@@ -9,6 +9,7 @@ export default function RoomPage() {
   const roomId = params.roomId as string;
 
   const [room, setRoom] = useState<any>(null);
+  const [game, setGame] = useState<any>(null);
 
   useEffect(() => {
     // 👇 RE-JOIN ROOM when page loads
@@ -16,6 +17,14 @@ export default function RoomPage() {
       roomId,
       players: [], // don't re-add players here
       deviceId: "reconnect",
+    });
+
+    socket.on("game_started", (data) => {
+      setGame(data);
+    });
+
+    socket.on("game_update", (data) => {
+      setGame(data);
     });
 
     socket.on("connect", () => {
@@ -53,6 +62,34 @@ export default function RoomPage() {
       <button onClick={() => socket.emit("start_game", { roomId })}>
         Start Game
       </button>
+
+      {game && (
+        <div>
+          <h2>Game Started 🎮</h2>
+
+          <p>
+            Current Turn:{" "}
+            {game?.players?.[game?.currentTurnIndex]?.name ?? "Loading..."}
+          </p>
+
+          <p>Dice: {game.diceValue ?? "-"}</p>
+
+          <button
+            onClick={() =>
+              socket.emit("roll_dice", {
+                roomId,
+                playerId: game?.players?.[game?.currentTurnIndex]?.id,
+              })
+            }
+          >
+            Roll Dice
+          </button>
+
+          <button onClick={() => socket.emit("next_turn", { roomId })}>
+            Next Turn
+          </button>
+        </div>
+      )}
     </div>
   );
 }
