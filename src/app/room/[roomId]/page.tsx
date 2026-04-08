@@ -90,6 +90,27 @@ export default function RoomPage() {
           </button>
         </div>
       )}
+      {game && game.players.map((p: any) => (
+        <div key={p.id}>
+          <h3>{p.name}</h3>
+
+          {p?.tokens?.map((pos: number, i: number) => (
+            <button
+              key={i}
+              onClick={() =>
+                socket.emit("move_token", {
+                  roomId,
+                  playerId: p.id,
+                  tokenIndex: i,
+                })
+              }
+              style={{ margin: "5px" }}
+            >
+              Token {i + 1}: {pos}
+            </button>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

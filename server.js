@@ -1,7 +1,12 @@
 import { createServer } from "http";
 import next from "next";
 import { Server } from "socket.io";
-import { createGame, rollDice, nextTurn } from "./src/game/engine.js";
+import {
+  createGame,
+  rollDice,
+  nextTurn,
+  moveToken,
+} from "./src/game/engine.js";
 
 const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
@@ -137,6 +142,23 @@ app.prepare().then(() => {
       if (!room || !room.gameState) return;
 
       room.gameState = nextTurn(room.gameState);
+
+      io.to(roomId).emit("game_update", room.gameState);
+    });
+
+    socket.on("move_token", ({ roomId, playerId, tokenIndex }) => {
+      const room = rooms[roomId];
+      if (!room || !room.gameState) return;
+
+      const prevDice = room.gameState.diceValue;
+
+      // 🎯 Move
+      room.gameState = moveToken(room.gameState, playerId, tokenIndex);
+
+      // 🔁 Auto next turn (unless dice = 6)
+      if (prevDice !== 6) {
+        room.gameState = nextTurn(room.gameState);
+      }
 
       io.to(roomId).emit("game_update", room.gameState);
     });
