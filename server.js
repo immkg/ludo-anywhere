@@ -1,7 +1,7 @@
 import { createServer } from "http";
 import next from "next";
 import { Server } from "socket.io";
-import { createGame, rollDice, nextTurn } from "./src/game/engine.ts";
+import { createGame, rollDice, nextTurn } from "./src/game/engine.js";
 
 const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
