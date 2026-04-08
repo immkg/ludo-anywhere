@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { socket } from "@/lib/socket";
 import { useParams } from "next/navigation";
+import Board from "@/components/game/Board";
 
 export default function RoomPage() {
   const params = useParams();
@@ -90,6 +91,7 @@ export default function RoomPage() {
           </button>
         </div>
       )}
+      {game && <Board game={game} />}
       {game && game.players.map((p: any) => (
         <div key={p.id}>
           <h3>{p.name}</h3>
