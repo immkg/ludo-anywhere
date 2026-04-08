@@ -21,7 +21,7 @@ export default function CreateRoom() {
 
     const players = Array.from({ length: playersOnDevice }).map((_, i) => ({
       id: `${Date.now()}-${i}`,
-      name: `Player ${i + 1}`,
+      name: prompt(`Enter player ${i+1} name`) || `Player-${Math.random()}`
     }));
 
     socket.emit("join_room", {
