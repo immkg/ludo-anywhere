@@ -33,8 +33,8 @@ app.prepare().then(() => {
 
   io.on("connection", (socket) => {
     socket.on("room:create", ({ maxPlayers, seats, deviceId }, ack) => {
-      if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 6) {
-        return ack?.({ error: "maxPlayers must be between 2 and 6" });
+      if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 4) {
+        return ack?.({ error: "maxPlayers must be between 2 and 4" });
       }
       if (!Array.isArray(seats) || seats.length < 1 || seats.length > maxPlayers) {
         return ack?.({ error: "Invalid seat request" });

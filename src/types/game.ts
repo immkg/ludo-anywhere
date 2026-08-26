@@ -8,7 +8,6 @@ export type GameSeat = {
 export type GameStatus = "playing" | "finished";
 
 export type GameState = {
-  arms: number; // board shape: 4 (classic), 5 (pentagon), or 6 (hexagon)
   seats: GameSeat[];
   currentSeatIndex: number;
   diceValue: number | null;

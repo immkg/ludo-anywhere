@@ -50,7 +50,7 @@ export default function CreateRoom() {
 
       <div>
         <label className="text-sm font-semibold text-ink-muted">Total players</label>
-        <NumberPicker options={[2, 3, 4, 5, 6]} value={totalPlayers} onChange={handleTotalChange} />
+        <NumberPicker options={[2, 3, 4]} value={totalPlayers} onChange={handleTotalChange} />
       </div>
 
       <div>

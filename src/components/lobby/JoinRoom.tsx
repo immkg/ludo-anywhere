@@ -57,7 +57,7 @@ export default function JoinRoom() {
       <div>
         <label className="text-sm font-semibold text-ink-muted">Players on this device</label>
         <NumberPicker
-          options={[1, 2, 3, 4, 5, 6]}
+          options={[1, 2, 3, 4]}
           value={seats.length}
           onChange={(n) => setSeats((prev) => defaultSeats(n, prev))}
         />

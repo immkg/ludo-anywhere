@@ -8,11 +8,9 @@ import {
 } from "./board.js";
 
 // seats: [{ id, armIndex }] — display info (name/color/connection) lives in
-// the room, not the game state. `arms` fixes the board shape (4/5/6) for
-// this game's whole lifetime.
-export function createGame(seats, arms) {
+// the room, not the game state.
+export function createGame(seats) {
   return {
-    arms,
     seats: seats.map((s) => ({
       id: s.id,
       armIndex: s.armIndex,
@@ -38,7 +36,7 @@ export function getValidMoves(state, seatId) {
   if (state.status !== "playing" || state.diceValue == null) return [];
 
   const dice = state.diceValue;
-  const finishLine = finished(state.arms);
+  const finishLine = finished();
   const moves = [];
   seat.tokens.forEach((pos, tokenIndex) => {
     if (pos === YARD) {
@@ -97,9 +95,8 @@ export function moveToken(state, seatId, tokenIndex) {
   const legal = getValidMoves(state, seatId);
   if (!legal.includes(tokenIndex)) return state;
 
-  const arms = state.arms;
-  const track = trackSteps(arms);
-  const finishLine = finished(arms);
+  const track = trackSteps();
+  const finishLine = finished();
 
   const dice = state.diceValue;
   const from = seat.tokens[tokenIndex];
@@ -112,13 +109,13 @@ export function moveToken(state, seatId, tokenIndex) {
   seats[seatIndex] = { ...seat, tokens };
 
   let captured = false;
-  if (to < track && !isSafeRelativeCell(seat.armIndex, to, arms)) {
-    const targetGlobal = relativeToGlobalRing(seat.armIndex, to, arms);
+  if (to < track && !isSafeRelativeCell(seat.armIndex, to)) {
+    const targetGlobal = relativeToGlobalRing(seat.armIndex, to);
     seats.forEach((other, otherIndex) => {
       if (otherIndex === seatIndex) return;
       const otherTokens = other.tokens.map((pos) => {
         if (pos === YARD || pos >= track) return pos;
-        if (relativeToGlobalRing(other.armIndex, pos, arms) === targetGlobal) {
+        if (relativeToGlobalRing(other.armIndex, pos) === targetGlobal) {
           captured = true;
           return YARD;
         }

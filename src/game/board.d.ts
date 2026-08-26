@@ -1,18 +1,15 @@
 export const TOKENS_PER_SEAT: number;
 export const YARD: number;
-export const RING_LEG_A: number;
-export const RING_LEG_BRIDGE: number;
 
 export type ArmColor = { id: string; label: string; hex: string };
 
-export function armsForPlayerCount(totalPlayers: number): number;
 export function armForSeatIndex(seatIndex: number, totalPlayers: number): number;
 export function colorForArm(armIndex: number): ArmColor;
-export function trackSteps(arms: number): number;
-export function finished(arms: number): number;
-export function relativeToGlobalRing(armIndex: number, relPos: number, arms: number): number | null;
-export function isSafeGlobalCell(globalIndex: number, arms: number): boolean;
-export function isSafeRelativeCell(armIndex: number, relPos: number, arms: number): boolean;
+export function trackSteps(): number;
+export function finished(): number;
+export function relativeToGlobalRing(armIndex: number, relPos: number): number | null;
+export function isSafeGlobalCell(globalIndex: number): boolean;
+export function isSafeRelativeCell(armIndex: number, relPos: number): boolean;
 
 export type Point = { x: number; y: number };
 export type RingCell = Point & { index: number };
@@ -25,10 +22,10 @@ export type ArmLayout = {
   startGlobalIndex: number;
   homeColumn: HomeColumnCell[];
   yardSlots: YardSlot[];
-  // Only set for the classic 4-arm board: this arm's solid-color quadrant,
-  // and its wedge of the small center "finish" pinwheel (3 points).
-  block?: ArmBlock;
-  pinwheel?: Point[];
+  // This arm's solid-color quadrant, and its wedge of the small center
+  // "finish" pinwheel (3 points).
+  block: ArmBlock;
+  pinwheel: Point[];
 };
 export type BoardLayout = {
   viewBox: number;
@@ -37,5 +34,5 @@ export type BoardLayout = {
   arms: ArmLayout[];
 };
 
-export function buildBoardLayout(arms: number): BoardLayout;
-export function tokenPixelPosition(armIndex: number, relPos: number, arms: number, tokenIndex?: number): Point;
+export function buildBoardLayout(): BoardLayout;
+export function tokenPixelPosition(armIndex: number, relPos: number, tokenIndex?: number): Point;

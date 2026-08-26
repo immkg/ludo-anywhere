@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { armsForPlayerCount, armForSeatIndex } from "../game/board.js";
+import { armForSeatIndex } from "../game/board.js";
 import { createGame } from "../game/engine.js";
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
@@ -42,10 +42,10 @@ export function getRoom(code) {
   return rooms.get((code || "").toUpperCase());
 }
 
-// Adds one device's seats to a room. `requests` is [{ name }]. Colors/arms
-// are assigned automatically by join order (see armForSeatIndex) so a
-// partially-filled classic board blanks out symmetrically rather than
-// depending on which color a player happens to pick.
+// Adds one device's seats to a room. `requests` is [{ name }]. Colors are
+// assigned automatically by join order (see armForSeatIndex) so a
+// partially-filled board blanks out symmetrically rather than depending on
+// which color a player happens to pick.
 // Returns { room, seats, error }.
 export function addSeats(room, requests, { socketId, deviceId }) {
   if (!room) return { error: "Room not found" };
@@ -136,12 +136,8 @@ export function startGame(room) {
   if (room.status !== "lobby") return { error: "Game already started" };
   if (room.seats.length < 2) return { error: "Need at least 2 players" };
 
-  const arms = armsForPlayerCount(room.maxPlayers);
   room.status = "playing";
-  room.game = createGame(
-    room.seats.map((s) => ({ id: s.id, armIndex: s.armIndex })),
-    arms
-  );
+  room.game = createGame(room.seats.map((s) => ({ id: s.id, armIndex: s.armIndex })));
   return { room };
 }
 
@@ -149,7 +145,6 @@ export function serializeRoom(room) {
   return {
     code: room.code,
     maxPlayers: room.maxPlayers,
-    arms: armsForPlayerCount(room.maxPlayers),
     hostSeatId: room.hostSeatId,
     status: room.status,
     seats: room.seats.map((s) => ({

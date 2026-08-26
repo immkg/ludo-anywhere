@@ -1,9 +1,9 @@
 # Ludo Multiplayer
 
 A mobile-first, browser-based multiplayer Ludo. Create a room or join one with
-a short code — 2 to 6 players total, split across devices however you like:
-one phone with all 6 seats, six separate devices with one seat each, or any
-mix in between (e.g. one device holding 2 seats, another holding 4). Everyone
+a short code — 2 to 4 players total, split across devices however you like:
+one phone with all 4 seats, four separate devices with one seat each, or any
+mix in between (e.g. one device holding 2 seats, another holding 2). Everyone
 gets the same experience regardless of how seats are distributed.
 
 No accounts — just a name per seat. Colors are assigned automatically in join
@@ -12,22 +12,10 @@ symmetrically instead of depending on who grabbed which color.
 
 ## Board
 
-The board shape follows the player count, matching the real board each size
-actually uses rather than stretching one shape to fit all of them:
-
-- **2-4 players** — the classic 4-arm cross, laid out on the real 15×15 grid
-  every physical/digital Ludo board uses (straight runs, 90° turns hugging
-  the edge, solid corner quadrants). Unused arms just sit dimmed/empty.
-- **5 players** — a 5-arm pentagon star.
-- **6 players** — a 6-arm hexagon star.
-
-The star boards (5-6p) generalize the same relative-position math the
-classic board uses (yard → ring → home column → finished), just with the
-ring cell count and arm count parameterized instead of fixed at 4/52. Each
-arm's ring segment leans from its own angle toward the hub, bends once, then
-leans back out to the next color's angle — matching how the classic board's
-path runs parallel to one home column, turns, then parallel to the next
-one — rather than a straight diagonal chord between star points. See
+The classic 4-arm cross, laid out on the real 15×15 grid every
+physical/digital Ludo board uses (straight runs, 90° turns hugging the
+edge, solid corner quadrants). With fewer than 4 players, the unused arms
+just sit dimmed/empty rather than reshaping the board. See
 `src/game/board.js` for the geometry and `src/game/engine.js` for the rules
 (capturing, safe cells, exact-count-to-finish, extra turns on a 6, three-6s
 forfeits, auto-skip when a roll leaves no legal move).

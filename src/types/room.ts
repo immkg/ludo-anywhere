@@ -11,7 +11,6 @@ export type Seat = {
 export type Room = {
   code: string;
   maxPlayers: number;
-  arms: number; // board shape for this room: 4 (classic), 5 (pentagon), 6 (hexagon)
   hostSeatId: string | null;
   status: RoomStatus;
   seats: Seat[];
