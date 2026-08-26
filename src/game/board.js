@@ -12,15 +12,15 @@
 //   0 .. ringLength-2 -> the shared ring cells that make up one full lap
 //   ringLength-1 .. +5 -> the 6 home-column cells (last one = finished)
 
-export const CELLS_PER_ARM = 13;
-export const HOME_STEPS = 6;
+const CELLS_PER_ARM = 13;
+const HOME_STEPS = 6;
 export const TOKENS_PER_SEAT = 4;
 export const YARD = -1;
 
 // Bright, saturated "toy" colors to match a traditional physical Ludo board.
 // Ordered so a 4-arm board gets exactly the classic red/green/yellow/blue
 // set, and 5/6-arm boards extend it with orange/purple.
-export const ARM_COLORS = [
+const ARM_COLORS = [
   { id: "red", label: "Red", hex: "#E8262C" },
   { id: "green", label: "Green", hex: "#1F9E4C" },
   { id: "yellow", label: "Yellow", hex: "#FFCC00" },
@@ -47,7 +47,7 @@ export function colorForArm(armIndex) {
   return ARM_COLORS[armIndex];
 }
 
-export function ringLength(arms) {
+function ringLength(arms) {
   return arms * CELLS_PER_ARM;
 }
 
@@ -57,7 +57,7 @@ export function trackSteps(arms) {
   return ringLength(arms) - 1;
 }
 
-export function homeStart(arms) {
+function homeStart(arms) {
   return trackSteps(arms);
 }
 
@@ -65,7 +65,7 @@ export function finished(arms) {
   return homeStart(arms) + HOME_STEPS - 1;
 }
 
-export function startOffset(armIndex) {
+function startOffset(armIndex) {
   return armIndex * CELLS_PER_ARM;
 }
 
@@ -292,27 +292,25 @@ function buildClassicLayout() {
   return { viewBox: VIEWBOX, center: CENTER, arms: armLayouts, ringCells };
 }
 
+function buildStarLayout(arms) {
+  const ringCells = buildRingCells(arms);
+  const armLayouts = Array.from({ length: arms }, (_, armIndex) => ({
+    armIndex,
+    color: colorForArm(armIndex),
+    startGlobalIndex: startOffset(armIndex),
+    homeColumn: buildHomeColumn(armIndex, ringCells, arms),
+    yardSlots: buildYardSlots(armIndex, arms),
+  }));
+  return { viewBox: VIEWBOX, center: CENTER, arms: armLayouts, ringCells };
+}
+
 const layoutCache = new Map();
 
 export function buildBoardLayout(arms) {
   const cached = layoutCache.get(arms);
   if (cached) return cached;
 
-  const layout =
-    arms === 4
-      ? buildClassicLayout()
-      : (() => {
-          const ringCells = buildRingCells(arms);
-          const armLayouts = Array.from({ length: arms }, (_, armIndex) => ({
-            armIndex,
-            color: colorForArm(armIndex),
-            startGlobalIndex: startOffset(armIndex),
-            homeColumn: buildHomeColumn(armIndex, ringCells, arms),
-            yardSlots: buildYardSlots(armIndex, arms),
-          }));
-          return { viewBox: VIEWBOX, center: CENTER, arms: armLayouts, ringCells };
-        })();
-
+  const layout = arms === 4 ? buildClassicLayout() : buildStarLayout(arms);
   layoutCache.set(arms, layout);
   return layout;
 }

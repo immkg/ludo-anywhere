@@ -41,8 +41,8 @@ function polarPoint(cx: number, cy: number, angleDeg: number, r: number) {
 
 // A rotated-rect spec for a "rail" running between two points, used to lay
 // a wide track bed under the star board's path cells — its single-file
-// diagonal interpolation needs a decorative width; the classic board's grid
-// cells are already properly widthed and don't need this.
+// bent-line path needs a decorative width; the classic board's grid cells
+// are already properly widthed and don't need this.
 function railBetween(p1: { x: number; y: number }, p2: { x: number; y: number }, thickness: number) {
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;

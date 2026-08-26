@@ -5,6 +5,10 @@ import Input from "@/components/ui/Input";
 
 export type SeatDraft = { name: string };
 
+export function defaultSeats(count: number, previous: SeatDraft[]): SeatDraft[] {
+  return Array.from({ length: count }, (_, i) => previous[i] ?? { name: "" });
+}
+
 type SeatRowProps = {
   index: number;
   seat: SeatDraft;

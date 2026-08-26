@@ -7,11 +7,8 @@ import { createRoom } from "@/lib/socketActions";
 import { saveOwnedSeats } from "@/lib/identity";
 import { useRoomStore } from "@/store/useRoomStore";
 import Button from "@/components/ui/Button";
-import SeatRow, { type SeatDraft } from "@/components/lobby/SeatRow";
-
-function defaultSeats(count: number, previous: SeatDraft[]): SeatDraft[] {
-  return Array.from({ length: count }, (_, i) => previous[i] ?? { name: "" });
-}
+import NumberPicker from "@/components/ui/NumberPicker";
+import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
 
 export default function CreateRoom() {
   const router = useRouter();
@@ -53,36 +50,16 @@ export default function CreateRoom() {
 
       <div>
         <label className="text-sm font-semibold text-ink-muted">Total players</label>
-        <div className="mt-2 flex gap-2">
-          {[2, 3, 4, 5, 6].map((n) => (
-            <button
-              key={n}
-              onClick={() => handleTotalChange(n)}
-              className={`h-11 flex-1 rounded-xl border font-semibold ${
-                totalPlayers === n ? "border-accent bg-accent text-white" : "border-line bg-surface"
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
+        <NumberPicker options={[2, 3, 4, 5, 6]} value={totalPlayers} onChange={handleTotalChange} />
       </div>
 
       <div>
         <label className="text-sm font-semibold text-ink-muted">Players on this device</label>
-        <div className="mt-2 flex gap-2">
-          {Array.from({ length: totalPlayers }, (_, i) => i + 1).map((n) => (
-            <button
-              key={n}
-              onClick={() => setSeatsOnDevice(n)}
-              className={`h-11 flex-1 rounded-xl border font-semibold ${
-                seats.length === n ? "border-accent bg-accent text-white" : "border-line bg-surface"
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
+        <NumberPicker
+          options={Array.from({ length: totalPlayers }, (_, i) => i + 1)}
+          value={seats.length}
+          onChange={setSeatsOnDevice}
+        />
       </div>
 
       <div className="flex flex-col gap-3">

@@ -7,11 +7,8 @@ import { saveOwnedSeats } from "@/lib/identity";
 import { useRoomStore } from "@/store/useRoomStore";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
-import SeatRow, { type SeatDraft } from "@/components/lobby/SeatRow";
-
-function defaultSeats(count: number, previous: SeatDraft[]): SeatDraft[] {
-  return Array.from({ length: count }, (_, i) => previous[i] ?? { name: "" });
-}
+import NumberPicker from "@/components/ui/NumberPicker";
+import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
 
 export default function JoinRoom() {
   const router = useRouter();
@@ -59,19 +56,11 @@ export default function JoinRoom() {
 
       <div>
         <label className="text-sm font-semibold text-ink-muted">Players on this device</label>
-        <div className="mt-2 flex gap-2">
-          {[1, 2, 3, 4, 5, 6].map((n) => (
-            <button
-              key={n}
-              onClick={() => setSeats((prev) => defaultSeats(n, prev))}
-              className={`h-11 flex-1 rounded-xl border font-semibold ${
-                seats.length === n ? "border-accent bg-accent text-white" : "border-line bg-surface"
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
+        <NumberPicker
+          options={[1, 2, 3, 4, 5, 6]}
+          value={seats.length}
+          onChange={(n) => setSeats((prev) => defaultSeats(n, prev))}
+        />
       </div>
 
       <div className="flex flex-col gap-3">
