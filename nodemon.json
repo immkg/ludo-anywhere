@@ -1,0 +1,6 @@
+{
+  "exec": "node server.js",
+  "watch": ["server.js", "src/server", "src/game"],
+  "ext": "js",
+  "ignore": ["node_modules", ".next"]
+}
