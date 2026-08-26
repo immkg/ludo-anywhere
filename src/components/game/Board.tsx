@@ -100,6 +100,24 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
             />
           ))}
 
+          {/* the "cage": a white inset square with a ~1-cell colored
+              border, where each arm's 4 waiting tokens sit — matches a
+              real board's yard box instead of a solid color patch. */}
+          {layout.arms.map((arm) => (
+            <Rect
+              key={`cage-${arm.armIndex}`}
+              x={arm.cage.x}
+              y={arm.cage.y}
+              width={arm.cage.width}
+              height={arm.cage.height}
+              cornerRadius={10}
+              fill={CREAM}
+              stroke={INK}
+              strokeWidth={2}
+              opacity={activeArms.has(arm.armIndex) ? 1 : 0.35}
+            />
+          ))}
+
           {/* the small colored "finish" pinwheel at dead center */}
           {layout.arms.map((arm) => (
             <Line

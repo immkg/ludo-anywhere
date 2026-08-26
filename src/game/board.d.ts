@@ -22,9 +22,11 @@ export type ArmLayout = {
   startGlobalIndex: number;
   homeColumn: HomeColumnCell[];
   yardSlots: YardSlot[];
-  // This arm's solid-color quadrant, and its wedge of the small center
-  // "finish" pinwheel (3 points).
+  // This arm's solid-color quadrant, the white inset "cage" square (with a
+  // ~1-cell colored border) where its waiting tokens sit, and its wedge of
+  // the small center "finish" pinwheel (3 points).
   block: ArmBlock;
+  cage: ArmBlock;
   pinwheel: Point[];
 };
 export type BoardLayout = {

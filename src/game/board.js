@@ -117,9 +117,17 @@ const CLASSIC_ARM0_RING = [
 const CLASSIC_ARM0_HOME = [
   [7, 1], [7, 2], [7, 3], [7, 4], [7, 5], [7, 6],
 ];
+// The 4 waiting tokens sit centered inside a white inset square (the
+// "cage"), not directly on the arm color — matching a real board, where
+// the corner is a colored frame around a white box holding the tokens.
 const CLASSIC_ARM0_YARD = [
-  [1, 1], [1, 4], [4, 1], [4, 4],
+  [1.5, 1.5], [1.5, 3.5], [3.5, 1.5], [3.5, 3.5],
 ];
+// The cage's white square, inset exactly one grid cell from the yard
+// corner's outer edge (row/col -0.5..5.5) so the colored border reads as
+// one step thick. Grid coordinates here are cell *edges*, not centers —
+// see rectFromEdges.
+const CLASSIC_ARM0_CAGE = [0.5, 4.5, 0.5, 4.5];
 // The small colored "finish" pinwheel at dead center: arm 0's wedge is the
 // west edge of the 3x3 hub square (matching its home column, which
 // approaches from the west), rotated 90° per arm for the rest.
@@ -134,6 +142,18 @@ function rotateBlock([r0, r1, c0, c1], turns) {
   const [a, b] = rotateGrid([r0, c0], turns);
   const [c, d] = rotateGrid([r1, c1], turns);
   return [Math.min(a, c), Math.max(a, c), Math.min(b, d), Math.max(b, d)];
+}
+
+// Like `block`'s pixel conversion, but for a box already given in cell
+// *edge* coordinates (e.g. -0.5..5.5) rather than inclusive cell indices,
+// so no +1/-half cell adjustment is needed.
+function rectFromEdges([rowStart, rowEnd, colStart, colEnd]) {
+  return {
+    x: GRID_ORIGIN + colStart * GRID_CELL,
+    y: GRID_ORIGIN + rowStart * GRID_CELL,
+    width: (colEnd - colStart) * GRID_CELL,
+    height: (rowEnd - rowStart) * GRID_CELL,
+  };
 }
 
 function computeBoardLayout() {
@@ -163,6 +183,7 @@ function computeBoardLayout() {
     const pinwheelCorners = CLASSIC_ARM0_PINWHEEL.map((rc) => rotateGrid(rc, armIndex)).map(([r, c]) =>
       gridPoint(r, c)
     );
+    const cage = rectFromEdges(rotateBlock(CLASSIC_ARM0_CAGE, armIndex));
 
     return {
       armIndex,
@@ -171,6 +192,7 @@ function computeBoardLayout() {
       homeColumn,
       yardSlots,
       block,
+      cage,
       pinwheel: [CENTER, ...pinwheelCorners],
     };
   });
