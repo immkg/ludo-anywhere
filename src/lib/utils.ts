@@ -1,3 +1,5 @@
-export function generateRoomCode() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  }
+import { clsx, type ClassValue } from "clsx";
+
+export function cn(...inputs: ClassValue[]) {
+  return clsx(inputs);
+}

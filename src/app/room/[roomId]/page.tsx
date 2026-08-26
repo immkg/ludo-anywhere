@@ -1,118 +1,56 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { socket } from "@/lib/socket";
-import { useParams } from "next/navigation";
-import Board from "@/components/game/Board";
+import { useParams, useRouter } from "next/navigation";
+import { useRoomStore } from "@/store/useRoomStore";
+import { loadOwnedSeats, saveOwnedSeats } from "@/lib/identity";
+import { joinRoom } from "@/lib/socketActions";
+import Button from "@/components/ui/Button";
+import WaitingRoom from "@/components/lobby/WaitingRoom";
+import GameView from "@/components/game/GameView";
 
 export default function RoomPage() {
   const params = useParams();
-  const roomId = params.roomId as string;
+  const router = useRouter();
+  const roomCode = String(params.roomId).toUpperCase();
 
-  const [room, setRoom] = useState<any>(null);
-  const [game, setGame] = useState<any>(null);
+  const room = useRoomStore((s) => s.room);
+  const addMySeats = useRoomStore((s) => s.addMySeats);
+  const mySeats = useRoomStore((s) => s.mySeats);
+
+  const [rejoinState, setRejoinState] = useState<"pending" | "ok" | "none">("pending");
 
   useEffect(() => {
-    // 👇 RE-JOIN ROOM when page loads
-    socket.emit("join_room", {
-      roomId,
-      players: [], // don't re-add players here
-      deviceId: "reconnect",
-    });
+    const known = loadOwnedSeats(roomCode);
+    joinRoom(roomCode, [], known.map((s) => s.token))
+      .then((res) => {
+        if (res.seats) {
+          saveOwnedSeats(roomCode, res.seats);
+          addMySeats(res.seats);
+        }
+        setRejoinState("ok");
+      })
+      .catch(() => setRejoinState("none"));
+  }, [roomCode, addMySeats]);
 
-    socket.on("game_started", (data) => {
-      setGame(data);
-    });
+  const myRelevantSeats = mySeats.filter((s) => room?.seats.some((rs) => rs.id === s.id));
 
-    socket.on("game_update", (data) => {
-      setGame(data);
-    });
+  if (rejoinState === "pending") {
+    return <div className="flex min-h-dvh items-center justify-center text-ink-muted">Loading room…</div>;
+  }
 
-    socket.on("connect", () => {
-      console.log("Connected to socket:", socket.id);
-    });
+  if (rejoinState === "none" || !room || myRelevantSeats.length === 0) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-8 text-center">
+        <p className="text-ink-muted">You&rsquo;re not seated in room {roomCode}.</p>
+        <Button onClick={() => router.push(`/join`)}>Join a room</Button>
+      </div>
+    );
+  }
 
-    socket.on("room_update", (data) => {
-      console.log("ROOM UPDATE:", data); // debug
-      setRoom(data);
-    });
+  if (room.status === "lobby") {
+    return <WaitingRoom room={room} mySeats={myRelevantSeats} />;
+  }
 
-    socket.on("game_started", (data) => {
-      console.log("Game started", data);
-    });
-
-    return () => {
-      socket.off("room_update");
-      socket.off("game_started");
-    };
-  }, [roomId]);
-
-  if (!room) return <div>Loading...</div>;
-
-  return (
-    <div>
-      <h1>Room: {roomId}</h1>
-
-      <h2>Players:</h2>
-      {room.players.map((p: any) => (
-        <div key={p.id}>
-          {p.name} (Device: {p.deviceId})
-        </div>
-      ))}
-
-      <button onClick={() => socket.emit("start_game", { roomId })}>
-        Start Game
-      </button>
-
-      {game && (
-        <div>
-          <h2>Game Started 🎮</h2>
-
-          <p>
-            Current Turn:{" "}
-            {game?.players?.[game?.currentTurnIndex]?.name ?? "Loading..."}
-          </p>
-
-          <p>Dice: {game.diceValue ?? "-"}</p>
-
-          <button
-            onClick={() =>
-              socket.emit("roll_dice", {
-                roomId,
-                playerId: game?.players?.[game?.currentTurnIndex]?.id,
-              })
-            }
-          >
-            Roll Dice
-          </button>
-
-          <button onClick={() => socket.emit("next_turn", { roomId })}>
-            Next Turn
-          </button>
-        </div>
-      )}
-      {game && <Board game={game} />}
-      {game && game.players.map((p: any) => (
-        <div key={p.id}>
-          <h3>{p.name}</h3>
-
-          {p?.tokens?.map((pos: number, i: number) => (
-            <button
-              key={i}
-              onClick={() =>
-                socket.emit("move_token", {
-                  roomId,
-                  playerId: p.id,
-                  tokenIndex: i,
-                })
-              }
-              style={{ margin: "5px" }}
-            >
-              Token {i + 1}: {pos}
-            </button>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
+  return <GameView room={room} mySeats={myRelevantSeats} />;
 }

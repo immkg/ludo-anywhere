@@ -2,169 +2,150 @@ import { createServer } from "http";
 import next from "next";
 import { Server } from "socket.io";
 import {
-  createGame,
-  rollDice,
-  nextTurn,
-  moveToken,
-} from "./src/game/engine.js";
+  createRoom,
+  getRoom,
+  addSeats,
+  reconnectSeats,
+  findSeatBySocket,
+  handleSocketDisconnect,
+  startGame,
+  serializeRoom,
+  serializeGame,
+} from "./src/server/rooms.js";
+import { rollDice, moveToken } from "./src/game/engine.js";
 
 const dev = process.env.NODE_ENV !== "production";
+const port = Number(process.env.PORT) || 3001;
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-const PORT = 3001;
-
-let rooms = {}; // in-memory (we'll improve later)
-
 app.prepare().then(() => {
-  const httpServer = createServer((req, res) => {
-    handle(req, res);
-  });
-
+  const httpServer = createServer((req, res) => handle(req, res));
   const io = new Server(httpServer);
 
+  function broadcastRoom(room) {
+    io.to(room.code).emit("room:update", serializeRoom(room));
+  }
+
+  function broadcastGame(room) {
+    io.to(room.code).emit("game:update", serializeGame(room));
+  }
+
   io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
-
-    // Join room
-    socket.on("join_room", ({ roomId, players = [], deviceId }) => {
-      socket.join(roomId);
-
-      if (!rooms[roomId]) {
-        rooms[roomId] = {
-          players: [],
-          maxPlayers: 6,
-          gameStarted: false,
-        };
+    socket.on("room:create", ({ maxPlayers, seats, deviceId }, ack) => {
+      if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 6) {
+        return ack?.({ error: "maxPlayers must be between 2 and 6" });
+      }
+      if (!Array.isArray(seats) || seats.length < 1 || seats.length > maxPlayers) {
+        return ack?.({ error: "Invalid seat request" });
       }
 
-      const room = rooms[roomId];
-
-      if (room.gameStarted) {
-        socket.emit("error", "Game already started");
-        return;
-      }
-
-      // ❌ Prevent overfill
-      if (room.players.length + players.length > room.maxPlayers) {
-        socket.emit("error", "Room is full");
-        return;
-      }
-
-      // ✅ Add players
-      players.forEach((player) => {
-        room.players.push({
-          ...player,
-          socketId: socket.id,
-          deviceId,
-        });
+      const room = createRoom({ maxPlayers });
+      const { error, seats: created } = addSeats(room, seats, {
+        socketId: socket.id,
+        deviceId,
       });
+      if (error) return ack?.({ error });
 
-      io.to(roomId).emit("room_update", room);
+      socket.join(room.code);
+      ack?.({
+        roomCode: room.code,
+        seats: created.map((s) => ({ id: s.id, token: s.token, armIndex: s.armIndex, name: s.name })),
+      });
+      broadcastRoom(room);
     });
 
-    // Create room
-    socket.on("create_room", ({ roomId, maxPlayers }) => {
-      rooms[roomId] = {
-        players: [],
-        maxPlayers,
-        gameStarted: false,
-      };
+    socket.on("room:join", ({ roomCode, seats, deviceId, knownTokens }, ack) => {
+      const room = getRoom(roomCode);
+      if (!room) return ack?.({ error: "Room not found" });
 
-      socket.join(roomId);
-
-      socket.emit("room_created", rooms[roomId]);
-    });
-
-    // Start game
-    socket.on("start_game", ({ roomId }) => {
-      const room = rooms[roomId];
-      if (!room) return;
-
-      if (room.players.length < 2) {
-        socket.emit("error", "Need at least 2 players");
+      const reconnected = reconnectSeats(room, knownTokens || [], socket.id);
+      if (reconnected.length > 0) {
+        socket.join(room.code);
+        ack?.({
+          roomCode: room.code,
+          seats: reconnected.map((s) => ({ id: s.id, token: s.token, armIndex: s.armIndex, name: s.name })),
+        });
+        broadcastRoom(room);
+        if (room.game) socket.emit("game:update", serializeGame(room));
         return;
       }
 
-      room.gameStarted = true;
+      if (!Array.isArray(seats) || seats.length < 1) {
+        return ack?.({ error: "Invalid seat request" });
+      }
 
-      // 🎯 Initialize game
-      room.gameState = createGame(
-        room.players.map((p, i) => ({
-          id: p.id,
-          name: p.name,
-          color: ["red", "blue", "green", "yellow", "purple", "orange"][i],
-        }))
-      );
+      const { error, seats: created } = addSeats(room, seats, {
+        socketId: socket.id,
+        deviceId,
+      });
+      if (error) return ack?.({ error });
 
-      io.to(roomId).emit("game_started", room.gameState);
+      socket.join(room.code);
+      ack?.({
+        roomCode: room.code,
+        seats: created.map((s) => ({ id: s.id, token: s.token, armIndex: s.armIndex, name: s.name })),
+      });
+      broadcastRoom(room);
     });
 
-    socket.on("disconnect", () => {
-      console.log("User disconnected:", socket.id);
+    socket.on("game:start", ({ roomCode, seatId }) => {
+      const room = getRoom(roomCode);
+      if (!room) return socket.emit("error", { message: "Room not found" });
+      if (room.hostSeatId !== seatId) {
+        return socket.emit("error", { message: "Only the host can start the game" });
+      }
 
-      for (const roomId in rooms) {
-        const room = rooms[roomId];
+      const { error } = startGame(room);
+      if (error) return socket.emit("error", { message: error });
 
-        // remove players from this socket
-        room.players = room.players.filter((p) => p.socketId !== socket.id);
+      broadcastRoom(room);
+      broadcastGame(room);
+    });
 
-        // delete empty room
-        if (room.players.length === 0) {
-          delete rooms[roomId];
-        } else {
-          io.to(roomId).emit("room_update", room);
+    socket.on("game:rollDice", ({ roomCode, seatId }) => {
+      const room = getRoom(roomCode);
+      if (!room?.game) return;
+      const current = room.game.seats[room.game.currentSeatIndex];
+      if (current?.id !== seatId) {
+        return socket.emit("error", { message: "Not your turn" });
+      }
+      room.game = rollDice(room.game);
+      broadcastGame(room);
+    });
+
+    socket.on("game:moveToken", ({ roomCode, seatId, tokenIndex }) => {
+      const room = getRoom(roomCode);
+      if (!room?.game) return;
+      const current = room.game.seats[room.game.currentSeatIndex];
+      if (current?.id !== seatId) {
+        return socket.emit("error", { message: "Not your turn" });
+      }
+      room.game = moveToken(room.game, seatId, tokenIndex);
+      broadcastGame(room);
+    });
+
+    socket.on("room:leave", ({ roomCode }) => {
+      const room = getRoom(roomCode);
+      if (!room) return;
+      handleSocketDisconnect(room, socket.id, () => broadcastRoom(room));
+      socket.leave(roomCode);
+    });
+
+    // `disconnecting` (not `disconnect`) — by the time `disconnect` fires,
+    // Socket.IO has already removed the socket from every room, so
+    // socket.rooms would be empty and we'd never find the room to update.
+    socket.on("disconnecting", () => {
+      for (const roomCode of socket.rooms) {
+        const room = getRoom(roomCode);
+        if (room && findSeatBySocket(room, socket.id)) {
+          handleSocketDisconnect(room, socket.id, () => broadcastRoom(room));
         }
       }
     });
-
-    socket.on("roll_dice", ({ roomId, playerId }) => {
-      const room = rooms[roomId];
-      if (!room || !room.gameState) return;
-
-      const currentPlayer =
-        room.gameState.players[room.gameState.currentTurnIndex];
-
-      // ❌ Not your turn
-      if (currentPlayer.id !== playerId) {
-        socket.emit("error", "Not your turn");
-        return;
-      }
-
-      // 🎲 Roll
-      room.gameState = rollDice(room.gameState);
-
-      io.to(roomId).emit("game_update", room.gameState);
-    });
-
-    socket.on("next_turn", ({ roomId }) => {
-      const room = rooms[roomId];
-      if (!room || !room.gameState) return;
-
-      room.gameState = nextTurn(room.gameState);
-
-      io.to(roomId).emit("game_update", room.gameState);
-    });
-
-    socket.on("move_token", ({ roomId, playerId, tokenIndex }) => {
-      const room = rooms[roomId];
-      if (!room || !room.gameState) return;
-
-      const prevDice = room.gameState.diceValue;
-
-      // 🎯 Move
-      room.gameState = moveToken(room.gameState, playerId, tokenIndex);
-
-      // 🔁 Auto next turn (unless dice = 6)
-      if (prevDice !== 6) {
-        room.gameState = nextTurn(room.gameState);
-      }
-
-      io.to(roomId).emit("game_update", room.gameState);
-    });
   });
 
-  httpServer.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  httpServer.listen(port, () => {
+    console.log(`> Ludo server listening on http://localhost:${port}`);
   });
 });

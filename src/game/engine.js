@@ -1,90 +1,145 @@
-// 🎯 Initialize Game
-export function createGame(players) {
+import {
+  TOKENS_PER_SEAT,
+  YARD,
+  trackSteps,
+  finished,
+  relativeToGlobalRing,
+  isSafeRelativeCell,
+} from "./board.js";
+
+// seats: [{ id, armIndex }] — display info (name/color/connection) lives in
+// the room, not the game state. `arms` fixes the board shape (4/5/6) for
+// this game's whole lifetime.
+export function createGame(seats, arms) {
   return {
-    players: players.map((p) => ({
-      ...p,
-      tokens: [-1, -1, -1, -1], // 4 tokens
+    arms,
+    seats: seats.map((s) => ({
+      id: s.id,
+      armIndex: s.armIndex,
+      tokens: Array(TOKENS_PER_SEAT).fill(YARD),
+      finished: false,
     })),
-    currentTurnIndex: 0,
+    currentSeatIndex: 0,
     diceValue: null,
+    consecutiveSixes: 0,
     status: "playing",
+    winnerSeatId: null,
   };
 }
 
-// 🎲 Roll Dice
-export function rollDice(state) {
-  const dice = Math.floor(Math.random() * 6) + 1;
-
-  return {
-    ...state,
-    diceValue: dice,
-  };
+export function getCurrentSeat(state) {
+  return state.seats[state.currentSeatIndex];
 }
 
-// 🔁 Next Turn
-export function nextTurn(state) {
-  // 🎲 If dice = 6 → same player again
-  if (state.diceValue === 6) {
-    return {
-      ...state,
-      diceValue: null,
-    };
-  }
-
-  const nextIndex = (state.currentTurnIndex + 1) % state.players.length;
-
-  return {
-    ...state,
-    currentTurnIndex: nextIndex,
-    diceValue: null,
-  };
-}
-
-// 👤 Get Current Player
-export function getCurrentPlayer(state) {
-  return state.players[state.currentTurnIndex];
-}
-
-export function moveToken(state, playerId, tokenIndex) {
-  const player = state.players[state.currentTurnIndex];
-
-  // ❌ Not your turn
-  if (player.id !== playerId) return state;
+// Which of a seat's tokens can legally move given the current dice value.
+export function getValidMoves(state, seatId) {
+  const seat = getCurrentSeat(state);
+  if (!seat || seat.id !== seatId) return [];
+  if (state.status !== "playing" || state.diceValue == null) return [];
 
   const dice = state.diceValue;
-
-  // ❌ No dice rolled
-  if (!dice) return state;
-
-  const tokens = [...player.tokens];
-  let position = tokens[tokenIndex];
-
-  // 🚪 Entry rule
-  if (position === -1) {
-    if (dice === 6) {
-      tokens[tokenIndex] = 0;
-    } else {
-      return state; // can't move
+  const finishLine = finished(state.arms);
+  const moves = [];
+  seat.tokens.forEach((pos, tokenIndex) => {
+    if (pos === YARD) {
+      if (dice === 6) moves.push(tokenIndex);
+      return;
     }
-  } else {
-    const newPos = position + dice;
+    if (pos + dice <= finishLine) moves.push(tokenIndex);
+  });
+  return moves;
+}
 
-    if (newPos <= 51) {
-      tokens[tokenIndex] = newPos;
-    } else {
-      return state;
-    }
+function advanceSeatIndex(state) {
+  const n = state.seats.length;
+  for (let step = 1; step <= n; step++) {
+    const candidate = (state.currentSeatIndex + step) % n;
+    if (!state.seats[candidate].finished) return candidate;
   }
+  return state.currentSeatIndex;
+}
 
-  const updatedPlayers = [...state.players];
-  updatedPlayers[state.currentTurnIndex] = {
-    ...player,
-    tokens,
-  };
-
+function endTurn(state) {
   return {
     ...state,
-    players: updatedPlayers,
-    diceValue: null, // ✅ reset dice AFTER move
+    currentSeatIndex: advanceSeatIndex(state),
+    diceValue: null,
+    consecutiveSixes: 0,
   };
+}
+
+// Rolls the dice for the current seat. If the roll leaves no legal move
+// (nothing off the yard and nothing on the board), or the seat has now
+// rolled three sixes in a row, the turn is auto-forfeited and passed on.
+export function rollDice(state) {
+  if (state.status !== "playing" || state.diceValue != null) return state;
+
+  const dice = Math.floor(Math.random() * 6) + 1;
+  const consecutiveSixes = dice === 6 ? state.consecutiveSixes + 1 : 0;
+
+  if (consecutiveSixes >= 3) {
+    return endTurn({ ...state, diceValue: dice, consecutiveSixes });
+  }
+
+  const rolled = { ...state, diceValue: dice, consecutiveSixes };
+  const seat = getCurrentSeat(rolled);
+  const hasMove = getValidMoves(rolled, seat.id).length > 0;
+  return hasMove ? rolled : endTurn(rolled);
+}
+
+export function moveToken(state, seatId, tokenIndex) {
+  if (state.status !== "playing" || state.diceValue == null) return state;
+
+  const seatIndex = state.currentSeatIndex;
+  const seat = state.seats[seatIndex];
+  if (!seat || seat.id !== seatId) return state;
+
+  const legal = getValidMoves(state, seatId);
+  if (!legal.includes(tokenIndex)) return state;
+
+  const arms = state.arms;
+  const track = trackSteps(arms);
+  const finishLine = finished(arms);
+
+  const dice = state.diceValue;
+  const from = seat.tokens[tokenIndex];
+  const to = from === YARD ? 0 : from + dice;
+
+  const tokens = [...seat.tokens];
+  tokens[tokenIndex] = to;
+
+  const seats = [...state.seats];
+  seats[seatIndex] = { ...seat, tokens };
+
+  let captured = false;
+  if (to < track && !isSafeRelativeCell(seat.armIndex, to, arms)) {
+    const targetGlobal = relativeToGlobalRing(seat.armIndex, to, arms);
+    seats.forEach((other, otherIndex) => {
+      if (otherIndex === seatIndex) return;
+      const otherTokens = other.tokens.map((pos) => {
+        if (pos === YARD || pos >= track) return pos;
+        if (relativeToGlobalRing(other.armIndex, pos, arms) === targetGlobal) {
+          captured = true;
+          return YARD;
+        }
+        return pos;
+      });
+      seats[otherIndex] = { ...other, tokens: otherTokens };
+    });
+  }
+
+  const seatFinished = tokens.every((pos) => pos === finishLine);
+  if (seatFinished) seats[seatIndex] = { ...seats[seatIndex], finished: true };
+
+  // consecutiveSixes is only cleared when a turn actually ends (endTurn) or
+  // a non-six is rolled (in rollDice) — a bonus move after a six must not
+  // erase the count, or three-sixes-forfeit could never trigger.
+  let next = { ...state, seats, diceValue: null };
+
+  if (seatFinished) {
+    return { ...next, status: "finished", winnerSeatId: seatId, consecutiveSixes: 0 };
+  }
+
+  const bonusTurn = dice === 6 || captured || to === finishLine;
+  return bonusTurn ? next : endTurn(next);
 }
