@@ -139,17 +139,18 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
                 x={cell.x}
                 y={cell.y}
                 numPoints={5}
-                innerRadius={3.4}
-                outerRadius={8}
+                innerRadius={CELL * 0.15}
+                outerRadius={CELL * 0.34}
                 fill="#D8A400"
                 stroke={INK}
-                strokeWidth={0.75}
+                strokeWidth={1.5}
               />
             );
           })}
 
-          {/* home columns are a cream lane cut into the color, same as the
-              ring — a same-colored lane would disappear against the color. */}
+          {/* home column: each arm's final track into the center, colored
+              like a real board so it reads as "your lane" against the
+              white shared ring. */}
           {layout.arms.flatMap((arm) =>
             arm.homeColumn.map((cell, i) => (
               <Rect
@@ -158,7 +159,7 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
                 y={cell.y - CELL / 2}
                 width={CELL}
                 height={CELL}
-                fill={CREAM}
+                fill={arm.color.hex}
                 stroke={INK}
                 strokeWidth={1.5}
                 opacity={activeArms.has(arm.armIndex) ? 1 : 0.35}

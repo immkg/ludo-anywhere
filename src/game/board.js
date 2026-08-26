@@ -118,7 +118,7 @@ const CLASSIC_ARM0_HOME = [
   [7, 1], [7, 2], [7, 3], [7, 4], [7, 5], [7, 6],
 ];
 const CLASSIC_ARM0_YARD = [
-  [2, 2], [2, 3], [3, 2], [3, 3],
+  [1, 1], [1, 4], [4, 1], [4, 4],
 ];
 // The small colored "finish" pinwheel at dead center: arm 0's wedge is the
 // west edge of the 3x3 hub square (matching its home column, which
