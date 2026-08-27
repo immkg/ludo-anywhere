@@ -217,9 +217,13 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
             />
           ))}
 
-          {/* shared ring */}
+          {/* shared ring — a start cell only carries its arm's color when
+              that arm is actually in play (2p/3p leaves some arms empty);
+              otherwise it fades the same way the block/home column do,
+              instead of standing out as one leftover bright cell. */}
           {layout.ringCells.map((cell) => {
             const startArm = layout.arms.find((a) => a.startGlobalIndex === cell.index) ?? null;
+            const active = startArm && activeArms.has(startArm.armIndex);
             return (
               <Rect
                 key={cell.index}
@@ -227,7 +231,7 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
                 y={cell.y - CELL / 2}
                 width={CELL}
                 height={CELL}
-                fill={startArm ? startArm.color.hex : CREAM}
+                fill={!startArm ? CREAM : active ? startArm.color.hex : faded(startArm.color.hex, 0.3)}
                 stroke={INK}
                 strokeWidth={1.5}
               />
