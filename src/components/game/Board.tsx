@@ -1,15 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Stage, Layer, Rect, Circle, Line, Star } from "react-konva";
+import { Stage, Layer, Rect, Circle, Line, Star, Group, Path, Text } from "react-konva";
 import { buildBoardLayout, tokenPixelPosition, isSafeGlobalCell } from "@/game/board";
+import { placementFor } from "@/game/engine";
 import Token, { MIN_HIT_RADIUS, MAX_HIT_RADIUS } from "@/components/game/Token";
 import { voronoiTerritory } from "@/lib/hitTerritory";
 import type { GameState } from "@/types/game";
 
 const INK = "#2B2016";
 const CREAM = "#FFFDF6";
+const GOLD = "#FFD400";
+const GOLD_DARK = "#C99A00";
 const BOARD_SIZE = 1000;
+// Same silhouette as PlayerCorner's crown badge, in a 0..24 x 0..22 local
+// box — kept here rather than shared, since one's plain SVG (a DOM
+// component) and this one's a Konva shape on the board's canvas.
+const CROWN_PATH = "M2,18 L2,9 L7,13 L12,4 L17,13 L22,9 L22,18 Z";
 
 // Inactive arms fade their color toward CREAM. Blocks, home columns, and
 // the center pinwheel all reach into the shared middle cross of the grid,
@@ -274,6 +281,50 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
               />
             ))
           )}
+
+          {/* A finished seat's tokens have all moved to the center, so
+              their yard sits empty — a big crown fills it, right where
+              their tokens started, instead of the small PlayerCorner
+              badge being the only sign they finished. */}
+          {layout.arms.map((arm) => {
+            const seatId = game.seats.find((s) => s.armIndex === arm.armIndex)?.id;
+            const placement = seatId ? placementFor(game, seatId) : null;
+            if (!placement || placement > 3) return null;
+
+            const crownWidth = arm.cage.width * 0.72;
+            const s = crownWidth / 24;
+            const cx = arm.cage.x + arm.cage.width / 2;
+            const cy = arm.cage.y + arm.cage.height / 2;
+
+            return (
+              <Group key={`crown-${arm.armIndex}`} x={cx - 12 * s} y={cy - 11 * s} scaleX={s} scaleY={s} listening={false}>
+                <Path
+                  data={CROWN_PATH}
+                  fill={GOLD}
+                  stroke={GOLD_DARK}
+                  strokeWidth={1.5}
+                  shadowColor="black"
+                  shadowBlur={3}
+                  shadowOpacity={0.35}
+                  shadowOffset={{ x: 0, y: 1.5 }}
+                />
+                <Circle x={2} y={9} radius={1.6} fill={GOLD_DARK} />
+                <Circle x={12} y={4} radius={1.8} fill={GOLD_DARK} />
+                <Circle x={22} y={9} radius={1.6} fill={GOLD_DARK} />
+                <Circle x={12} y={20} radius={4.5} fill={INK} />
+                <Text
+                  text={String(placement)}
+                  x={12 - 3}
+                  y={20 - 3.5}
+                  width={6}
+                  align="center"
+                  fontSize={6}
+                  fontStyle="bold"
+                  fill={CREAM}
+                />
+              </Group>
+            );
+          })}
 
           {/* the small colored "finish" pinwheel at dead center — drawn on
               top of the ring/home cells so its clean triangles cover the
