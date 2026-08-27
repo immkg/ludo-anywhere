@@ -1,23 +1,37 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { armForSeatIndex } from "@/game/board";
 import { createRoom } from "@/lib/socketActions";
 import { saveOwnedSeats } from "@/lib/identity";
 import { useRoomStore } from "@/store/useRoomStore";
+import { useProfiles } from "@/hooks/useProfiles";
 import Button from "@/components/ui/Button";
 import NumberPicker from "@/components/ui/NumberPicker";
 import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
 
 export default function CreateRoom() {
   const router = useRouter();
+  const { data: session } = useSession();
   const addMySeats = useRoomStore((s) => s.addMySeats);
+  const { profiles, createProfile } = useProfiles();
 
   const [totalPlayers, setTotalPlayers] = useState(4);
   const [seats, setSeats] = useState<SeatDraft[]>(defaultSeats(1, []));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The device-login's own profile (created automatically on sign-in) is
+  // almost always one of the players, so default seat 1 to it.
+  useEffect(() => {
+    if (seats[0]?.profileId) return;
+    const myEmail = session?.user?.email?.toLowerCase();
+    const mine = profiles.find((p) => p.email === myEmail);
+    if (mine) setSeats((prev) => prev.map((s, i) => (i === 0 ? { profileId: mine.id } : s)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profiles, session?.user?.email]);
 
   const setSeatsOnDevice = (count: number) => {
     setSeats((prev) => defaultSeats(Math.min(count, totalPlayers), prev));
@@ -29,10 +43,19 @@ export default function CreateRoom() {
   };
 
   const handleCreate = async () => {
+    if (seats.some((s) => !s.profileId)) {
+      setError("Pick a player for every seat");
+      return;
+    }
+    const profileIds = seats.map((s) => s.profileId);
+    if (new Set(profileIds).size !== profileIds.length) {
+      setError("Each player can only be seated once");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const finalSeats = seats.map((s, i) => ({ name: s.name.trim() || `Player ${i + 1}` }));
+      const finalSeats = seats.map((s) => ({ profileId: s.profileId as string }));
       const res = await createRoom(totalPlayers, finalSeats);
       if (!res.roomCode || !res.seats) throw new Error("Could not create room");
       saveOwnedSeats(res.roomCode, res.seats);
@@ -63,15 +86,22 @@ export default function CreateRoom() {
       </div>
 
       <div className="flex flex-col gap-3">
-        {seats.map((seat, i) => (
-          <SeatRow
-            key={i}
-            index={i}
-            seat={seat}
-            previewArmIndex={armForSeatIndex(i, totalPlayers)}
-            onChange={(next) => setSeats((prev) => prev.map((s, j) => (j === i ? next : s)))}
-          />
-        ))}
+        {seats.map((seat, i) => {
+          const takenElsewhere = new Set(
+            seats.filter((_, j) => j !== i).map((s) => s.profileId)
+          );
+          return (
+            <SeatRow
+              key={i}
+              index={i}
+              seat={seat}
+              previewArmIndex={armForSeatIndex(i, totalPlayers)}
+              profiles={profiles.filter((p) => !takenElsewhere.has(p.id))}
+              onChange={(next) => setSeats((prev) => prev.map((s, j) => (j === i ? next : s)))}
+              onCreateProfile={createProfile}
+            />
+          );
+        })}
       </div>
 
       {error && <p className="text-sm text-accent">{error}</p>}

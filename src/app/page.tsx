@@ -1,10 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Button from "@/components/ui/Button";
+import AccountBar from "@/components/auth/AccountBar";
 
 export default function HomePage() {
   const router = useRouter();
+  const { data: session, status } = useSession();
+  const signedIn = !!session?.user;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center gap-10 px-6 py-10">
@@ -16,12 +20,22 @@ export default function HomePage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-3">
-        <Button onClick={() => router.push("/create")}>Create room</Button>
-        <Button variant="secondary" onClick={() => router.push("/join")}>
-          Join room
-        </Button>
-      </div>
+      <AccountBar />
+
+      {signedIn && (
+        <div className="flex flex-col gap-3">
+          <Button onClick={() => router.push("/create")}>Create room</Button>
+          <Button variant="secondary" onClick={() => router.push("/join")}>
+            Join room
+          </Button>
+        </div>
+      )}
+
+      {!signedIn && status !== "loading" && (
+        <p className="text-center text-sm text-ink-muted">
+          Sign in with Google to create or join a room.
+        </p>
+      )}
     </main>
   );
 }

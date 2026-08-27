@@ -42,16 +42,32 @@ export function getRoom(code) {
   return rooms.get((code || "").toUpperCase());
 }
 
-// Adds one device's seats to a room. `requests` is [{ name }]. Colors are
-// assigned automatically by join order (see armForSeatIndex) so a
-// partially-filled board blanks out symmetrically rather than depending on
-// which color a player happens to pick.
+// Adds one device's seats to a room. `requests` is [{ name, profileId }]
+// (profiles already resolved/verified by resolveSeatProfiles). `userId` is
+// the device-login adding them, kept on the seat purely so its owner can
+// reclaim it later (see reconnectSeats) — separate from `profileId`, which
+// is the actual player identity and is what game history/leaderboards key
+// off, since the same profile can be added from more than one device-login.
+// Colors are assigned automatically by join order (see armForSeatIndex) so
+// a partially-filled board blanks out symmetrically rather than depending
+// on which color a player happens to pick.
 // Returns { room, seats, error }.
-export function addSeats(room, requests, { socketId, deviceId }) {
+export function addSeats(room, requests, { socketId, deviceId, userId }) {
   if (!room) return { error: "Room not found" };
   if (room.status !== "lobby") return { error: "Game already started" };
   if (room.seats.length + requests.length > room.maxPlayers) {
     return { error: "Room is full" };
+  }
+
+  // A given player (profile) can only occupy one seat per room, whether
+  // that's a duplicate within this same request or one already seated by
+  // another device.
+  const seatedProfileIds = new Set(room.seats.map((s) => s.profileId).filter(Boolean));
+  for (const req of requests) {
+    if (req.profileId && seatedProfileIds.has(req.profileId)) {
+      return { error: "That player is already in this room" };
+    }
+    if (req.profileId) seatedProfileIds.add(req.profileId);
   }
 
   const startIndex = room.seats.length;
@@ -61,6 +77,8 @@ export function addSeats(room, requests, { socketId, deviceId }) {
     name: (req.name || "Player").slice(0, 20),
     armIndex: armForSeatIndex(startIndex + i, room.maxPlayers),
     deviceId,
+    profileId: req.profileId || null,
+    userId: userId || null,
     socketId,
     connected: true,
   }));
@@ -71,13 +89,16 @@ export function addSeats(room, requests, { socketId, deviceId }) {
   return { room, seats: newSeats };
 }
 
-// Reattaches previously-known seats (by their persisted tokens) to a new
-// socket, e.g. after a page refresh or reconnect.
-export function reconnectSeats(room, tokens, socketId) {
+// Reattaches previously-known seats to a new socket, e.g. after a page
+// refresh, a crash, or reopening on a different device — matched either by
+// the seat's persisted token (same browser) or by the connecting device
+// login owning the seat (any device, as long as they're signed in as the
+// same Google account that added it).
+export function reconnectSeats(room, tokens, socketId, userId) {
   if (!room) return [];
   const reconnected = [];
   for (const seat of room.seats) {
-    if (tokens.includes(seat.token)) {
+    if (tokens.includes(seat.token) || (userId && seat.userId === userId)) {
       seat.socketId = socketId;
       seat.connected = true;
       clearDisconnectTimer(room, seat.id);
@@ -136,7 +157,16 @@ export function startGame(room) {
   if (room.status !== "lobby") return { error: "Game already started" };
   if (room.seats.length < 2) return { error: "Need at least 2 players" };
 
+  // addSeats already rejects a profile joining twice, but this is a cheap
+  // last check right before locking in the roster, in case seats ever got
+  // here some other way.
+  const profileIds = room.seats.map((s) => s.profileId).filter(Boolean);
+  if (new Set(profileIds).size !== profileIds.length) {
+    return { error: "Duplicate players in room" };
+  }
+
   room.status = "playing";
+  room.startedAt = new Date();
   room.game = createGame(room.seats.map((s) => ({ id: s.id, armIndex: s.armIndex })));
   return { room };
 }

@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Auth.js (NextAuth) models, shaped for @auth/prisma-adapter ---
+
+model User {
+  id            String        @id @default(cuid())
+  name          String?
+  email         String?       @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime      @default(now())
+  accounts      Account[]
+  sessions      Session[]
+  profiles      UserProfile[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// --- Player profiles ---
+//
+// Google sign-in is the "device login" — it identifies who's holding the
+// phone/browser, not who's playing. The actual players seated in a room are
+// PlayerProfiles: lightweight, reusable identities keyed by email, so the
+// same person's stats/history stay unified no matter which signed-in
+// device seats them (e.g. a parent's phone seating the whole family, or the
+// same kid playing from two different devices). UserProfile just tracks
+// which profiles a given device-login has used before, for its picker.
+
+model PlayerProfile {
+  id          String        @id @default(cuid())
+  name        String
+  email       String        @unique
+  createdAt   DateTime      @default(now())
+  users       UserProfile[]
+  gamePlayers GamePlayer[]
+}
+
+model UserProfile {
+  userId    String
+  profileId String
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile   PlayerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@id([userId, profileId])
+}
+
+// --- Game history ---
+
+model Game {
+  id           String       @id @default(cuid())
+  roomCode     String
+  maxPlayers   Int
+  startedAt    DateTime
+  endedAt      DateTime     @default(now())
+  winnerSeatId String?
+  players      GamePlayer[]
+}
+
+model GamePlayer {
+  id        String         @id @default(cuid())
+  gameId    String
+  seatId    String
+  name      String
+  armIndex  Int
+  isWinner  Boolean        @default(false)
+  profileId String?
+  game      Game           @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  profile   PlayerProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([profileId])
+  @@index([gameId])
+}

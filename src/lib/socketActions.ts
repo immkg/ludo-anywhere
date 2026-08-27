@@ -2,7 +2,7 @@ import { getSocket } from "@/lib/socket";
 import { getDeviceId } from "@/lib/identity";
 import type { OwnedSeat } from "@/types/room";
 
-export type SeatRequest = { name: string };
+export type SeatRequest = { profileId: string };
 type Ack = { error?: string; roomCode?: string; seats?: OwnedSeat[] };
 
 function emitWithAck(event: string, payload: unknown): Promise<Ack> {
