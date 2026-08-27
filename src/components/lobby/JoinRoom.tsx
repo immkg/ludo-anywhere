@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -108,7 +109,12 @@ export default function JoinRoom() {
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
-      <h1 className="text-2xl font-extrabold">Join room</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-extrabold">Join room</h1>
+        <Link href="/" className="text-sm font-semibold text-ink-muted underline">
+          Home
+        </Link>
+      </div>
 
       {friendsPlayingNow.length > 0 && (
         <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">

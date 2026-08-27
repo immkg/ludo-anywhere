@@ -12,16 +12,21 @@ import { shareOnWhatsApp, roomJoinUrl } from "@/lib/share";
 import { useFriends } from "@/hooks/useFriends";
 import { usePresenceStore } from "@/store/usePresenceStore";
 import { useNotificationsStore } from "@/store/useNotificationsStore";
+import { useRoomStore } from "@/store/useRoomStore";
 import Button from "@/components/ui/Button";
 import FriendAvatar from "@/components/friends/FriendAvatar";
+import Link from "next/link";
 import type { Room } from "@/types/room";
 import type { OwnedSeat } from "@/types/room";
 
 export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: OwnedSeat[] }) {
   const [copied, setCopied] = useState(false);
+  const error = useRoomStore((s) => s.error);
+  const setError = useRoomStore((s) => s.setError);
   const isHost = !!room.hostSeatId && mySeats.some((s) => s.id === room.hostSeatId);
   const canStart = isHost && room.seats.length >= 2;
   const openSlots = Math.max(0, room.maxPlayers - room.seats.length);
+  const hostName = room.seats.find((s) => s.id === room.hostSeatId)?.name;
 
   const handleCopy = async () => {
     try {
@@ -35,12 +40,36 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
+      {error && (
+        <div className="flex items-start justify-between gap-3 rounded-2xl border border-accent bg-surface p-3">
+          <p className="text-sm">
+            {error}
+            {error.includes("used up today") && (
+              <>
+                {" "}
+                <Link href="/pricing" className="font-semibold text-accent underline">
+                  Get more games
+                </Link>
+              </>
+            )}
+          </p>
+          <button onClick={() => setError(null)} className="shrink-0 text-xs text-ink-muted underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div className="text-center">
         <p className="text-sm text-ink-muted">Room code</p>
         <button onClick={handleCopy} className="text-4xl font-extrabold tracking-[0.2em]">
           {room.code}
         </button>
         <p className="mt-1 text-xs text-ink-muted">{copied ? "Copied!" : "Tap to copy and share"}</p>
+        {room.sponsored && !isHost && (
+          <p className="mt-1 text-xs font-semibold text-accent">
+            {hostName ?? "The host"} is hosting — this game&apos;s on them
+          </p>
+        )}
         <button
           onClick={() => shareOnWhatsApp(`Join my Ludo room! ${roomJoinUrl(room.code)}`)}
           className="mt-2 text-xs font-semibold text-accent underline"

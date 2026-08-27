@@ -11,11 +11,13 @@ import {
   startGame,
   serializeRoom,
   serializeGame,
+  hostUserId,
 } from "./src/server/rooms.js";
 import { rollDice, moveToken } from "./src/game/engine.js";
 import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
 import { resolveSeatProfiles } from "./src/server/profiles.js";
+import { resolveCharge, checkGameStart, logEvent } from "./src/server/entitlements.js";
 import {
   markOnline,
   markOffline,
@@ -242,6 +244,7 @@ app.prepare().then(() => {
         broadcastRoom(room);
         setUserRoom(userId, room.code);
         broadcastPresence(userId).catch(logPresenceError("room:create presence update"));
+        logEvent("room_created", userId, { maxPlayers });
       })
     );
 
@@ -277,6 +280,25 @@ app.prepare().then(() => {
         const resolved = await resolveSeatProfiles(seats, reconnectUserId);
         if (resolved.error) return ack?.({ error: resolved.error });
 
+        // Pre-flight only — the real charge happens at game:start. A
+        // free host's own additional seats need no check here (they're
+        // covered by the host's own eventual charge); a host who currently
+        // holds an active subscription or a credit is optimistically
+        // treated as "will sponsor this game" and skips the check too.
+        const hostId = hostUserId(room);
+        if (reconnectUserId !== hostId) {
+          const hostDecision = await resolveCharge(hostId, room.maxPlayers);
+          if (hostDecision.source === "FREE") {
+            const joinerDecision = await resolveCharge(reconnectUserId, room.maxPlayers);
+            if (!joinerDecision.allowed) {
+              return ack?.({
+                error: "You've used today's free games. Get more instantly.",
+                code: "limit_reached",
+              });
+            }
+          }
+        }
+
         const { error, seats: created } = addSeats(room, resolved.seats, {
           socketId: socket.id,
           deviceId,
@@ -292,21 +314,40 @@ app.prepare().then(() => {
         broadcastRoom(room);
         setUserRoom(reconnectUserId, room.code);
         broadcastPresence(reconnectUserId).catch(logPresenceError("room:join presence update"));
+        logEvent("player_joined", reconnectUserId, { roomCode: room.code });
       })
     );
 
-    socket.on("game:start", ({ roomCode, seatId }) => {
+    socket.on("game:start", async ({ roomCode, seatId }) => {
       const room = getRoom(roomCode);
       if (!room) return socket.emit("error", { message: "Room not found" });
       if (room.hostSeatId !== seatId) {
         return socket.emit("error", { message: "Only the host can start the game" });
       }
 
+      // Charges the host first, then (unless the host's charge is sponsoring
+      // the room) every other distinct account seated — atomically, so a
+      // blocked seat leaves nobody charged for a game that never starts.
+      const charged = await checkGameStart(room);
+      if (!charged.ok) {
+        return socket.emit("error", {
+          message: `${charged.name ?? "A player"} can't play right now — free games used up today`,
+          seatId: charged.seatId,
+        });
+      }
+      room.sponsored = charged.sponsored;
+
       const { error } = startGame(room);
       if (error) return socket.emit("error", { message: error });
 
       broadcastRoom(room);
       broadcastGame(room);
+      logEvent("game_started", hostUserId(room), {
+        roomCode: room.code,
+        playerCount: room.seats.length,
+        source: charged.source,
+        sponsored: charged.sponsored,
+      });
 
       // The room is no longer an open lobby, so it's no longer something a
       // friend could "ask to join" — clear it out of everyone's presence.
@@ -343,6 +384,11 @@ app.prepare().then(() => {
         room.status = "finished";
         saveGameHistory(room).catch((err) => {
           console.error("Failed to save game history", err);
+        });
+        logEvent("game_completed", hostUserId(room), {
+          roomCode: room.code,
+          playerCount: room.seats.length,
+          sponsored: room.sponsored,
         });
       }
     });

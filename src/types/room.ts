@@ -13,6 +13,7 @@ export type Room = {
   maxPlayers: number;
   hostSeatId: string | null;
   status: RoomStatus;
+  sponsored: boolean;
   seats: Seat[];
 };
 

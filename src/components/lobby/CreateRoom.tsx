@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -11,6 +12,7 @@ import { useProfiles } from "@/hooks/useProfiles";
 import Button from "@/components/ui/Button";
 import NumberPicker from "@/components/ui/NumberPicker";
 import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
+import type { EntitlementStatus } from "@/types/billing";
 
 export default function CreateRoom() {
   const router = useRouter();
@@ -22,6 +24,20 @@ export default function CreateRoom() {
   const [seats, setSeats] = useState<SeatDraft[]>(defaultSeats(1, []));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [billing, setBilling] = useState<EntitlementStatus | null>(null);
+
+  useEffect(() => {
+    fetch("/api/billing/status")
+      .then((res) => res.json())
+      .then(setBilling)
+      .catch(() => {});
+  }, []);
+
+  // Only a hard signal (no free slot, no credit, no active plan) blocks the
+  // button — this is a pre-check, the real charge happens server-side at
+  // game:start. The free allowance is flat (any player count), so it
+  // doesn't depend on totalPlayers.
+  const blocked = !!billing && !billing.entitlement && billing.creditsRemaining <= 0 && billing.freeRemaining <= 0;
 
   // The device-login's own profile (created automatically on sign-in) is
   // almost always one of the players, so default seat 1 to it.
@@ -69,11 +85,25 @@ export default function CreateRoom() {
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
-      <h1 className="text-2xl font-extrabold">Create room</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-extrabold">Create room</h1>
+        <Link href="/" className="text-sm font-semibold text-ink-muted underline">
+          Home
+        </Link>
+      </div>
 
       <div>
         <label className="text-sm font-semibold text-ink-muted">Total players</label>
         <NumberPicker options={[2, 3, 4]} value={totalPlayers} onChange={handleTotalChange} />
+        {billing && (
+          <p className="mt-1 text-xs text-ink-muted">
+            {billing.entitlement
+              ? "Unlimited"
+              : billing.creditsRemaining > 0
+                ? `${billing.creditsRemaining} credits left`
+                : `${billing.freeRemaining} free today`}
+          </p>
+        )}
       </div>
 
       <div>
@@ -106,9 +136,18 @@ export default function CreateRoom() {
 
       {error && <p className="text-sm text-accent">{error}</p>}
 
-      <Button onClick={handleCreate} disabled={loading}>
-        {loading ? "Creating…" : "Create room"}
-      </Button>
+      {blocked ? (
+        <div className="flex flex-col gap-2 rounded-2xl border border-accent bg-surface p-4 text-center">
+          <p className="text-sm">You&rsquo;ve used today&rsquo;s free games.</p>
+          <Link href="/pricing">
+            <Button className="w-full">Get more games</Button>
+          </Link>
+        </div>
+      ) : (
+        <Button onClick={handleCreate} disabled={loading}>
+          {loading ? "Creating…" : "Create room"}
+        </Button>
+      )}
     </div>
   );
 }

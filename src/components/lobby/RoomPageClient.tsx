@@ -43,7 +43,12 @@ export default function RoomPageClient() {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-8 text-center">
         <p className="text-ink-muted">You&rsquo;re not seated in room {roomCode}.</p>
-        <Button onClick={() => router.push(`/join`)}>Join a room</Button>
+        <div className="flex w-full max-w-xs flex-col gap-3">
+          <Button onClick={() => router.push(`/join`)}>Join a room</Button>
+          <Button variant="secondary" onClick={() => router.push(`/create`)}>
+            Create room
+          </Button>
+        </div>
       </div>
     );
   }

@@ -32,6 +32,7 @@ export function createRoom({ maxPlayers }) {
     status: "lobby", // lobby | playing | finished
     seats: [],
     game: null,
+    sponsored: false, // set true at game:start when the host paid via a subscription or Game Pack credit
     disconnectTimers: new Map(), // seatId -> Timeout
   };
   rooms.set(code, room);
@@ -40,6 +41,10 @@ export function createRoom({ maxPlayers }) {
 
 export function getRoom(code) {
   return rooms.get((code || "").toUpperCase());
+}
+
+export function hostUserId(room) {
+  return room.seats.find((s) => s.id === room.hostSeatId)?.userId ?? null;
 }
 
 // Adds one device's seats to a room. `requests` is [{ name, profileId }]
@@ -177,6 +182,7 @@ export function serializeRoom(room) {
     maxPlayers: room.maxPlayers,
     hostSeatId: room.hostSeatId,
     status: room.status,
+    sponsored: room.sponsored,
     seats: room.seats.map((s) => ({
       id: s.id,
       name: s.name,

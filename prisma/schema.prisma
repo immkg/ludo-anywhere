@@ -22,6 +22,10 @@ model User {
   profiles            UserProfile[]
   friendshipsSent     Friendship[]  @relation("FriendshipsSent")
   friendshipsReceived Friendship[]  @relation("FriendshipsReceived")
+  entitlements        Entitlement[]
+  creditBatches       CreditBatch[]
+  usageEvents         UsageEvent[]
+  payments            Payment[]
 }
 
 model Account {
@@ -136,4 +140,90 @@ model GamePlayer {
 
   @@index([profileId])
   @@index([gameId])
+}
+
+// --- Pricing & entitlements ---
+//
+// Usage is charged per distinct signed-in account (User), not per seat —
+// one account can seat several PlayerProfiles in a single room:create call
+// (e.g. a parent seating their whole family), and that's still one charge.
+// The charge itself is decided by src/server/entitlements.js's
+// resolveCharge(), in priority order: an active Entitlement (subscription,
+// checked against its fair-use cap) -> today's free allowance for that
+// player count -> a CreditBatch (Game Pack) -> blocked. "Today" is a fixed
+// Asia/Kolkata midnight window computed at query time against UsageEvent,
+// not a stored counter — see src/server/time.js.
+
+model PricingConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique // "active" — single row, read at request time
+  data      Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+model Entitlement {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String // MONTHLY | ANNUAL
+  startsAt  DateTime
+  expiresAt DateTime
+  paymentId String   @unique
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model CreditBatch {
+  id        String   @id @default(cuid())
+  userId    String
+  credits   Int
+  remaining Int
+  expiresAt DateTime
+  paymentId String   @unique
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model UsageEvent {
+  id             String   @id @default(cuid())
+  userId         String
+  roomCode       String
+  role           String // HOST | JOINER
+  playerCount    Int
+  source         String // SUBSCRIPTION | FREE | PACK
+  creditBatchId  String?
+  consumedAt     DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consumedAt])
+}
+
+model Payment {
+  id                String    @id @default(cuid())
+  userId            String
+  purpose           String // PACK | MONTHLY | ANNUAL
+  amountInr         Int
+  discountInr       Int       @default(0) // e.g. the Monthly->Annual upgrade credit, for audit/analytics
+  razorpayOrderId   String    @unique
+  razorpayPaymentId String?   @unique
+  status            String // CREATED | PAID | FAILED
+  createdAt         DateTime  @default(now())
+  verifiedAt        DateTime?
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+model AnalyticsEvent {
+  id         String   @id @default(cuid())
+  userId     String?
+  type       String
+  properties Json?
+  createdAt  DateTime @default(now())
+
+  @@index([type, createdAt])
 }
