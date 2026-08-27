@@ -51,12 +51,18 @@ export default function Token({
   const { x: rawX, y: rawY } = useSteppedToken(armIndex, pos, tokenIndex);
   const px = rawX + offsetX;
   const py = rawY + offsetY;
-  const haloRadius = usePulse(selectable, 20, 28);
+  // A same-color ring around a same-size token was easy to miss (the ring
+  // reads as another decoration, and gold-on-cream board cells barely
+  // contrast). Growing and shrinking the whole piece is much harder to miss
+  // at a glance, and doesn't depend on hue contrast at all.
+  const pulseScale = usePulse(selectable, 1, 1.22, 700);
 
   return (
     <Group
       x={px}
       y={py}
+      scaleX={pulseScale}
+      scaleY={pulseScale}
       onClick={onTap}
       onTap={onTap}
       onMouseEnter={(e) => selectable && setCursor(e, "pointer")}
@@ -67,20 +73,12 @@ export default function Token({
           a shape with opacity 0 as long as it has a fill, so this widens
           the tap target without changing what's drawn. */}
       <Circle radius={HIT_RADIUS} fill={color} opacity={0} />
-      {selectable && (
-        <>
-          {/* high-contrast ring so "movable" reads even against a
-              same-hued board quadrant, not just the token's own glow */}
-          <Circle radius={haloRadius} stroke={GOLD} strokeWidth={2.5} opacity={0.9} />
-          <Circle radius={haloRadius * 0.8} fill={color} opacity={0.3} />
-        </>
-      )}
       <Ellipse radiusX={10} radiusY={3.5} y={8} fill={INK} opacity={0.25} />
       <Circle
         radius={COLLAR_RADIUS}
         fill={CREAM}
-        stroke={INK}
-        strokeWidth={2}
+        stroke={selectable ? GOLD : INK}
+        strokeWidth={selectable ? 3 : 2}
         shadowColor="black"
         shadowBlur={5}
         shadowOffset={{ x: 0, y: 3 }}
