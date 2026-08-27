@@ -70,12 +70,23 @@ const LANDING_ORIENTATION: Record<number, { x: number; y: number }> = {
   6: { x: 0, y: 180 },
 };
 
-function Face({ value, color }: { value: number; color: string }) {
+function Face({
+  value,
+  numberColor,
+  frameColor,
+}: {
+  value: number;
+  // The pips: colored for whoever actually rolled this number.
+  numberColor: string;
+  // The border: colored for whoever currently needs to roll/move, even
+  // once that's someone else — see the cubeColor/color split below.
+  frameColor: string;
+}) {
   const pips = PIP_LAYOUTS[value] ?? [];
   return (
     <div
       className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl border-2 bg-surface p-1.5 [backface-visibility:hidden]"
-      style={{ transform: FACE_PLACEMENT[value], borderColor: color }}
+      style={{ transform: FACE_PLACEMENT[value], borderColor: frameColor }}
     >
       {Array.from({ length: 9 }, (_, i) => {
         const row = Math.floor(i / 3);
@@ -85,7 +96,7 @@ function Face({ value, color }: { value: number; color: string }) {
           <span
             key={i}
             className="m-auto h-2 w-2 rounded-full bg-transparent"
-            style={active ? { backgroundColor: color } : undefined}
+            style={active ? { backgroundColor: numberColor } : undefined}
           />
         );
       })}
@@ -119,18 +130,19 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
   const prevRollSeqRef = useRef(rollSeq);
   const spinStartRef = useRef(0);
   const landTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The cube's own face color lags the incoming `color` prop while a roll
-  // is in flight: the state update that confirms a roll (rollSeq) often
-  // also carries the turn having already advanced to the next player (a
-  // bonus-less move ends the turn in the same broadcast), so `color` can
-  // switch to the next player before this cube has finished showing the
-  // roll that just happened. Only adopts the new color once the spin/land
-  // animation actually finishes — the outer countdown ring below always
-  // tracks `color` directly, since that's genuinely whose turn it is now.
+  // The pips stay in whichever color rolled the number currently on
+  // display — they only change when a *new* roll actually lands, not
+  // whenever `color` (whose turn it is now) moves on, e.g. once that
+  // player's token move ends their turn with no bonus roll. The face's
+  // border and everything else outside the cube (ring, countdown arc)
+  // track `color` directly, since those are about whose turn it is now.
   const [cubeColor, setCubeColor] = useState(color);
-  useEffect(() => {
-    if (!isRolling) setCubeColor(color);
-  }, [color, isRolling]);
+  // Holds `color` as of just before the current render, so the roll-landing
+  // effect below can read "who actually rolled" even when that same update
+  // also advances the turn (a roll with no valid moves ends the turn in the
+  // same broadcast) — by the time this render's `color` prop is read, it may
+  // already be the next player's.
+  const prevColorRef = useRef(color);
 
   function spinFrom(prev: { x: number; y: number }) {
     return { x: prev.x + 360 * 3, y: prev.y + 360 * 4 };
@@ -143,6 +155,7 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
   useEffect(() => {
     if (rollSeq === prevRollSeqRef.current) return;
     prevRollSeqRef.current = rollSeq;
+    const rollerColor = prevColorRef.current;
 
     const alreadySpinning = isRolling && Date.now() - spinStartRef.current < MIN_SPIN_MS;
     if (!alreadySpinning) {
@@ -158,9 +171,16 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
     landTimeoutRef.current = setTimeout(() => {
       setOrientation({ x: target.x + 360 * 2, y: target.y + 360 * 2 });
       setIsRolling(false);
+      setCubeColor(rollerColor);
     }, remaining);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rollSeq, lastRoll]);
+
+  // Runs after the roll-landing effect above on any render where both
+  // change together, so that effect still sees the pre-update color.
+  useEffect(() => {
+    prevColorRef.current = color;
+  }, [color]);
 
   useEffect(() => {
     return () => {
@@ -252,7 +272,7 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
           }}
         >
           {[1, 2, 3, 4, 5, 6].map((value) => (
-            <Face key={value} value={value} color={cubeColor} />
+            <Face key={value} value={value} numberColor={cubeColor} frameColor={color} />
           ))}
         </motion.div>
       </div>
