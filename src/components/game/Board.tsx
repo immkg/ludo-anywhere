@@ -118,19 +118,6 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
             />
           ))}
 
-          {/* the small colored "finish" pinwheel at dead center */}
-          {layout.arms.map((arm) => (
-            <Line
-              key={`pin-${arm.color.id}`}
-              points={arm.pinwheel.flatMap((p) => [p.x, p.y])}
-              closed
-              fill={arm.color.hex}
-              stroke={INK}
-              strokeWidth={1.5}
-              opacity={activeArms.has(arm.armIndex) ? 1 : 0.3}
-            />
-          ))}
-
           {/* shared ring */}
           {layout.ringCells.map((cell) => {
             const startArm = layout.arms.find((a) => a.startGlobalIndex === cell.index) ?? null;
@@ -201,6 +188,22 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
               />
             ))
           )}
+
+          {/* the small colored "finish" pinwheel at dead center — drawn on
+              top of the ring/home cells so its clean triangles cover the
+              hub instead of the home column's individually-bordered end
+              cells showing through as a grid. */}
+          {layout.arms.map((arm) => (
+            <Line
+              key={`pin-${arm.color.id}`}
+              points={arm.pinwheel.flatMap((p) => [p.x, p.y])}
+              closed
+              fill={arm.color.hex}
+              stroke={INK}
+              strokeWidth={1.5}
+              opacity={activeArms.has(arm.armIndex) ? 1 : 0.3}
+            />
+          ))}
 
           {[...groups.values()].map((group) =>
             group.map((t, i) => {
