@@ -1,20 +1,35 @@
 "use client";
 
 import { Circle, Ellipse, Group } from "react-konva";
-import { useAnimatedPoint, usePulse } from "@/hooks/useAnimatedPoint";
+import { usePulse } from "@/hooks/useAnimatedPoint";
+import { useSteppedToken } from "@/hooks/useSteppedToken";
 
 const INK = "#2B2016";
 
 type TokenProps = {
-  x: number;
-  y: number;
+  armIndex: number;
+  pos: number;
+  tokenIndex: number;
+  offsetX?: number;
+  offsetY?: number;
   color: string;
   selectable: boolean;
   onTap?: () => void;
 };
 
-export default function Token({ x, y, color, selectable, onTap }: TokenProps) {
-  const { x: px, y: py } = useAnimatedPoint(x, y);
+export default function Token({
+  armIndex,
+  pos,
+  tokenIndex,
+  offsetX = 0,
+  offsetY = 0,
+  color,
+  selectable,
+  onTap,
+}: TokenProps) {
+  const { x: rawX, y: rawY } = useSteppedToken(armIndex, pos, tokenIndex);
+  const px = rawX + offsetX;
+  const py = rawY + offsetY;
   const haloRadius = usePulse(selectable);
 
   return (

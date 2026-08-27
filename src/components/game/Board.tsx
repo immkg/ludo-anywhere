@@ -58,6 +58,21 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
     const key = `${Math.round(t.x)}:${Math.round(t.y)}`;
     groups.set(key, [...(groups.get(key) ?? []), t]);
   });
+  // Each token's fan-out offset, looked up by its own stable key rather than
+  // rendered via a nested per-group map — a nested `.map` inside `.map`
+  // leaves the outer array without keys, so React keys each Token by its
+  // (group position, token key) pair instead of just the token key. Since
+  // group membership/order reshuffles constantly as tokens move (especially
+  // around safe cells, where tokens stack and unstack most), that silently
+  // remounts the Token and resets its in-flight step animation mid-hop.
+  const spreadByKey = new Map<string, { offsetX: number; offsetY: number }>();
+  groups.forEach((group) => {
+    const spread = group.length > 1 ? 8 : 0;
+    group.forEach((t, i) => {
+      const offsetAngle = (i / group.length) * Math.PI * 2;
+      spreadByKey.set(t.key, { offsetX: Math.cos(offsetAngle) * spread, offsetY: Math.sin(offsetAngle) * spread });
+    });
+  });
 
   const size = width || 1;
   const scale = size / BOARD_SIZE;
@@ -205,24 +220,24 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
             />
           ))}
 
-          {[...groups.values()].map((group) =>
-            group.map((t, i) => {
-              const spread = group.length > 1 ? 8 : 0;
-              const offsetAngle = (i / group.length) * Math.PI * 2;
-              const arm = layout.arms[t.seat.armIndex];
-              const selectable = isMyTurn && t.seat.id === currentSeatId && validMoves.includes(t.tokenIndex);
-              return (
-                <Token
-                  key={t.key}
-                  x={t.x + Math.cos(offsetAngle) * spread}
-                  y={t.y + Math.sin(offsetAngle) * spread}
-                  color={arm.color.hex}
-                  selectable={selectable}
-                  onTap={() => onTokenTap(t.seat.id, t.tokenIndex)}
-                />
-              );
-            })
-          )}
+          {placed.map((t) => {
+            const { offsetX, offsetY } = spreadByKey.get(t.key)!;
+            const arm = layout.arms[t.seat.armIndex];
+            const selectable = isMyTurn && t.seat.id === currentSeatId && validMoves.includes(t.tokenIndex);
+            return (
+              <Token
+                key={t.key}
+                armIndex={t.seat.armIndex}
+                pos={t.pos}
+                tokenIndex={t.tokenIndex}
+                offsetX={offsetX}
+                offsetY={offsetY}
+                color={arm.color.hex}
+                selectable={selectable}
+                onTap={() => onTokenTap(t.seat.id, t.tokenIndex)}
+              />
+            );
+          })}
         </Layer>
       </Stage>
     </div>

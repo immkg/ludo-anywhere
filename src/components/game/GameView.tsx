@@ -7,10 +7,9 @@ import { useGame } from "@/hooks/useGame";
 import { rollDice as emitRollDice, moveToken as emitMoveToken } from "@/lib/socketActions";
 import { colorForArm } from "@/game/board";
 import Dice from "@/components/game/Dice";
-import TurnBanner from "@/components/game/TurnBanner";
+import PlayerCorner from "@/components/game/PlayerCorner";
 import Button from "@/components/ui/Button";
-import type { Room } from "@/types/room";
-import type { OwnedSeat } from "@/types/room";
+import type { Room, Seat } from "@/types/room";
 
 // Konva needs a real <canvas>/window, so this can't run during SSR.
 const Board = dynamic(() => import("@/components/game/Board"), {
@@ -18,9 +17,9 @@ const Board = dynamic(() => import("@/components/game/Board"), {
   loading: () => <div className="aspect-square w-full max-w-lg mx-auto" />,
 });
 
-export default function GameView({ room, mySeats }: { room: Room; mySeats: OwnedSeat[] }) {
+export default function GameView({ room }: { room: Room }) {
   const router = useRouter();
-  const { game, currentSeat, currentRoomSeat, isMyTurn, validMoves } = useGame();
+  const { game, currentSeat, isMyTurn, validMoves } = useGame();
 
   if (!game) {
     return <div className="flex min-h-dvh items-center justify-center text-ink-muted">Loading game…</div>;
@@ -46,6 +45,10 @@ export default function GameView({ room, mySeats }: { room: Room; mySeats: Owned
     );
   }
 
+  // Board corners: arm 0 = top-left, arm 1 = top-right, arm 2 = bottom-right,
+  // arm 3 = bottom-left (see armForSeatIndex in src/game/board.js).
+  const seatByArm = new Map<number, Seat>(room.seats.map((s) => [s.armIndex, s]));
+
   const canRoll = isMyTurn && game.diceValue == null;
 
   const handleRoll = () => {
@@ -59,7 +62,14 @@ export default function GameView({ room, mySeats }: { room: Room; mySeats: Owned
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-lg flex-col gap-4 px-4 py-4">
-      <TurnBanner currentSeat={currentSeat} currentRoomSeat={currentRoomSeat} isMyTurn={isMyTurn} mySeats={mySeats} />
+      <div className="mx-auto flex w-full max-w-lg items-center justify-between px-1">
+        <PlayerCorner seat={seatByArm.get(0) ?? null} avatarFirst isTurn={seatByArm.get(0)?.id === currentSeat?.id} />
+        <PlayerCorner
+          seat={seatByArm.get(1) ?? null}
+          avatarFirst={false}
+          isTurn={seatByArm.get(1)?.id === currentSeat?.id}
+        />
+      </div>
 
       <Board
         game={game}
@@ -69,8 +79,23 @@ export default function GameView({ room, mySeats }: { room: Room; mySeats: Owned
         onTokenTap={handleTokenTap}
       />
 
+      <div className="mx-auto flex w-full max-w-lg items-center justify-between px-1">
+        <PlayerCorner seat={seatByArm.get(3) ?? null} avatarFirst isTurn={seatByArm.get(3)?.id === currentSeat?.id} />
+        <PlayerCorner
+          seat={seatByArm.get(2) ?? null}
+          avatarFirst={false}
+          isTurn={seatByArm.get(2)?.id === currentSeat?.id}
+        />
+      </div>
+
       <div className="flex items-center justify-center">
-        <Dice lastRoll={game.lastRoll} rollSeq={game.rollSeq} canRoll={canRoll} onRoll={handleRoll} />
+        <Dice
+          lastRoll={game.lastRoll}
+          rollSeq={game.rollSeq}
+          canRoll={canRoll}
+          onRoll={handleRoll}
+          color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+        />
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -67,18 +67,24 @@ const LANDING_ORIENTATION: Record<number, { x: number; y: number }> = {
   6: { x: 0, y: 180 },
 };
 
-function Face({ value }: { value: number }) {
+function Face({ value, color }: { value: number; color: string }) {
   const pips = PIP_LAYOUTS[value] ?? [];
   return (
     <div
-      className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl border-2 border-line bg-surface p-1.5 [backface-visibility:hidden]"
-      style={{ transform: FACE_PLACEMENT[value] }}
+      className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl border-2 bg-surface p-1.5 [backface-visibility:hidden]"
+      style={{ transform: FACE_PLACEMENT[value], borderColor: color }}
     >
       {Array.from({ length: 9 }, (_, i) => {
         const row = Math.floor(i / 3);
         const col = i % 3;
         const active = pips.some(([r, c]) => r === row && c === col);
-        return <span key={i} className={cn("m-auto h-2 w-2 rounded-full", active ? "bg-ink" : "bg-transparent")} />;
+        return (
+          <span
+            key={i}
+            className="m-auto h-2 w-2 rounded-full bg-transparent"
+            style={active ? { backgroundColor: color } : undefined}
+          />
+        );
       })}
     </div>
   );
@@ -89,9 +95,14 @@ type DiceProps = {
   rollSeq: number;
   canRoll: boolean;
   onRoll: () => void;
+  // The color of whichever seat currently needs to roll/move — stays put
+  // (doesn't fade back to neutral) until that turn actually advances, so
+  // the dice keeps reading as "this is so-and-so's turn" through bonus
+  // rolls too, not just the instant right after a roll.
+  color: string;
 };
 
-export default function Dice({ lastRoll, rollSeq, canRoll, onRoll }: DiceProps) {
+export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, color }: DiceProps) {
   const [isRolling, setIsRolling] = useState(false);
   const [orientation, setOrientation] = useState(() => LANDING_ORIENTATION[lastRoll ?? 1]);
   const prevRollSeqRef = useRef(rollSeq);
@@ -147,9 +158,9 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll }: DiceProps) 
       disabled={!canRoll || isRolling}
       className={cn(
         "relative h-16 w-16 rounded-2xl transition disabled:opacity-40",
-        canRoll && !isRolling ? "ring-2 ring-accent ring-offset-2 ring-offset-bg active:scale-95" : ""
+        canRoll && !isRolling ? "ring-2 ring-offset-2 ring-offset-bg active:scale-95" : ""
       )}
-      style={{ perspective: 300 }}
+      style={{ perspective: 300, ...(canRoll && !isRolling ? ({ "--tw-ring-color": color } as CSSProperties) : {}) }}
     >
       <motion.div
         className="relative h-full w-full"
@@ -170,7 +181,7 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll }: DiceProps) 
         }}
       >
         {[1, 2, 3, 4, 5, 6].map((value) => (
-          <Face key={value} value={value} />
+          <Face key={value} value={value} color={color} />
         ))}
       </motion.div>
     </button>

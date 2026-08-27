@@ -52,5 +52,5 @@ export default function RoomPage() {
     return <WaitingRoom room={room} mySeats={myRelevantSeats} />;
   }
 
-  return <GameView room={room} mySeats={myRelevantSeats} />;
+  return <GameView room={room} />;
 }
