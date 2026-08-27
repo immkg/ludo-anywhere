@@ -185,22 +185,18 @@ function computeBoardLayout() {
     );
     const cage = rectFromEdges(rotateBlock(CLASSIC_ARM0_CAGE, armIndex));
 
-    // Where a finished token actually sits: near the middle of this arm's
-    // own wedge of the center pinwheel (not homeColumn's last cell, which
-    // is one grid square short of true center — see tokenPixelPosition).
-    // Small per-token spread around that point, same idea as yardSlots,
-    // so up to 4 finished tokens from one seat don't perfectly overlap,
-    // and different arms' clusters stay visually distinct near center.
-    const wedgeMid = {
-      x: (CENTER.x + pinwheelCorners[0].x + pinwheelCorners[1].x) / 3,
-      y: (CENTER.y + pinwheelCorners[0].y + pinwheelCorners[1].y) / 3,
-    };
-    const FINISH_SPREAD = 9;
+    // Where a finished token actually sits: the board's true dead center
+    // (not homeColumn's last cell, which is one grid square short of it —
+    // see tokenPixelPosition), the same point every arm's tokens converge
+    // on. A tight per-token spread, same idea as yardSlots, keeps up to 4
+    // finished tokens from one seat individually visible instead of
+    // fully stacked on one pixel, without reading as "off-center".
+    const FINISH_SPREAD = 5;
     const finishSlots = [
-      { x: wedgeMid.x - FINISH_SPREAD, y: wedgeMid.y - FINISH_SPREAD },
-      { x: wedgeMid.x + FINISH_SPREAD, y: wedgeMid.y - FINISH_SPREAD },
-      { x: wedgeMid.x - FINISH_SPREAD, y: wedgeMid.y + FINISH_SPREAD },
-      { x: wedgeMid.x + FINISH_SPREAD, y: wedgeMid.y + FINISH_SPREAD },
+      { x: CENTER.x - FINISH_SPREAD, y: CENTER.y - FINISH_SPREAD },
+      { x: CENTER.x + FINISH_SPREAD, y: CENTER.y - FINISH_SPREAD },
+      { x: CENTER.x - FINISH_SPREAD, y: CENTER.y + FINISH_SPREAD },
+      { x: CENTER.x + FINISH_SPREAD, y: CENTER.y + FINISH_SPREAD },
     ].map((p, slot) => ({ slot, ...p }));
 
     return {

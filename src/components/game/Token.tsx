@@ -9,24 +9,12 @@ const INK = "#2B2016";
 const GOLD = "#FFD400";
 const CREAM = "#FFFDF6";
 
-// Visible token radius. Kept separate from the hit-area sizing below so the
-// tap target can be generous without the piece itself looking oversized.
-const RADIUS = 15;
-// A cream "collar" drawn around the token, wider than its own fill. A
-// token's fill is the same hue as its home yard/column, so on those cells
-// the ink outline alone was too thin to keep it from blending in — this
-// gives every token a light ring that reads against any arm color.
-const COLLAR_RADIUS = RADIUS + 3;
-// Invisible hit-area floor/ceiling — bigger than the drawn token so it's
-// easy to tap on a phone. Board.tsx builds each selectable token's actual
-// hit shape as a Voronoi-style territory (see src/lib/hitTerritory.ts):
-// the largest area around it that stays closer to it than to any other
-// selectable token, clamped to this floor/ceiling and to the board edge.
-// Exported so Board's territory math always matches what this component
-// will actually render.
-export const MIN_HIT_RADIUS = COLLAR_RADIUS;
-export const MAX_HIT_RADIUS = 46;
-const DEFAULT_HIT_RADIUS = 27;
+// Every other measurement below is a fraction of this baseline (the
+// design's original fixed 18px collar radius) — Board.tsx now passes the
+// actual `radius` a token should render at (its outer, collar edge, sized
+// to match the board's cell), and everything scales off that via `k`
+// rather than staying pinned to the original absolute pixel values.
+const BASE_COLLAR_RADIUS = 18;
 
 function setCursor(e: Konva.KonvaEventObject<Event>, cursor: string) {
   const container = e.target.getStage()?.container();
@@ -41,6 +29,10 @@ type TokenProps = {
   offsetY?: number;
   color: string;
   selectable: boolean;
+  // Outer (collar) radius this token should render at — see Board.tsx,
+  // which sizes it to the board's own cell so a token's diameter matches
+  // a cell's.
+  radius: number;
   // Flattened [x0, y0, x1, y1, ...] polygon points, in this token's own
   // local space, for its Voronoi territory (see Board.tsx). Only meaningful
   // (and only ever set) while selectable; falls back to a plain circle
@@ -58,6 +50,7 @@ export default function Token({
   offsetY = 0,
   color,
   selectable,
+  radius,
   hitPoints,
   onTap,
 }: TokenProps) {
@@ -69,6 +62,11 @@ export default function Token({
   // contrast). Growing and shrinking the whole piece is much harder to miss
   // at a glance, and doesn't depend on hue contrast at all.
   const pulseScale = usePulse(selectable, 1, 1.22, 700);
+
+  const k = radius / BASE_COLLAR_RADIUS;
+  const collarRadius = radius;
+  const innerRadius = 15 * k;
+  const defaultHitRadius = 27 * k;
 
   return (
     <Group
@@ -91,31 +89,31 @@ export default function Token({
       {hitPoints && hitPoints.length >= 6 ? (
         <Line points={hitPoints} closed fill={color} opacity={0} />
       ) : (
-        <Circle radius={DEFAULT_HIT_RADIUS} fill={color} opacity={0} />
+        <Circle radius={defaultHitRadius} fill={color} opacity={0} />
       )}
-      <Ellipse radiusX={10} radiusY={3.5} y={8} fill={INK} opacity={0.25} />
+      <Ellipse radiusX={10 * k} radiusY={3.5 * k} y={8 * k} fill={INK} opacity={0.25} />
       <Circle
-        radius={COLLAR_RADIUS}
+        radius={collarRadius}
         fill={CREAM}
         stroke={selectable ? GOLD : INK}
-        strokeWidth={selectable ? 3 : 2}
+        strokeWidth={(selectable ? 3 : 2) * k}
         shadowColor="black"
-        shadowBlur={5}
-        shadowOffset={{ x: 0, y: 3 }}
+        shadowBlur={5 * k}
+        shadowOffset={{ x: 0, y: 3 * k }}
         shadowOpacity={0.35}
       />
       <Circle
-        radius={RADIUS}
-        fillRadialGradientStartPoint={{ x: -4, y: -5 }}
+        radius={innerRadius}
+        fillRadialGradientStartPoint={{ x: -4 * k, y: -5 * k }}
         fillRadialGradientStartRadius={0}
-        fillRadialGradientEndPoint={{ x: -2, y: -3 }}
-        fillRadialGradientEndRadius={18}
+        fillRadialGradientEndPoint={{ x: -2 * k, y: -3 * k }}
+        fillRadialGradientEndRadius={18 * k}
         fillRadialGradientColorStops={[0, "#ffffff", 0.25, color, 1, color]}
         stroke={INK}
-        strokeWidth={2}
+        strokeWidth={2 * k}
       />
-      <Circle radius={6.5} y={-1} fill={color} stroke={INK} strokeWidth={1.5} />
-      <Ellipse radiusX={3.5} radiusY={2.5} x={-4} y={-5} fill="white" opacity={0.8} />
+      <Circle radius={6.5 * k} y={-1 * k} fill={color} stroke={INK} strokeWidth={1.5 * k} />
+      <Ellipse radiusX={3.5 * k} radiusY={2.5 * k} x={-4 * k} y={-5 * k} fill="white" opacity={0.8} />
     </Group>
   );
 }

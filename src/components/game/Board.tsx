@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Rect, Circle, Line, Star, Group, Path, Text } from "react-konva";
 import { buildBoardLayout, tokenPixelPosition, isSafeGlobalCell } from "@/game/board";
 import { placementFor } from "@/game/engine";
-import Token, { MIN_HIT_RADIUS, MAX_HIT_RADIUS } from "@/components/game/Token";
+import Token from "@/components/game/Token";
 import { voronoiTerritory } from "@/lib/hitTerritory";
 import type { GameState } from "@/types/game";
 
@@ -79,6 +79,15 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
     layout.ringCells[1].y - layout.ringCells[0].y
   );
   const CELL = pitch * 0.94;
+  // A token's diameter matches a cell's — see Token.tsx, which scales its
+  // whole design off this outer (collar) radius. Everything that used to
+  // be sized relative to the old fixed token radius (the tap-target
+  // ceiling, the fan-out spread below) scales with it too, at the same
+  // ratio the original fixed pixel values had to the original fixed
+  // 18px collar radius.
+  const TOKEN_RADIUS = CELL / 2;
+  const MIN_HIT_RADIUS = TOKEN_RADIUS;
+  const MAX_HIT_RADIUS = TOKEN_RADIUS * (46 / 18);
 
   // Group tokens sharing (roughly) the same cell so they fan out instead of
   // fully overlapping.
@@ -102,7 +111,7 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
   // remounts the Token and resets its in-flight step animation mid-hop.
   const spreadByKey = new Map<string, { offsetX: number; offsetY: number }>();
   groups.forEach((group) => {
-    const spread = group.length > 1 ? 8 : 0;
+    const spread = group.length > 1 ? TOKEN_RADIUS * (8 / 18) : 0;
     group.forEach((t, i) => {
       const offsetAngle = (i / group.length) * Math.PI * 2;
       spreadByKey.set(t.key, { offsetX: Math.cos(offsetAngle) * spread, offsetY: Math.sin(offsetAngle) * spread });
@@ -358,6 +367,7 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
                 offsetY={offsetY}
                 color={arm.color.hex}
                 selectable={selectable}
+                radius={TOKEN_RADIUS}
                 hitPoints={hitPointsByKey.get(t.key)}
                 onTap={() => onTokenTap(t.seat.id, t.tokenIndex)}
               />
