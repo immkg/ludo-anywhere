@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Rect, Circle, Line, Star } from "react-konva";
 import { buildBoardLayout, tokenPixelPosition, isSafeGlobalCell } from "@/game/board";
-import Token from "@/components/game/Token";
+import Token, { MIN_HIT_RADIUS, MAX_HIT_RADIUS } from "@/components/game/Token";
+import { voronoiTerritory } from "@/lib/hitTerritory";
 import type { GameState } from "@/types/game";
 
 const INK = "#2B2016";
@@ -107,6 +108,44 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
   const gridMargin = CELL * 0.85;
   const gridMin = Math.min(...layout.arms.flatMap((a) => [a.block.x, a.block.y]));
   const gridMax = Math.max(...layout.arms.flatMap((a) => [a.block.x + a.block.width, a.block.y + a.block.height]));
+  const boardBounds = {
+    left: gridMin - gridMargin,
+    right: gridMax + gridMargin,
+    top: gridMin - gridMargin,
+    bottom: gridMax + gridMargin,
+  };
+
+  // Only selectable tokens actually listen for taps (see Token's
+  // `listening={selectable}`), so a selectable token's tap target only ever
+  // needs to steer clear of *other selectable* tokens' territories —
+  // everything else is invisible to Konva's hit test regardless of overlap.
+  // Each one gets the largest area that's still closer to it than to any
+  // other legal-move chip (a Voronoi cell), capped by an outer reach and
+  // the board edge — see src/lib/hitTerritory.ts for the geometry. A chip
+  // off on its own claims far more room than one boxed in by neighbors, and
+  // unevenly so: it reaches further specifically toward whichever side is
+  // actually open.
+  const selectablePoints = placed
+    .filter((t) => isMyTurn && t.seat.id === currentSeatId && validMoves.includes(t.tokenIndex))
+    .map((t) => {
+      const { offsetX, offsetY } = spreadByKey.get(t.key)!;
+      return { key: t.key, x: t.x + offsetX, y: t.y + offsetY };
+    });
+  const hitPointsByKey = new Map<string, number[]>();
+  selectablePoints.forEach((point) => {
+    const others = selectablePoints.filter((other) => other.key !== point.key);
+    const territory = voronoiTerritory(point, others, {
+      minRadius: MIN_HIT_RADIUS,
+      maxRadius: MAX_HIT_RADIUS,
+      bounds: boardBounds,
+    });
+    // Local space, relative to the token's own center — Token renders this
+    // inside a Group already positioned at (point.x, point.y).
+    hitPointsByKey.set(
+      point.key,
+      territory.flatMap((p) => [p.x - point.x, p.y - point.y])
+    );
+  });
 
   return (
     <div ref={containerRef} className="flex h-full w-full items-center justify-center touch-none select-none">
@@ -268,6 +307,7 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
                 offsetY={offsetY}
                 color={arm.color.hex}
                 selectable={selectable}
+                hitPoints={hitPointsByKey.get(t.key)}
                 onTap={() => onTokenTap(t.seat.id, t.tokenIndex)}
               />
             );

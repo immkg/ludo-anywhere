@@ -7,6 +7,7 @@ import { createGame, rollDice, moveToken, getValidMoves, pickAutoMoveToken } fro
 import { armForSeatIndex, colorForArm, YARD, finished as finishLine, trackSteps } from "@/game/board";
 import { cn } from "@/lib/utils";
 import Dice from "@/components/game/Dice";
+import DiceLabel from "@/components/game/DiceLabel";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import Button from "@/components/ui/Button";
 import NumberPicker from "@/components/ui/NumberPicker";
@@ -44,6 +45,7 @@ function createTestSetup(count: number) {
 // demand (an exact dice value, an arbitrary token position, an instant win).
 export default function TestModeView() {
   const [{ seats, game }, setState] = useState(() => createTestSetup(4));
+  const [isDiceRolling, setIsDiceRolling] = useState(false);
 
   const currentSeat = game.seats[game.currentSeatIndex] ?? null;
   const validMoves = currentSeat ? getValidMoves(game, currentSeat.id) : [];
@@ -153,12 +155,23 @@ export default function TestModeView() {
           </div>
         )}
 
-        <div className="flex shrink-0 items-center justify-between px-4">
+        <div className="relative flex shrink-0 items-center justify-between px-4">
           <PlayerCorner
             seat={seatByArm.get(0) ?? null}
             avatarFirst
             isTurn={seatByArm.get(0)?.id === currentSeat?.id}
           />
+          {/* Absolutely centered so it never competes with the corners for
+              row width — placed inline instead, a long name could squeeze
+              its corner enough to wrap onto a second line. */}
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <DiceLabel
+              canRoll={canRoll}
+              canMove={canMove}
+              isRolling={isDiceRolling}
+              color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+            />
+          </div>
           <PlayerCorner
             seat={seatByArm.get(1) ?? null}
             avatarFirst={false}
@@ -176,27 +189,29 @@ export default function TestModeView() {
           />
         </div>
 
-        <div className="flex shrink-0 items-center justify-between px-4">
+        <div className="relative flex min-h-16 shrink-0 items-center justify-between px-4">
           <PlayerCorner
             seat={seatByArm.get(3) ?? null}
             avatarFirst
             isTurn={seatByArm.get(3)?.id === currentSeat?.id}
           />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="pointer-events-auto">
+              <Dice
+                lastRoll={game.lastRoll}
+                rollSeq={game.rollSeq}
+                canRoll={canRoll}
+                onRoll={handleRoll}
+                canMove={canMove}
+                color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+                onRollingChange={setIsDiceRolling}
+              />
+            </div>
+          </div>
           <PlayerCorner
             seat={seatByArm.get(2) ?? null}
             avatarFirst={false}
             isTurn={seatByArm.get(2)?.id === currentSeat?.id}
-          />
-        </div>
-
-        <div className="flex shrink-0 items-center justify-center px-4">
-          <Dice
-            lastRoll={game.lastRoll}
-            rollSeq={game.rollSeq}
-            canRoll={canRoll}
-            onRoll={handleRoll}
-            canMove={canMove}
-            color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
           />
         </div>
       </div>

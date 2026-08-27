@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { usePulse } from "@/hooks/useAnimatedPoint";
 
 const MIN_SPIN_MS = 650;
 const SPIN_LOOP_SECONDS = 0.5;
@@ -107,9 +106,13 @@ type DiceProps = {
   // the dice keeps reading as "this is so-and-so's turn" through bonus
   // rolls too, not just the instant right after a roll.
   color: string;
+  // Mirrors isRolling out to the parent — the "Roll"/"Move" label now lives
+  // up in the player-name row (see DiceLabel), separate from this cube, but
+  // still needs to hide for the same window the spin animation is playing.
+  onRollingChange?: (isRolling: boolean) => void;
 };
 
-export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, color }: DiceProps) {
+export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, color, onRollingChange }: DiceProps) {
   const [isRolling, setIsRolling] = useState(false);
   const [orientation, setOrientation] = useState(() => LANDING_ORIENTATION[lastRoll ?? 1]);
   const prevRollSeqRef = useRef(rollSeq);
@@ -151,6 +154,10 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
     };
   }, []);
 
+  useEffect(() => {
+    onRollingChange?.(isRolling);
+  }, [isRolling, onRollingChange]);
+
   // Ref so the auto-roll timer doesn't restart on every re-render — the
   // parent passes a fresh onRoll closure each time it renders.
   const onRollRef = useRef(onRoll);
@@ -163,13 +170,6 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
     const timer = setTimeout(() => onRollRef.current(), AUTO_ROLL_MS);
     return () => clearTimeout(timer);
   }, [canRoll, isRolling]);
-
-  // Same "you need to act" pulse used on movable tokens, applied here while
-  // the dice sits disabled waiting on a token tap — set directly (not
-  // through framer's animate/transition) so it stays a crisp, uninterrupted
-  // breathing loop instead of getting smoothed by the cube's own landing
-  // transition.
-  const pulseScale = usePulse(canMove && !isRolling, 1, 1.15, 900);
 
   function handleClick() {
     if (!canRoll || isRolling) return;
@@ -217,25 +217,7 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
         </svg>
       )}
 
-      <AnimatePresence>
-        {canRoll && !isRolling && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl border-2 bg-surface text-xs font-bold uppercase tracking-wide"
-            style={{ borderColor: color, color }}
-          >
-            Roll
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div
-        className="relative h-full w-full"
-        style={{ transform: `scale(${pulseScale})`, transformStyle: "preserve-3d" }}
-      >
+      <div className="relative h-full w-full" style={{ transformStyle: "preserve-3d" }}>
         <motion.div
           className="relative h-full w-full"
           style={{ transformStyle: "preserve-3d" }}

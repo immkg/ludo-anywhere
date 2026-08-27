@@ -1,14 +1,16 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useGame } from "@/hooks/useGame";
+import { useGameStore } from "@/store/useGameStore";
 import { rollDice as emitRollDice, moveToken as emitMoveToken } from "@/lib/socketActions";
 import { colorForArm } from "@/game/board";
-import { pickAutoMoveToken } from "@/game/engine";
+import { pickAutoMoveToken, moveToken as applyMoveToken } from "@/game/engine";
 import Dice from "@/components/game/Dice";
+import DiceLabel from "@/components/game/DiceLabel";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import Button from "@/components/ui/Button";
 import type { Room, Seat } from "@/types/room";
@@ -24,6 +26,8 @@ const AUTO_MOVE_MS = 15000;
 export default function GameView({ room }: { room: Room }) {
   const router = useRouter();
   const { game, currentSeat, isMyTurn, validMoves } = useGame();
+  const setGame = useGameStore((s) => s.setGame);
+  const [isDiceRolling, setIsDiceRolling] = useState(false);
 
   // If a player doesn't tap a token in time, move one for them: prefer a
   // capture, then a move that lands safe, then the token furthest along
@@ -78,14 +82,32 @@ export default function GameView({ room }: { room: Room }) {
     emitRollDice(room.code, currentSeat.id);
   };
 
+  // Apply the move locally right away — engine.moveToken is the same pure,
+  // deterministic function the server runs, so this renders the token's
+  // motion instantly instead of waiting on a round trip. The emit still goes
+  // out so the server (source of truth) can broadcast the authoritative
+  // state, which silently reconciles anything that drifts (dropped socket
+  // message, reconnect, etc).
   const handleTokenTap = (seatId: string, tokenIndex: number) => {
+    setGame(applyMoveToken(game, seatId, tokenIndex));
     emitMoveToken(room.code, seatId, tokenIndex);
   };
 
   return (
     <div className="mx-auto flex h-dvh w-full flex-col gap-4 py-4">
-      <div className="flex shrink-0 items-center justify-between px-4">
+      <div className="relative flex shrink-0 items-center justify-between px-4">
         <PlayerCorner seat={seatByArm.get(0) ?? null} avatarFirst isTurn={seatByArm.get(0)?.id === currentSeat?.id} />
+        {/* Absolutely centered so it never competes with the corners for
+            row width — placed inline instead, a long name could squeeze its
+            corner enough to wrap onto a second line. */}
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <DiceLabel
+            canRoll={canRoll}
+            canMove={canMove}
+            isRolling={isDiceRolling}
+            color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+          />
+        </div>
         <PlayerCorner
           seat={seatByArm.get(1) ?? null}
           avatarFirst={false}
@@ -114,23 +136,25 @@ export default function GameView({ room }: { room: Room }) {
             : ""}
       </p>
 
-      <div className="flex shrink-0 items-center justify-between px-4">
+      <div className="relative flex min-h-16 shrink-0 items-center justify-between px-4">
         <PlayerCorner seat={seatByArm.get(3) ?? null} avatarFirst isTurn={seatByArm.get(3)?.id === currentSeat?.id} />
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="pointer-events-auto">
+            <Dice
+              lastRoll={game.lastRoll}
+              rollSeq={game.rollSeq}
+              canRoll={canRoll}
+              onRoll={handleRoll}
+              canMove={canMove}
+              color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+              onRollingChange={setIsDiceRolling}
+            />
+          </div>
+        </div>
         <PlayerCorner
           seat={seatByArm.get(2) ?? null}
           avatarFirst={false}
           isTurn={seatByArm.get(2)?.id === currentSeat?.id}
-        />
-      </div>
-
-      <div className="flex shrink-0 items-center justify-center px-4">
-        <Dice
-          lastRoll={game.lastRoll}
-          rollSeq={game.rollSeq}
-          canRoll={canRoll}
-          onRoll={handleRoll}
-          canMove={canMove}
-          color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
         />
       </div>
     </div>

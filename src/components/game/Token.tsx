@@ -1,7 +1,7 @@
 "use client";
 
 import type Konva from "konva";
-import { Circle, Ellipse, Group } from "react-konva";
+import { Circle, Ellipse, Group, Line } from "react-konva";
 import { usePulse } from "@/hooks/useAnimatedPoint";
 import { useSteppedToken } from "@/hooks/useSteppedToken";
 
@@ -9,18 +9,24 @@ const INK = "#2B2016";
 const GOLD = "#FFD400";
 const CREAM = "#FFFDF6";
 
-// Visible token radius. Kept separate from HIT_RADIUS below so the tap
-// target can be generous without the piece itself looking oversized.
+// Visible token radius. Kept separate from the hit-area sizing below so the
+// tap target can be generous without the piece itself looking oversized.
 const RADIUS = 15;
 // A cream "collar" drawn around the token, wider than its own fill. A
 // token's fill is the same hue as its home yard/column, so on those cells
 // the ink outline alone was too thin to keep it from blending in — this
 // gives every token a light ring that reads against any arm color.
 const COLLAR_RADIUS = RADIUS + 3;
-// Invisible hit-area radius — bigger than the drawn token so it's easy to
-// tap on a phone. Stays under half the ring-cell pitch (~26 board units)
-// so neighboring cells' tokens don't steal each other's taps.
-const HIT_RADIUS = 24;
+// Invisible hit-area floor/ceiling — bigger than the drawn token so it's
+// easy to tap on a phone. Board.tsx builds each selectable token's actual
+// hit shape as a Voronoi-style territory (see src/lib/hitTerritory.ts):
+// the largest area around it that stays closer to it than to any other
+// selectable token, clamped to this floor/ceiling and to the board edge.
+// Exported so Board's territory math always matches what this component
+// will actually render.
+export const MIN_HIT_RADIUS = COLLAR_RADIUS;
+export const MAX_HIT_RADIUS = 46;
+const DEFAULT_HIT_RADIUS = 27;
 
 function setCursor(e: Konva.KonvaEventObject<Event>, cursor: string) {
   const container = e.target.getStage()?.container();
@@ -35,6 +41,12 @@ type TokenProps = {
   offsetY?: number;
   color: string;
   selectable: boolean;
+  // Flattened [x0, y0, x1, y1, ...] polygon points, in this token's own
+  // local space, for its Voronoi territory (see Board.tsx). Only meaningful
+  // (and only ever set) while selectable; falls back to a plain circle
+  // otherwise, which is never actually hit-tested since a non-selectable
+  // token's Group doesn't listen for events at all.
+  hitPoints?: number[];
   onTap?: () => void;
 };
 
@@ -46,6 +58,7 @@ export default function Token({
   offsetY = 0,
   color,
   selectable,
+  hitPoints,
   onTap,
 }: TokenProps) {
   const { x: rawX, y: rawY } = useSteppedToken(armIndex, pos, tokenIndex);
@@ -71,8 +84,15 @@ export default function Token({
     >
       {/* Bigger-than-the-token, invisible hit area — Konva still hit-tests
           a shape with opacity 0 as long as it has a fill, so this widens
-          the tap target without changing what's drawn. */}
-      <Circle radius={HIT_RADIUS} fill={color} opacity={0} />
+          the tap target without changing what's drawn. Its own Voronoi
+          territory when one was computed (see Board.tsx), otherwise a
+          plain circle that's never actually hit-tested (selectable=false
+          means the Group itself isn't listening). */}
+      {hitPoints && hitPoints.length >= 6 ? (
+        <Line points={hitPoints} closed fill={color} opacity={0} />
+      ) : (
+        <Circle radius={DEFAULT_HIT_RADIUS} fill={color} opacity={0} />
+      )}
       <Ellipse radiusX={10} radiusY={3.5} y={8} fill={INK} opacity={0.25} />
       <Circle
         radius={COLLAR_RADIUS}

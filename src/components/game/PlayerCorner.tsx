@@ -1,5 +1,6 @@
 import { colorForArm } from "@/game/board";
 import { animalForSeat } from "@/lib/avatar";
+import { cn } from "@/lib/utils";
 import type { Seat } from "@/types/room";
 
 type PlayerCornerProps = {
@@ -22,7 +23,7 @@ export default function PlayerCorner({ seat, avatarFirst, isTurn }: PlayerCorner
   );
   const name = (
     <span
-      className="max-w-[6.5rem] truncate text-sm font-semibold"
+      className={cn("max-w-[6.5rem] truncate text-sm font-semibold", !avatarFirst && "text-right")}
       style={{ color: color.hex }}
       title={seat.name}
     >
