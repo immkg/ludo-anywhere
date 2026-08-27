@@ -19,6 +19,8 @@ export function createGame(seats) {
     })),
     currentSeatIndex: 0,
     diceValue: null,
+    lastRoll: null,
+    rollSeq: 0,
     consecutiveSixes: 0,
     status: "playing",
     winnerSeatId: null,
@@ -75,11 +77,13 @@ export function rollDice(state) {
   const dice = Math.floor(Math.random() * 6) + 1;
   const consecutiveSixes = dice === 6 ? state.consecutiveSixes + 1 : 0;
 
+  const rollSeq = state.rollSeq + 1;
+
   if (consecutiveSixes >= 3) {
-    return endTurn({ ...state, diceValue: dice, consecutiveSixes });
+    return endTurn({ ...state, diceValue: dice, lastRoll: dice, rollSeq, consecutiveSixes });
   }
 
-  const rolled = { ...state, diceValue: dice, consecutiveSixes };
+  const rolled = { ...state, diceValue: dice, lastRoll: dice, rollSeq, consecutiveSixes };
   const seat = getCurrentSeat(rolled);
   const hasMove = getValidMoves(rolled, seat.id).length > 0;
   return hasMove ? rolled : endTurn(rolled);

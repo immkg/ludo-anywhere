@@ -70,7 +70,7 @@ export default function GameView({ room, mySeats }: { room: Room; mySeats: Owned
       />
 
       <div className="flex items-center justify-center">
-        <Dice value={game.diceValue} canRoll={canRoll} onRoll={handleRoll} />
+        <Dice lastRoll={game.lastRoll} rollSeq={game.rollSeq} canRoll={canRoll} onRoll={handleRoll} />
       </div>
     </div>
   );
