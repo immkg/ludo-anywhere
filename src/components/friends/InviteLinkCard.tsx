@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Button from "@/components/ui/Button";
 import { shareOnWhatsApp } from "@/lib/share";
+import { trackShare } from "@/lib/socketActions";
 
 export default function InviteLinkCard() {
   const [url, setUrl] = useState<string | null>(null);
@@ -36,7 +37,11 @@ export default function InviteLinkCard() {
         </Button>
         <Button
           className="flex-1"
-          onClick={() => url && shareOnWhatsApp(`Add me as a friend on MyLudo! ${url}`)}
+          onClick={() => {
+            if (!url) return;
+            trackShare("invite_link_shared");
+            shareOnWhatsApp(`Add me as a friend on MyLudo! ${url}`);
+          }}
           disabled={!url}
         >
           WhatsApp

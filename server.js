@@ -145,6 +145,17 @@ app.prepare().then(() => {
       })
     );
 
+    // Fire-and-forget analytics for client-side actions that never touch a
+    // room (a share-button tap) — no ack, and the type is allowlisted so a
+    // compromised/hand-crafted client can't write arbitrary event rows.
+    const TRACKABLE_EVENTS = new Set(["room_shared", "invite_link_shared"]);
+    socket.on("analytics:track", async ({ type, properties } = {}) => {
+      if (!TRACKABLE_EVENTS.has(type)) return;
+      const userId =
+        socket.data.userId ?? (await getAuthenticatedUserId(socket.handshake.headers.cookie));
+      logEvent(type, userId ?? null, properties ?? {});
+    });
+
     socket.on(
       "room:invite",
       withAck(async ({ roomCode, friendUserId }, ack) => {
@@ -268,6 +279,15 @@ app.prepare().then(() => {
           seats: created.map((s) => ({ id: s.id, token: s.token, armIndex: s.armIndex, name: s.name })),
         });
         ack?.({});
+        // This is the only place a genuinely new person (not already
+        // seated) actually lands a seat — room:join stores the request as
+        // `pending` and returns early without logging anything (see
+        // above), so without this the entire "shared a room link, someone
+        // new joined" path was invisible in AnalyticsEvent.
+        logEvent("player_joined", toUserId, {
+          roomCode: room.code,
+          source: pending?.claimSeatId ? "claim" : pending ? "link" : "friend_request",
+        });
       })
     );
 

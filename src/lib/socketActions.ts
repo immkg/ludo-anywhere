@@ -90,6 +90,13 @@ export function inviteFriendToRoom(roomCode: string, friendUserId: string) {
   return emitWithAck("room:invite", { roomCode, friendUserId });
 }
 
+// Fire-and-forget analytics for a share-button tap — no ack, since the UI
+// never needs to know whether it landed. `type` must be one of the values
+// server.js's TRACKABLE_EVENTS allowlists, or the server just drops it.
+export function trackShare(type: "room_shared" | "invite_link_shared", properties?: Record<string, unknown>) {
+  getSocket().emit("analytics:track", { type, properties });
+}
+
 export function requestToJoinRoom(roomCode: string) {
   return emitWithAck("room:joinRequest", { roomCode });
 }

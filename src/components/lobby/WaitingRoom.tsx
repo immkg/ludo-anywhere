@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { colorForArm } from "@/game/board";
-import { startGame, inviteFriendToRoom, removeSeat, joinRoom } from "@/lib/socketActions";
+import { startGame, inviteFriendToRoom, removeSeat, joinRoom, trackShare } from "@/lib/socketActions";
 import { shareOnWhatsApp, roomJoinUrl } from "@/lib/share";
 import { saveOwnedSeats } from "@/lib/identity";
 import { useFriends } from "@/hooks/useFriends";
@@ -73,7 +73,10 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
           </p>
         )}
         <button
-          onClick={() => shareOnWhatsApp(`Join my Ludo room on MyLudo! ${roomJoinUrl(room.code)}`)}
+          onClick={() => {
+            trackShare("room_shared", { roomCode: room.code });
+            shareOnWhatsApp(`Join my Ludo room on MyLudo! ${roomJoinUrl(room.code)}`);
+          }}
           className="mt-2 text-xs font-semibold text-accent underline"
         >
           Share on WhatsApp

@@ -43,3 +43,6 @@ next-env.d.ts
 
 # claude code local state (worktrees, session scratch)
 /.claude/
+
+# local ad-hoc scripts (not for commit)
+/analytic.mjs
