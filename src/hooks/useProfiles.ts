@@ -49,5 +49,19 @@ export function useProfiles() {
     setProfiles((prev) => prev.filter((p) => p.id !== profileId));
   }, []);
 
-  return { profiles, loading, createProfile, removeProfile };
+  const renameProfile = useCallback(async (profileId: string, name: string) => {
+    const res = await fetch(`/api/profiles/${profileId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not rename player");
+
+    const profile = data.profile as PlayerProfile;
+    setProfiles((prev) => prev.map((p) => (p.id === profile.id ? profile : p)));
+    return profile;
+  }, []);
+
+  return { profiles, loading, createProfile, removeProfile, renameProfile };
 }
