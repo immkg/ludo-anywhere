@@ -42,9 +42,13 @@ type PlayerCornerProps = {
   // Their tokens stay on the board (and stay capturable); they just get
   // no turns and read as dimmed here, same as a disconnected seat.
   suspended?: boolean;
+  // Set (host only — see GameView.tsx) to make this seat tappable, opening
+  // that player's manage-player actions instead of a dedicated separate
+  // "Manage players" control.
+  onClick?: () => void;
 };
 
-export default function PlayerCorner({ seat, avatarFirst, isTurn, placement, suspended }: PlayerCornerProps) {
+export default function PlayerCorner({ seat, avatarFirst, isTurn, placement, suspended, onClick }: PlayerCornerProps) {
   if (!seat) return <div className="h-9" />;
 
   const color = colorForArm(seat.armIndex);
@@ -70,8 +74,11 @@ export default function PlayerCorner({ seat, avatarFirst, isTurn, placement, sus
     </span>
   );
 
+  const Wrapper = onClick ? "button" : "div";
+
   return (
-    <div
+    <Wrapper
+      onClick={onClick}
       className="flex items-center gap-2 rounded-full border px-2 py-1 transition-shadow"
       style={{
         borderColor: isTurn ? color.hex : "transparent",
@@ -90,6 +97,6 @@ export default function PlayerCorner({ seat, avatarFirst, isTurn, placement, sus
           {avatar}
         </>
       )}
-    </div>
+    </Wrapper>
   );
 }

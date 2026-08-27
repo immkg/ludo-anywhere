@@ -7,7 +7,6 @@ import { createGame, rollDice, moveToken, getValidMoves, pickAutoMoveToken, plac
 import { armForSeatIndex, colorForArm, YARD, finished as finishLine, trackSteps } from "@/game/board";
 import { cn } from "@/lib/utils";
 import Dice from "@/components/game/Dice";
-import DiceLabel from "@/components/game/DiceLabel";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import Button from "@/components/ui/Button";
 import NumberPicker from "@/components/ui/NumberPicker";
@@ -45,7 +44,6 @@ function createTestSetup(count: number) {
 // demand (an exact dice value, an arbitrary token position, an instant win).
 export default function TestModeView() {
   const [{ seats, game }, setState] = useState(() => createTestSetup(4));
-  const [isDiceRolling, setIsDiceRolling] = useState(false);
 
   const currentSeat = game.seats[game.currentSeatIndex] ?? null;
   const validMoves = currentSeat ? getValidMoves(game, currentSeat.id) : [];
@@ -144,7 +142,7 @@ export default function TestModeView() {
 
   return (
     <div className="mx-auto flex w-full flex-col">
-      <div className="flex h-dvh w-full flex-col gap-4 py-4">
+      <div className="flex h-dvh w-full flex-col gap-2 overflow-hidden py-2">
         <div className="mx-4 flex shrink-0 items-center justify-between rounded-xl border border-dashed border-accent/60 bg-accent/10 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-accent">
           <span>Test mode — dev only</span>
           <Link href="/" className="underline">
@@ -177,17 +175,6 @@ export default function TestModeView() {
             isTurn={seatByArm.get(0)?.id === currentSeat?.id}
             placement={placementForArm(seatByArm.get(0))}
           />
-          {/* Absolutely centered so it never competes with the corners for
-              row width — placed inline instead, a long name could squeeze
-              its corner enough to wrap onto a second line. */}
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <DiceLabel
-              canRoll={canRoll}
-              canMove={canMove}
-              isRolling={isDiceRolling}
-              color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
-            />
-          </div>
           <PlayerCorner
             seat={seatByArm.get(1) ?? null}
             avatarFirst={false}
@@ -222,7 +209,6 @@ export default function TestModeView() {
                 onRoll={handleRoll}
                 canMove={canMove}
                 color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
-                onRollingChange={setIsDiceRolling}
               />
             </div>
           </div>

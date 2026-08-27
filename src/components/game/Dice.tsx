@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { playDiceRoll } from "@/lib/sound";
 
 const MIN_SPIN_MS = 650;
 const SPIN_LOOP_SECONDS = 0.5;
@@ -118,6 +119,18 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
   const prevRollSeqRef = useRef(rollSeq);
   const spinStartRef = useRef(0);
   const landTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The cube's own face color lags the incoming `color` prop while a roll
+  // is in flight: the state update that confirms a roll (rollSeq) often
+  // also carries the turn having already advanced to the next player (a
+  // bonus-less move ends the turn in the same broadcast), so `color` can
+  // switch to the next player before this cube has finished showing the
+  // roll that just happened. Only adopts the new color once the spin/land
+  // animation actually finishes — the outer countdown ring below always
+  // tracks `color` directly, since that's genuinely whose turn it is now.
+  const [cubeColor, setCubeColor] = useState(color);
+  useEffect(() => {
+    if (!isRolling) setCubeColor(color);
+  }, [color, isRolling]);
 
   function spinFrom(prev: { x: number; y: number }) {
     return { x: prev.x + 360 * 3, y: prev.y + 360 * 4 };
@@ -136,6 +149,7 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
       spinStartRef.current = Date.now();
       setIsRolling(true);
       setOrientation(spinFrom);
+      playDiceRoll();
     }
 
     const target = LANDING_ORIENTATION[lastRoll ?? 1];
@@ -176,6 +190,7 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
     spinStartRef.current = Date.now();
     setIsRolling(true);
     setOrientation(spinFrom);
+    playDiceRoll();
     onRoll();
   }
 
@@ -237,7 +252,7 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
           }}
         >
           {[1, 2, 3, 4, 5, 6].map((value) => (
-            <Face key={value} value={value} color={color} />
+            <Face key={value} value={value} color={cubeColor} />
           ))}
         </motion.div>
       </div>

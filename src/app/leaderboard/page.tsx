@@ -11,12 +11,17 @@ export default async function LeaderboardPage() {
 
   const players = await prisma.gamePlayer.findMany({
     where: { profileId: { not: null } },
-    include: { profile: true },
+    include: { profile: true, game: true },
   });
 
   const byProfile = new Map<string, Row>();
   for (const p of players) {
     if (!p.profile) continue;
+    // A game the host ended early never resolved for whoever hadn't
+    // already finished — no win, no loss, so it doesn't count as a game
+    // played for them either (see engine.js's endGame).
+    if (p.game.endedEarly && !p.isWinner) continue;
+
     const row = byProfile.get(p.profileId as string) ?? {
       id: p.profileId as string,
       name: p.profile.name,

@@ -71,6 +71,10 @@ export function transferHost(roomCode: string, toSeatId: string) {
   return emitWithAck("room:transferHost", { roomCode, toSeatId });
 }
 
+export function endGame(roomCode: string) {
+  return emitWithAck("room:endGame", { roomCode });
+}
+
 export function claimSeat(roomCode: string, seatId: string, profileId: string) {
   return emitWithAck("room:claimSeat", { roomCode, seatId, profileId });
 }

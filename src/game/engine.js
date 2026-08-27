@@ -25,6 +25,7 @@ export function createGame(seats) {
     consecutiveSixes: 0,
     status: "playing",
     winnerSeatId: null,
+    endedEarly: false,
     // Ordered list of seatIds as they finish — 1st place first. Play
     // continues past the first finish; the game only truly ends once at
     // most one seat is left unfinished (see moveToken), so a 4-seat game
@@ -35,13 +36,15 @@ export function createGame(seats) {
 }
 
 // 1-indexed finishing rank for a seat: its position in `placements`, or
-// (once the game has ended) state.seats.length for whichever seat never
-// finished — the always-exactly-one loser. Returns null for an
-// unfinished seat in a game that's still playing (no rank yet).
+// (once the game has ended naturally) state.seats.length for whichever seat
+// never finished — the always-exactly-one loser. Returns null for an
+// unfinished seat in a game that's still playing (no rank yet), and also
+// for one that never finished in a game the host ended early (see
+// endGame) — there's no real loser there, just an unresolved seat.
 export function placementFor(state, seatId) {
   const rank = state.placements.indexOf(seatId);
   if (rank !== -1) return rank + 1;
-  return state.status === "finished" ? state.seats.length : null;
+  return state.status === "finished" && !state.endedEarly ? state.seats.length : null;
 }
 
 export function getCurrentSeat(state) {
@@ -269,6 +272,19 @@ export function removeSeatFromGame(state, seatId) {
     return { ...next, status: "finished", winnerSeatId: state.placements[0] ?? null, consecutiveSixes: 0 };
   }
   return state.seats[state.currentSeatIndex]?.id === seatId ? endTurn(next) : next;
+}
+
+// Host-triggered early end: stops the round outright without resolving it
+// as a win or loss for anyone still unfinished — status becomes "finished"
+// (so play stops and the room's normal finish/history flow runs) but
+// `placements` is left exactly as it was, winnerSeatId stays null, and
+// `endedEarly` tells placementFor to return null rather than "last place"
+// for whoever hadn't finished yet. Anyone who *had* already finished
+// keeps their real placement — this only neutralizes the seats the game
+// never actually resolved.
+export function endGame(state) {
+  if (state.status !== "playing") return state;
+  return { ...state, status: "finished", winnerSeatId: null, endedEarly: true, diceValue: null };
 }
 
 // Makes a seat playable again — the opposite of removeSeatFromGame's

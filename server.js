@@ -16,6 +16,7 @@ import {
   midGameSuspendSeat,
   midGameResumeSeat,
   midGameRemoveSeat,
+  midGameEndGame,
   transferHost,
   claimableSeats,
   claimSeat,
@@ -559,6 +560,25 @@ app.prepare().then(() => {
         if (error) return ack?.({ error });
 
         broadcastGame(room);
+        ack?.({});
+      })
+    );
+
+    socket.on(
+      "room:endGame",
+      withAck(async ({ roomCode }, ack) => {
+        const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!callerUserId || hostUserId(room) !== callerUserId) {
+          return ack?.({ error: "Only the host can end the game" });
+        }
+
+        const { error } = midGameEndGame(room);
+        if (error) return ack?.({ error });
+
+        broadcastGame(room);
+        finishRoomIfNeeded(room);
         ack?.({});
       })
     );

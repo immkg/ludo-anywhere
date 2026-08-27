@@ -124,6 +124,12 @@ model Game {
   startedAt    DateTime
   endedAt      DateTime     @default(now())
   winnerSeatId String?
+  // True when the host stopped the game early (see engine.js's endGame)
+  // rather than it finishing naturally — whoever hadn't already finished
+  // gets isWinner: false / placement: null on their GamePlayer row (not a
+  // loss), and the history page reads this flag to label it "Ended early"
+  // instead of "Lost" for those rows.
+  endedEarly   Boolean      @default(false)
   players      GamePlayer[]
 }
 

@@ -1,6 +1,12 @@
 import { randomBytes } from "crypto";
 import { armForSeatIndex } from "../game/board.js";
-import { createGame, suspendSeat as suspendGameSeat, removeSeatFromGame, reactivateSeat } from "../game/engine.js";
+import {
+  createGame,
+  suspendSeat as suspendGameSeat,
+  removeSeatFromGame,
+  reactivateSeat,
+  endGame as endGameInProgress,
+} from "../game/engine.js";
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
 const DISCONNECT_GRACE_MS = 2 * 60 * 1000;
@@ -209,6 +215,17 @@ export function midGameRemoveSeat(room, seatId) {
   if (stillInPlay <= 2) return { error: "A game needs at least 2 players still in it" };
 
   room.game = removeSeatFromGame(room.game, seatId);
+  return { room };
+}
+
+// Host-only: stops the game outright without declaring a winner or a
+// loser — see engine.js's endGame. Unlike midGameRemoveSeat, this doesn't
+// require narrowing down to one seat first; the host can call it any time
+// mid-game, and whoever hadn't already finished just gets a neutral,
+// unresolved result recorded (see history.js/leaderboard).
+export function midGameEndGame(room) {
+  if (!room?.game || room.status !== "playing") return { error: "Game not in progress" };
+  room.game = endGameInProgress(room.game);
   return { room };
 }
 

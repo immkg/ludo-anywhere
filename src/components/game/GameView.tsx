@@ -14,12 +14,12 @@ import {
   resumeSeat,
   removeSeat,
   transferHost,
+  endGame as emitEndGame,
   rematch,
 } from "@/lib/socketActions";
 import { colorForArm } from "@/game/board";
 import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor } from "@/game/engine";
 import Dice from "@/components/game/Dice";
-import DiceLabel from "@/components/game/DiceLabel";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
@@ -40,8 +40,7 @@ export default function GameView({ room }: { room: Room }) {
   const setGame = useGameStore((s) => s.setGame);
   const mySeats = useRoomStore((s) => s.mySeats);
   const isHost = !!room.hostSeatId && mySeats.some((s) => s.id === room.hostSeatId);
-  const [isDiceRolling, setIsDiceRolling] = useState(false);
-  const [managePlayersOpen, setManagePlayersOpen] = useState(false);
+  const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
   const [rematchLoading, setRematchLoading] = useState(false);
   const [rematchError, setRematchError] = useState<string | null>(null);
 
@@ -100,7 +99,7 @@ export default function GameView({ room }: { room: Room }) {
         animate={{ opacity: 1 }}
         className="flex min-h-dvh flex-col items-center justify-center gap-6 px-8 text-center"
       >
-        <p className="text-ink-muted">Results</p>
+        <p className="text-ink-muted">{game.endedEarly ? "Game ended early" : "Results"}</p>
         <div className="flex w-full max-w-xs flex-col gap-2">
           {winners.map((r) => (
             <div key={r.seatId} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3">
@@ -114,7 +113,9 @@ export default function GameView({ room }: { room: Room }) {
               key={r.seatId}
               className="flex items-center gap-3 rounded-2xl border border-dashed border-line p-3 opacity-70"
             >
-              <span className="w-5 shrink-0 text-xs font-semibold text-ink-muted">Last</span>
+              <span className="w-5 shrink-0 text-xs font-semibold text-ink-muted">
+                {game.endedEarly ? "—" : "Last"}
+              </span>
               {r.color && <span className="h-8 w-8 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
               <span className="flex-1 truncate text-left font-semibold">{r.name}</span>
             </div>
@@ -162,20 +163,19 @@ export default function GameView({ room }: { room: Room }) {
   };
 
   return (
-    <div className="mx-auto flex h-dvh w-full flex-col gap-4 py-4">
+    <div className="mx-auto flex h-dvh w-full flex-col gap-2 overflow-hidden py-2">
       {isHost && (
         <div className="shrink-0 px-4">
           <IncomingJoinRequests roomCode={room.code} />
-          <button
-            onClick={() => setManagePlayersOpen(true)}
-            className="text-xs font-semibold text-ink-muted underline"
-          >
-            Manage players
-          </button>
         </div>
       )}
-      {managePlayersOpen && (
-        <ManagePlayersPanel room={room} game={game} onClose={() => setManagePlayersOpen(false)} />
+      {selectedSeatId && (
+        <PlayerActionsModal
+          room={room}
+          game={game}
+          seatId={selectedSeatId}
+          onClose={() => setSelectedSeatId(null)}
+        />
       )}
 
       <div className="relative flex shrink-0 items-center justify-between px-4">
@@ -185,24 +185,15 @@ export default function GameView({ room }: { room: Room }) {
           isTurn={seatByArm.get(0)?.id === currentSeat?.id}
           placement={placementForArm(seatByArm.get(0))}
           suspended={suspendedForArm(seatByArm.get(0))}
+          onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
         />
-        {/* Absolutely centered so it never competes with the corners for
-            row width — placed inline instead, a long name could squeeze its
-            corner enough to wrap onto a second line. */}
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <DiceLabel
-            canRoll={canRoll}
-            canMove={canMove}
-            isRolling={isDiceRolling}
-            color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
-          />
-        </div>
         <PlayerCorner
           seat={seatByArm.get(1) ?? null}
           avatarFirst={false}
           isTurn={seatByArm.get(1)?.id === currentSeat?.id}
           placement={placementForArm(seatByArm.get(1))}
           suspended={suspendedForArm(seatByArm.get(1))}
+          onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
         />
       </div>
 
@@ -234,6 +225,7 @@ export default function GameView({ room }: { room: Room }) {
           isTurn={seatByArm.get(3)?.id === currentSeat?.id}
           placement={placementForArm(seatByArm.get(3))}
           suspended={suspendedForArm(seatByArm.get(3))}
+          onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
         />
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div className="pointer-events-auto">
@@ -244,7 +236,6 @@ export default function GameView({ room }: { room: Room }) {
               onRoll={handleRoll}
               canMove={canMove}
               color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
-              onRollingChange={setIsDiceRolling}
             />
           </div>
         </div>
@@ -254,77 +245,126 @@ export default function GameView({ room }: { room: Room }) {
           isTurn={seatByArm.get(2)?.id === currentSeat?.id}
           placement={placementForArm(seatByArm.get(2))}
           suspended={suspendedForArm(seatByArm.get(2))}
+          onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
         />
       </div>
     </div>
   );
 }
 
-// Host-only mid-game controls: pause/resume/remove a seat, or hand off
-// host. A won seat is untouchable; a removed one becomes claimable by
-// someone else (see room:claimSeat) rather than offering any action here.
-function ManagePlayersPanel({
+// Host-only mid-game controls for the one seat just tapped in the player
+// row: pause/resume/remove, or hand off host. A won seat is untouchable;
+// a removed one becomes claimable by someone else (see room:claimSeat)
+// rather than offering any action here.
+function PlayerActionsModal({
   room,
   game,
+  seatId,
   onClose,
 }: {
   room: Room;
   game: GameState;
+  seatId: string;
   onClose: () => void;
 }) {
+  const seat = room.seats.find((s) => s.id === seatId);
+  const [confirmingEnd, setConfirmingEnd] = useState(false);
+  const [endGameLoading, setEndGameLoading] = useState(false);
+  const [endGameError, setEndGameError] = useState<string | null>(null);
+  if (!seat) return null;
+
+  const gameSeat = game.seats.find((s) => s.id === seatId);
+  const won = !!gameSeat?.finished && game.placements.includes(seatId);
+  const removed = !!gameSeat?.finished && !won;
+  const suspended = !!gameSeat?.suspended;
+  const isHostSeat = seatId === room.hostSeatId;
+  const color = gameSeat ? colorForArm(gameSeat.armIndex) : null;
+
+  const handleEndGame = async () => {
+    setEndGameLoading(true);
+    setEndGameError(null);
+    try {
+      await emitEndGame(room.code);
+      onClose();
+    } catch (e) {
+      setEndGameError(e instanceof Error ? e.message : "Could not end the game");
+    } finally {
+      setEndGameLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/40 p-4 sm:items-center">
       <div className="flex w-full max-w-sm flex-col gap-3 rounded-2xl bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <p className="font-semibold">Manage players</p>
-          <button onClick={onClose} className="text-sm font-semibold text-ink-muted underline">
+        <div className="flex items-center gap-2">
+          {color && <span className="h-7 w-7 shrink-0 rounded-full" style={{ backgroundColor: color.hex }} />}
+          <p className="min-w-0 flex-1 truncate font-semibold">
+            {seat.name}
+            {isHostSeat && <span className="ml-1 text-xs font-normal text-ink-muted">(Host)</span>}
+          </p>
+          <button onClick={onClose} className="shrink-0 text-sm font-semibold text-ink-muted underline">
             Close
           </button>
         </div>
-        {room.seats.map((seat) => {
-          const gameSeat = game.seats.find((s) => s.id === seat.id);
-          const won = !!gameSeat?.finished && game.placements.includes(seat.id);
-          const removed = !!gameSeat?.finished && !won;
-          const suspended = !!gameSeat?.suspended;
-          const isHostSeat = seat.id === room.hostSeatId;
 
-          return (
-            <div key={seat.id} className="flex items-center gap-2 rounded-2xl border border-line px-3 py-2">
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {seat.name}
-                {isHostSeat && <span className="ml-1 text-xs font-normal text-ink-muted">(Host)</span>}
-              </span>
-              {won && <span className="text-xs text-ink-muted">Finished</span>}
-              {removed && <span className="text-xs text-ink-muted">Removed</span>}
-              {!won && !removed && (
-                <>
+        {isHostSeat ? (
+          confirmingEnd ? (
+            <>
+              <p className="text-sm text-ink-muted">
+                Play stops for everyone right away. It&rsquo;s saved to history but doesn&rsquo;t count as a
+                win or loss for anyone who hasn&rsquo;t already finished.
+              </p>
+              {endGameError && <p className="text-sm text-accent">{endGameError}</p>}
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setConfirmingEnd(false)} disabled={endGameLoading}>
+                  Cancel
+                </Button>
+                <Button onClick={handleEndGame} disabled={endGameLoading}>
+                  {endGameLoading ? "Ending…" : "End game"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirmingEnd(true)}
+              className="self-start rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+            >
+              End game
+            </button>
+          )
+        ) : (
+          <>
+            {won && <p className="text-sm text-ink-muted">Already finished — nothing to manage.</p>}
+            {removed && <p className="text-sm text-ink-muted">Removed from this game.</p>}
+            {!won && !removed && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => (suspended ? resumeSeat : suspendSeat)(room.code, seatId).catch(() => {})}
+                  className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+                >
+                  {suspended ? "Resume" : "Pause"}
+                </button>
+                <button
+                  onClick={() => {
+                    removeSeat(room.code, seatId).catch(() => {});
+                    onClose();
+                  }}
+                  className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+                >
+                  Remove
+                </button>
+                {seat.connected && !suspended && (
                   <button
-                    onClick={() =>
-                      (suspended ? resumeSeat : suspendSeat)(room.code, seat.id).catch(() => {})
-                    }
-                    className="shrink-0 text-xs font-semibold text-accent underline"
+                    onClick={() => transferHost(room.code, seatId).catch(() => {})}
+                    className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-ink-muted"
                   >
-                    {suspended ? "Resume" : "Pause"}
+                    Make host
                   </button>
-                  <button
-                    onClick={() => removeSeat(room.code, seat.id).catch(() => {})}
-                    className="shrink-0 text-xs font-semibold text-accent underline"
-                  >
-                    Remove
-                  </button>
-                  {!isHostSeat && seat.connected && !suspended && (
-                    <button
-                      onClick={() => transferHost(room.code, seat.id).catch(() => {})}
-                      className="shrink-0 text-xs font-semibold text-ink-muted underline"
-                    >
-                      Make host
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })}
+                )}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

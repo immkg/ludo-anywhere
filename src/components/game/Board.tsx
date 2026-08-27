@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Rect, Circle, Line, Star, Group, Path, Text } from "react-konva";
-import { buildBoardLayout, tokenPixelPosition, isSafeGlobalCell } from "@/game/board";
+import { buildBoardLayout, tokenPixelPosition, isSafeGlobalCell, finished as finishedPos, YARD } from "@/game/board";
 import { placementFor } from "@/game/engine";
 import Token from "@/components/game/Token";
+import { STEP_MS } from "@/hooks/useSteppedToken";
 import { voronoiTerritory } from "@/lib/hitTerritory";
 import type { GameState } from "@/types/game";
 
@@ -69,10 +70,86 @@ function useContainerSize() {
   return [ref, size] as const;
 }
 
+const FINISH_LINE = finishedPos();
+
+// The one token that just moved forward this turn (a captured token also
+// changes, but only ever backward to the yard, so it's excluded here) — the
+// same move used to compute both the capture-retreat delay and which home
+// arrival gets the finish/victory sound.
+function findMover(prevGame: GameState, game: GameState) {
+  for (const prevSeat of prevGame.seats) {
+    const seat = game.seats.find((s) => s.id === prevSeat.id);
+    if (!seat) continue;
+    for (let tokenIndex = 0; tokenIndex < prevSeat.tokens.length; tokenIndex++) {
+      const from = prevSeat.tokens[tokenIndex];
+      const to = seat.tokens[tokenIndex];
+      if (from === to || to === YARD) continue;
+      const hops = from === YARD ? 0 : to - from;
+      return { seatId: seat.id, tokenIndex, to, hops };
+    }
+  }
+  return null;
+}
+
+type MoveEffects = { captureDelayByKey: Map<string, number>; finishSoundByKey: Map<string, "chime" | "victory"> };
+
+function computeMoveEffects(prevGame: GameState, game: GameState): MoveEffects {
+  const captureDelayByKey = new Map<string, number>();
+  const finishSoundByKey = new Map<string, "chime" | "victory">();
+
+  const mover = findMover(prevGame, game);
+  if (!mover) return { captureDelayByKey, finishSoundByKey };
+
+  // Entering from the yard (hops === 0) never captures — the start cell
+  // is always safe — so only a forward hop along the ring can.
+  if (mover.hops > 0) {
+    const delayMs = mover.hops * STEP_MS;
+    game.seats.forEach((seat) => {
+      if (seat.id === mover.seatId) return;
+      const prevSeat = prevGame.seats.find((s) => s.id === seat.id);
+      if (!prevSeat) return;
+      seat.tokens.forEach((pos, tokenIndex) => {
+        const wasOnRing = prevSeat.tokens[tokenIndex] !== YARD;
+        if (wasOnRing && pos === YARD) captureDelayByKey.set(`${seat.id}-${tokenIndex}`, delayMs);
+      });
+    });
+  }
+
+  if (mover.to === FINISH_LINE) {
+    const justWon = game.placements.includes(mover.seatId) && !prevGame.placements.includes(mover.seatId);
+    finishSoundByKey.set(`${mover.seatId}-${mover.tokenIndex}`, justWon ? "victory" : "chime");
+  }
+
+  return { captureDelayByKey, finishSoundByKey };
+}
+
+const EMPTY_MOVE_EFFECTS: MoveEffects = { captureDelayByKey: new Map(), finishSoundByKey: new Map() };
+
+// Tracks the previous `game` purely to diff against the new one. Uses
+// React's sanctioned "adjust state during render" pattern (a plain state
+// compare-and-set, bailing out once already caught up) rather than a ref —
+// a ref's `.current` can't be read during render (see the
+// react-hooks/refs lint rule), and this needs the freshly computed maps
+// ready in time for this same render's Tokens, not a render late.
+function useMoveEffects(game: GameState) {
+  const [prevGame, setPrevGame] = useState(game);
+  const [effects, setEffects] = useState(EMPTY_MOVE_EFFECTS);
+
+  if (game !== prevGame) {
+    const next = computeMoveEffects(prevGame, game);
+    setPrevGame(game);
+    setEffects(next);
+    return next;
+  }
+
+  return effects;
+}
+
 export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTokenTap }: BoardProps) {
   const [containerRef, containerSize] = useContainerSize();
   const layout = buildBoardLayout();
   const activeArms = new Set(game.seats.map((s) => s.armIndex));
+  const { captureDelayByKey, finishSoundByKey } = useMoveEffects(game);
 
   const pitch = Math.hypot(
     layout.ringCells[1].x - layout.ringCells[0].x,
@@ -373,6 +450,8 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
                 selectable={selectable}
                 radius={TOKEN_RADIUS}
                 hitPoints={hitPointsByKey.get(t.key)}
+                captureDelayMs={captureDelayByKey.get(t.key)}
+                finishSound={finishSoundByKey.get(t.key)}
                 onTap={() => onTokenTap(t.seat.id, t.tokenIndex)}
               />
             );

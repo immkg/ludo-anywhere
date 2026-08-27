@@ -26,6 +26,10 @@ export type GameState = {
   consecutiveSixes: number;
   status: GameStatus;
   winnerSeatId: string | null;
+  // True once the host has stopped the game early (see endGame in
+  // engine.js) rather than it finishing naturally — placementFor returns
+  // null (not "last place") for a seat that hadn't already finished.
+  endedEarly: boolean;
   // Ordered seatIds as they finish (1st place first) — play continues
   // past the first finish; see placementFor in src/game/engine.js.
   placements: string[];

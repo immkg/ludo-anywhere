@@ -8,9 +8,12 @@ const ORDINALS = ["1st", "2nd", "3rd"];
 
 // Play now continues past the first finish (up to 3 winners), so "Won"
 // alone no longer says which place — placement is only null for rows
-// saved before that field existed.
-function placementLabel(isWinner: boolean, placement: number | null): string {
-  if (!isWinner) return "Lost";
+// saved before that field existed, or for a seat that hadn't finished when
+// the host ended the game early (see engine.js's endGame) — that's a
+// no-decision, not a loss, so it gets its own neutral label rather than
+// "Lost".
+function placementLabel(isWinner: boolean, placement: number | null, endedEarly: boolean): string {
+  if (!isWinner) return endedEarly ? "Ended early" : "Lost";
   if (placement == null) return "Won";
   return `Won (${ORDINALS[placement - 1] ?? `${placement}th`})`;
 }
@@ -71,7 +74,8 @@ export default async function HistoryPage() {
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">
-                    Room {entry.game.roomCode} · {placementLabel(entry.isWinner, entry.placement)}
+                    Room {entry.game.roomCode} ·{" "}
+                    {placementLabel(entry.isWinner, entry.placement, entry.game.endedEarly)}
                   </p>
                   <p className="truncate text-xs text-ink-muted">
                     vs {opponents.map((o) => o.name).join(", ") || "—"}

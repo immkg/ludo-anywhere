@@ -62,6 +62,15 @@ type TokenProps = {
   // otherwise, which is never actually hit-tested since a non-selectable
   // token's Group doesn't listen for events at all.
   hitPoints?: number[];
+  // How long (ms) to hold off this token's capture retreat so it starts
+  // only once the attacking token has visually reached it — see Board.tsx,
+  // which computes this from the mover's own hop count. Irrelevant except
+  // at the instant this token gets sent back to the yard.
+  captureDelayMs?: number;
+  // Which sound (if any) this token's landing on the home/finish slot
+  // should play — "victory" when this is the seat's last token to arrive,
+  // "chime" for any other token finishing. See Board.tsx.
+  finishSound?: "chime" | "victory";
   onTap?: () => void;
 };
 
@@ -75,9 +84,11 @@ export default function Token({
   selectable,
   radius,
   hitPoints,
+  captureDelayMs,
+  finishSound,
   onTap,
 }: TokenProps) {
-  const { x: rawX, y: rawY } = useSteppedToken(armIndex, pos, tokenIndex);
+  const { x: rawX, y: rawY } = useSteppedToken(armIndex, pos, tokenIndex, captureDelayMs, finishSound);
   const px = rawX + offsetX;
   const py = rawY + offsetY;
   // A same-color ring around a same-size token was easy to miss (the ring

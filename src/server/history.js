@@ -15,6 +15,7 @@ export async function saveGameHistory(room) {
       maxPlayers: room.maxPlayers,
       startedAt: room.startedAt ?? new Date(),
       winnerSeatId: game.winnerSeatId,
+      endedEarly: !!game.endedEarly,
       players: {
         create: room.seats.map((seat) => ({
           seatId: seat.id,
