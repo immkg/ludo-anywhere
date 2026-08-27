@@ -22,6 +22,7 @@ export type ArmLayout = {
   startGlobalIndex: number;
   homeColumn: HomeColumnCell[];
   yardSlots: YardSlot[];
+  finishSlots: YardSlot[];
   // This arm's solid-color quadrant, the white inset "cage" square (with a
   // ~1-cell colored border) where its waiting tokens sit, and its wedge of
   // the small center "finish" pinwheel (3 points).

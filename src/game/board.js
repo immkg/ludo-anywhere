@@ -185,12 +185,31 @@ function computeBoardLayout() {
     );
     const cage = rectFromEdges(rotateBlock(CLASSIC_ARM0_CAGE, armIndex));
 
+    // Where a finished token actually sits: near the middle of this arm's
+    // own wedge of the center pinwheel (not homeColumn's last cell, which
+    // is one grid square short of true center — see tokenPixelPosition).
+    // Small per-token spread around that point, same idea as yardSlots,
+    // so up to 4 finished tokens from one seat don't perfectly overlap,
+    // and different arms' clusters stay visually distinct near center.
+    const wedgeMid = {
+      x: (CENTER.x + pinwheelCorners[0].x + pinwheelCorners[1].x) / 3,
+      y: (CENTER.y + pinwheelCorners[0].y + pinwheelCorners[1].y) / 3,
+    };
+    const FINISH_SPREAD = 9;
+    const finishSlots = [
+      { x: wedgeMid.x - FINISH_SPREAD, y: wedgeMid.y - FINISH_SPREAD },
+      { x: wedgeMid.x + FINISH_SPREAD, y: wedgeMid.y - FINISH_SPREAD },
+      { x: wedgeMid.x - FINISH_SPREAD, y: wedgeMid.y + FINISH_SPREAD },
+      { x: wedgeMid.x + FINISH_SPREAD, y: wedgeMid.y + FINISH_SPREAD },
+    ].map((p, slot) => ({ slot, ...p }));
+
     return {
       armIndex,
       color: colorForArm(armIndex),
       startGlobalIndex: startOffset(armIndex),
       homeColumn,
       yardSlots,
+      finishSlots,
       block,
       cage,
       pinwheel: [CENTER, ...pinwheelCorners],
@@ -208,13 +227,17 @@ export function buildBoardLayout() {
 }
 
 // Pixel position for a token given its arm, relative position, and (only
-// relevant while in the yard) its own token index so the 4 tokens spread
-// across the 4 yard slots instead of stacking.
+// relevant in the yard or once finished) its own token index so the 4
+// tokens spread across the 4 yard/finish slots instead of stacking.
 export function tokenPixelPosition(armIndex, relPos, tokenIndex = 0) {
   const layout = buildBoardLayout();
   const arm = layout.arms[armIndex];
   if (relPos === YARD) {
     const slot = arm.yardSlots[tokenIndex % arm.yardSlots.length];
+    return { x: slot.x, y: slot.y };
+  }
+  if (relPos === finished()) {
+    const slot = arm.finishSlots[tokenIndex % arm.finishSlots.length];
     return { x: slot.x, y: slot.y };
   }
   if (relPos >= homeStart()) {

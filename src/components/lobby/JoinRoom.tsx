@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { joinRoom, requestToJoinRoom } from "@/lib/socketActions";
+import { joinRoom, requestToJoinRoom, claimSeat, type ClaimableSeat } from "@/lib/socketActions";
 import { saveOwnedSeats } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { useRoomStore } from "@/store/useRoomStore";
@@ -28,7 +28,13 @@ export default function JoinRoom() {
   const [roomCode, setRoomCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
   const [seats, setSeats] = useState<SeatDraft[]>(defaultSeats(1, []));
   const [loading, setLoading] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set once room:join reports the room's already mid-game — nothing was
+  // joined, this lists the paused/vacated seats a player could take over
+  // instead (see room:claimSeat in server.js).
+  const [claimable, setClaimable] = useState<ClaimableSeat[] | null>(null);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (seats[0]?.profileId) return;
@@ -57,6 +63,20 @@ export default function JoinRoom() {
     try {
       const finalSeats = seats.map((s) => ({ profileId: s.profileId as string }));
       const res = await joinRoom(roomCode.trim(), finalSeats);
+      // A brand-new account's join needs host approval — see room:join in
+      // server.js. The eventual result arrives later via the same
+      // room:joinApproved/room:joinRequest:declined listeners below that
+      // already handle "Ask to join".
+      if (res.pending) {
+        setWaiting(true);
+        setLoading(false);
+        return;
+      }
+      if (res.midGame) {
+        setClaimable(res.claimableSeats ?? []);
+        setLoading(false);
+        return;
+      }
       if (!res.roomCode || !res.seats) throw new Error("Could not join room");
       saveOwnedSeats(res.roomCode, res.seats);
       addMySeats(res.seats);
@@ -64,6 +84,29 @@ export default function JoinRoom() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not join room");
       setLoading(false);
+    }
+  };
+
+  const handleClaim = async (seatId: string) => {
+    const profileId = seats[0]?.profileId;
+    if (!profileId) return;
+    setClaimingId(seatId);
+    setError(null);
+    try {
+      const res = await claimSeat(roomCode.trim(), seatId, profileId);
+      if (res.pending) {
+        setClaimable(null);
+        setWaiting(true);
+        return;
+      }
+      if (!res.roomCode || !res.seats) throw new Error("Could not join that seat");
+      saveOwnedSeats(res.roomCode, res.seats);
+      addMySeats(res.seats);
+      router.push(`/room/${res.roomCode}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not join that seat");
+    } finally {
+      setClaimingId(null);
     }
   };
 
@@ -84,6 +127,7 @@ export default function JoinRoom() {
     };
     const onDeclined = () => {
       setAskingUserId(null);
+      setWaiting(false);
       setError("The host declined your request to join");
     };
     socket.on("room:joinApproved", onApproved);
@@ -116,6 +160,45 @@ export default function JoinRoom() {
         </Link>
       </div>
 
+      {claimable ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
+          <p className="text-sm font-semibold text-ink-muted">
+            That game&rsquo;s already in progress
+            {claimable.length > 0 ? " — but you can take over an open seat:" : "."}
+          </p>
+          {claimable.length === 0 ? (
+            <p className="text-sm text-ink-muted">No seats are open to join right now.</p>
+          ) : (
+            claimable.map((seat) => (
+              <button
+                key={seat.id}
+                disabled={claimingId === seat.id}
+                onClick={() => handleClaim(seat.id)}
+                className="rounded-2xl border border-line bg-surface-2 px-4 py-3 text-left font-medium disabled:opacity-40"
+              >
+                {claimingId === seat.id ? "Joining…" : `Take over ${seat.name}’s seat`}
+              </button>
+            ))
+          )}
+          <button onClick={() => setClaimable(null)} className="text-sm font-semibold text-ink-muted underline">
+            Back
+          </button>
+        </div>
+      ) : waiting ? (
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-line p-6 text-center">
+          <p className="font-semibold">Waiting for the host to approve…</p>
+          <p className="text-sm text-ink-muted">
+            They&rsquo;ll see your request the moment they&rsquo;re back in the app.
+          </p>
+          <button
+            onClick={() => setWaiting(false)}
+            className="text-sm font-semibold text-ink-muted underline"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <>
       {friendsPlayingNow.length > 0 && (
         <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
           <p className="text-sm font-semibold text-ink-muted">Friends playing now</p>
@@ -179,6 +262,8 @@ export default function JoinRoom() {
       <Button onClick={handleJoin} disabled={loading}>
         {loading ? "Joining…" : "Join room"}
       </Button>
+        </>
+      )}
     </div>
   );
 }

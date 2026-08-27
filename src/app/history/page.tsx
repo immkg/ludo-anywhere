@@ -4,6 +4,17 @@ import { prisma } from "@/lib/prisma";
 import { colorForArm } from "@/game/board";
 import Button from "@/components/ui/Button";
 
+const ORDINALS = ["1st", "2nd", "3rd"];
+
+// Play now continues past the first finish (up to 3 winners), so "Won"
+// alone no longer says which place — placement is only null for rows
+// saved before that field existed.
+function placementLabel(isWinner: boolean, placement: number | null): string {
+  if (!isWinner) return "Lost";
+  if (placement == null) return "Won";
+  return `Won (${ORDINALS[placement - 1] ?? `${placement}th`})`;
+}
+
 export default async function HistoryPage() {
   const session = await auth();
 
@@ -60,7 +71,7 @@ export default async function HistoryPage() {
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">
-                    Room {entry.game.roomCode} · {entry.isWinner ? "Won" : "Lost"}
+                    Room {entry.game.roomCode} · {placementLabel(entry.isWinner, entry.placement)}
                   </p>
                   <p className="truncate text-xs text-ink-muted">
                     vs {opponents.map((o) => o.name).join(", ") || "—"}

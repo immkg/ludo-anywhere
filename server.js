@@ -5,6 +5,7 @@ import {
   createRoom,
   getRoom,
   addSeats,
+  removeSeat,
   reconnectSeats,
   findSeatBySocket,
   handleSocketDisconnect,
@@ -12,6 +13,14 @@ import {
   serializeRoom,
   serializeGame,
   hostUserId,
+  midGameSuspendSeat,
+  midGameResumeSeat,
+  midGameRemoveSeat,
+  transferHost,
+  claimableSeats,
+  claimSeat,
+  deleteRoom,
+  rematchEligibleSeats,
 } from "./src/server/rooms.js";
 import { rollDice, moveToken } from "./src/game/engine.js";
 import { saveGameHistory } from "./src/server/history.js";
@@ -44,6 +53,23 @@ app.prepare().then(() => {
 
   function broadcastGame(room) {
     io.to(room.code).emit("game:update", serializeGame(room));
+  }
+
+  // Called after anything that might have just ended a round (a move that
+  // finishes the last active seat, or a host removing a seat down to the
+  // same point) — saves history exactly once, whichever path got there.
+  function finishRoomIfNeeded(room) {
+    if (room.game?.status !== "finished" || room.historySaved) return;
+    room.historySaved = true;
+    room.status = "finished";
+    saveGameHistory(room).catch((err) => {
+      console.error("Failed to save game history", err);
+    });
+    logEvent("game_completed", hostUserId(room), {
+      roomCode: room.code,
+      playerCount: room.seats.length,
+      sponsored: room.sponsored,
+    });
   }
 
   const userChannel = (userId) => `user:${userId}`;
@@ -160,50 +186,82 @@ app.prepare().then(() => {
     );
 
     socket.on("room:joinRequest:decline", ({ roomCode, toUserId }) => {
+      getRoom(roomCode)?.pendingRequests.delete(toUserId);
       io.to(userChannel(toUserId)).emit("room:joinRequest:declined", { roomCode });
     });
 
     socket.on(
       "room:joinRequest:approve",
       withAck(async ({ roomCode, toUserId }, ack) => {
-        const hostUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const approverUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
         const room = getRoom(roomCode);
         if (!room) return ack?.({ error: "Room not found" });
         const hostSeat = room.seats.find((s) => s.id === room.hostSeatId);
-        if (!hostUserId || hostSeat?.userId !== hostUserId) {
+        if (!approverUserId || hostSeat?.userId !== approverUserId) {
           return ack?.({ error: "Only the host can approve requests" });
         }
 
-        // The requester's socket never joined this room's socket.io channel
-        // (they were never seated), so the result has to be pushed to them
-        // by user id rather than broadcast — everything else mirrors what
-        // room:join does for a normal seat request.
-        const requester = await getPrisma().user.findUnique({ where: { id: toUserId } });
-        if (!requester?.email) return ack?.({ error: "Could not find that player" });
-        const profile = await getPrisma().playerProfile.findUnique({
-          where: { email: requester.email.toLowerCase() },
-        });
-        if (!profile) return ack?.({ error: "Could not find that player" });
+        // room:join's approval-gated path (any new room-code join) stores
+        // the requester's actual chosen seats in pendingRequests; the
+        // older friends-list "Ask to join" flow never does (it only ever
+        // knows who's asking, not what they picked), so it falls back to
+        // resolving their own default profile the way it always has.
+        const pending = room.pendingRequests.get(toUserId);
+        room.pendingRequests.delete(toUserId);
 
-        const resolved = await resolveSeatProfiles([{ profileId: profile.id }], toUserId);
+        let resolved;
+        if (pending) {
+          resolved = { seats: pending.seats };
+        } else {
+          // The requester's socket never joined this room's socket.io
+          // channel (they were never seated), so the result has to be
+          // pushed to them by user id rather than broadcast.
+          const requester = await getPrisma().user.findUnique({ where: { id: toUserId } });
+          if (!requester?.email) return ack?.({ error: "Could not find that player" });
+          const profile = await getPrisma().playerProfile.findUnique({
+            where: { email: requester.email.toLowerCase() },
+          });
+          if (!profile) return ack?.({ error: "Could not find that player" });
+          resolved = await resolveSeatProfiles([{ profileId: profile.id }], toUserId);
+        }
         if (resolved.error) {
           io.to(userChannel(toUserId)).emit("room:joinRequest:declined", { roomCode });
           return ack?.({ error: resolved.error });
         }
 
-        const { error, seats: created } = addSeats(room, resolved.seats, {
-          socketId: null,
-          deviceId: null,
-          userId: toUserId,
-        });
-        if (error) {
-          io.to(userChannel(toUserId)).emit("room:joinRequest:declined", { roomCode });
-          return ack?.({ error });
+        // A mid-game claim (see room:claimSeat) replaces one existing
+        // seat instead of appending a new one.
+        let created;
+        if (pending?.claimSeatId) {
+          const { error, seat } = claimSeat(room, pending.claimSeatId, {
+            name: resolved.seats[0].name,
+            profileId: resolved.seats[0].profileId,
+            userId: toUserId,
+            socketId: null,
+            deviceId: null,
+          });
+          if (error) {
+            io.to(userChannel(toUserId)).emit("room:joinRequest:declined", { roomCode });
+            return ack?.({ error });
+          }
+          created = [seat];
+        } else {
+          const { error, seats: addedSeats } = addSeats(room, resolved.seats, {
+            socketId: null,
+            deviceId: null,
+            userId: toUserId,
+          });
+          if (error) {
+            io.to(userChannel(toUserId)).emit("room:joinRequest:declined", { roomCode });
+            return ack?.({ error });
+          }
+          created = addedSeats;
         }
 
         setUserRoom(toUserId, room.code);
         broadcastPresence(toUserId).catch(logPresenceError("join-request presence update"));
         broadcastRoom(room);
+        if (pending?.claimSeatId) broadcastGame(room);
         io.to(userChannel(toUserId)).emit("room:joinApproved", {
           roomCode: room.code,
           seats: created.map((s) => ({ id: s.id, token: s.token, armIndex: s.armIndex, name: s.name })),
@@ -268,7 +326,27 @@ app.prepare().then(() => {
             setUserRoom(reconnectUserId, room.code);
             broadcastPresence(reconnectUserId).catch(logPresenceError("room:join reconnect presence update"));
           }
+          // The host missed any join requests that came in while they were
+          // disconnected — room:joinRequest:incoming is a one-shot push, so
+          // replay whatever's still pending now that they're back.
+          if (reconnectUserId && hostUserId(room) === reconnectUserId) {
+            for (const [fromUserId, request] of room.pendingRequests) {
+              socket.emit("room:joinRequest:incoming", { roomCode: room.code, fromUserId, fromName: request.fromName });
+            }
+          }
           return;
+        }
+
+        // Not a reconnect, and the roster's already locked in — appending a
+        // brand-new seat isn't possible once the game's started. Point the
+        // client at room:claimSeat instead, with whatever's claimable right
+        // now (paused or removed-and-unclaimed seats — see claimableSeats).
+        if (room.status !== "lobby") {
+          return ack?.({
+            midGame: true,
+            roomCode: room.code,
+            claimableSeats: claimableSeats(room).map((s) => ({ id: s.id, name: s.name })),
+          });
         }
 
         if (!Array.isArray(seats) || seats.length < 1) {
@@ -297,6 +375,27 @@ app.prepare().then(() => {
               });
             }
           }
+        }
+
+        // A genuinely new account (no seat here yet) needs host approval —
+        // reconnecting to an owned seat (handled above) and an
+        // already-seated account adding another of its own profiles both
+        // stay instant, since there's nobody meaningful to ask.
+        const alreadySeated = room.seats.some((s) => s.userId === reconnectUserId);
+        if (!alreadySeated) {
+          if (room.seats.length + resolved.seats.length > room.maxPlayers) {
+            return ack?.({ error: "Room is full" });
+          }
+          const fromName = resolved.seats.map((s) => s.name).join(", ");
+          room.pendingRequests.set(reconnectUserId, { seats: resolved.seats, fromName });
+          if (hostId) {
+            io.to(userChannel(hostId)).emit("room:joinRequest:incoming", {
+              roomCode: room.code,
+              fromUserId: reconnectUserId,
+              fromName,
+            });
+          }
+          return ack?.({ pending: true, roomCode: room.code });
         }
 
         const { error, seats: created } = addSeats(room, resolved.seats, {
@@ -378,20 +477,233 @@ app.prepare().then(() => {
       }
       room.game = moveToken(room.game, seatId, tokenIndex);
       broadcastGame(room);
-
-      if (room.game.status === "finished" && !room.historySaved) {
-        room.historySaved = true;
-        room.status = "finished";
-        saveGameHistory(room).catch((err) => {
-          console.error("Failed to save game history", err);
-        });
-        logEvent("game_completed", hostUserId(room), {
-          roomCode: room.code,
-          playerCount: room.seats.length,
-          sponsored: room.sponsored,
-        });
-      }
+      finishRoomIfNeeded(room);
     });
+
+    socket.on(
+      "room:removeSeat",
+      withAck(async ({ roomCode, seatId }, ack) => {
+        const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!callerUserId || hostUserId(room) !== callerUserId) {
+          return ack?.({ error: "Only the host can remove a player" });
+        }
+
+        // Lobby: the seat is gone entirely, same as always. Mid-game: the
+        // seat stays visible (dimmed, no crown) and becomes claimable —
+        // see room:claimSeat — so their socket isn't kicked out the way a
+        // lobby removal's is.
+        if (room.status === "lobby") {
+          const removedSeat = room.seats.find((s) => s.id === seatId);
+          const { error } = removeSeat(room, seatId);
+          if (error) return ack?.({ error });
+
+          // Force their socket out of this room's channel so they stop
+          // receiving updates for a room they're no longer seated in — the
+          // room:update broadcast itself already makes their client show
+          // "You're not seated in this room" (see RoomPageClient.tsx).
+          if (removedSeat?.socketId) {
+            io.sockets.sockets.get(removedSeat.socketId)?.leave(room.code);
+          }
+
+          broadcastRoom(room);
+          ack?.({});
+
+          if (removedSeat?.userId) {
+            clearUserRoom(removedSeat.userId, room.code);
+            broadcastPresence(removedSeat.userId).catch(logPresenceError("room:removeSeat presence update"));
+          }
+          return;
+        }
+
+        const { error } = midGameRemoveSeat(room, seatId);
+        if (error) return ack?.({ error });
+
+        broadcastRoom(room);
+        broadcastGame(room);
+        finishRoomIfNeeded(room);
+        ack?.({});
+      })
+    );
+
+    socket.on(
+      "room:suspendSeat",
+      withAck(async ({ roomCode, seatId }, ack) => {
+        const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!callerUserId || hostUserId(room) !== callerUserId) {
+          return ack?.({ error: "Only the host can pause a player" });
+        }
+
+        const { error } = midGameSuspendSeat(room, seatId);
+        if (error) return ack?.({ error });
+
+        broadcastGame(room);
+        ack?.({});
+      })
+    );
+
+    socket.on(
+      "room:resumeSeat",
+      withAck(async ({ roomCode, seatId }, ack) => {
+        const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!callerUserId || hostUserId(room) !== callerUserId) {
+          return ack?.({ error: "Only the host can resume a player" });
+        }
+
+        const { error } = midGameResumeSeat(room, seatId);
+        if (error) return ack?.({ error });
+
+        broadcastGame(room);
+        ack?.({});
+      })
+    );
+
+    socket.on(
+      "room:transferHost",
+      withAck(async ({ roomCode, toSeatId }, ack) => {
+        const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!callerUserId || hostUserId(room) !== callerUserId) {
+          return ack?.({ error: "Only the host can hand off host" });
+        }
+
+        const { error } = transferHost(room, toSeatId);
+        if (error) return ack?.({ error });
+
+        broadcastRoom(room);
+        ack?.({});
+      })
+    );
+
+    socket.on(
+      "room:claimSeat",
+      withAck(async ({ roomCode, seatId, profileId }, ack) => {
+        const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        if (!callerUserId) return ack?.({ error: "Sign in with Google to join" });
+
+        const room = getRoom(roomCode);
+        if (!room?.game) return ack?.({ error: "Game not in progress" });
+        if (room.seats.some((s) => s.userId === callerUserId && s.id !== seatId)) {
+          return ack?.({ error: "You're already playing in this room" });
+        }
+        if (!claimableSeats(room).some((s) => s.id === seatId)) {
+          return ack?.({ error: "That seat isn't available" });
+        }
+
+        const resolved = await resolveSeatProfiles([{ profileId }], callerUserId);
+        if (resolved.error) return ack?.({ error: resolved.error });
+        const [{ name }] = resolved.seats;
+
+        // Same rule as a normal join: already being in this room makes it
+        // self-service; a brand-new account needs host approval.
+        const alreadySeated = room.seats.some((s) => s.userId === callerUserId);
+        if (!alreadySeated) {
+          const hostId = hostUserId(room);
+          room.pendingRequests.set(callerUserId, { seats: [{ name, profileId }], fromName: name, claimSeatId: seatId });
+          if (hostId) {
+            io.to(userChannel(hostId)).emit("room:joinRequest:incoming", { roomCode: room.code, fromUserId: callerUserId, fromName: name });
+          }
+          return ack?.({ pending: true, roomCode: room.code });
+        }
+
+        const claimed = claimSeat(room, seatId, { name, profileId, userId: callerUserId, socketId: socket.id, deviceId: null });
+        if (claimed.error) return ack?.({ error: claimed.error });
+
+        socket.join(room.code);
+        ack?.({
+          roomCode: room.code,
+          seats: [{ id: claimed.seat.id, token: claimed.seat.token, armIndex: claimed.seat.armIndex, name: claimed.seat.name }],
+        });
+        broadcastRoom(room);
+        broadcastGame(room);
+      })
+    );
+
+    socket.on(
+      "room:rematch",
+      withAck(async ({ roomCode }, ack) => {
+        const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (room.status !== "finished") return ack?.({ error: "This game hasn't finished yet" });
+        if (!callerUserId || hostUserId(room) !== callerUserId) {
+          return ack?.({ error: "Only the host can start a rematch" });
+        }
+
+        // Everyone who actually won plus the one natural loser — not
+        // anyone the host removed mid-game (see rematchEligibleSeats).
+        const eligible = rematchEligibleSeats(room);
+        if (eligible.length < 2) return ack?.({ error: "Not enough players left for a rematch" });
+
+        const newRoom = createRoom({ maxPlayers: room.maxPlayers });
+        for (const seat of eligible) {
+          // Seated with no live socket yet — each client binds its own
+          // once it navigates in and reconnects with the fresh token
+          // pushed below, same as any other approved join.
+          const { error: seatError } = addSeats(newRoom, [{ name: seat.name, profileId: seat.profileId }], {
+            socketId: null,
+            deviceId: seat.deviceId,
+            userId: seat.userId,
+          });
+          if (seatError) {
+            deleteRoom(newRoom.code);
+            return ack?.({ error: seatError });
+          }
+        }
+        // Whoever triggered the rematch stays host, regardless of seating
+        // order (which may not match the old room's host if it had been
+        // transferred).
+        const newHostSeat = newRoom.seats.find((s) => s.userId === callerUserId);
+        if (newHostSeat) newRoom.hostSeatId = newHostSeat.id;
+
+        // Charged exactly like a fresh game:start — a rematch is a new
+        // game, and can still be blocked per-seat (e.g. someone's out of
+        // free games today).
+        const charged = await checkGameStart(newRoom);
+        if (!charged.ok) {
+          deleteRoom(newRoom.code);
+          return ack?.({ error: `${charged.name ?? "A player"} can't play right now — free games used up today` });
+        }
+        newRoom.sponsored = charged.sponsored;
+
+        const { error: startError } = startGame(newRoom);
+        if (startError) {
+          deleteRoom(newRoom.code);
+          return ack?.({ error: startError });
+        }
+
+        logEvent("game_started", hostUserId(newRoom), {
+          roomCode: newRoom.code,
+          playerCount: newRoom.seats.length,
+          source: charged.source,
+          sponsored: charged.sponsored,
+          rematchOf: room.code,
+        });
+
+        // Push each distinct account's new seats directly — mirrors how
+        // room:joinRequest:approve already pushes seats to a specific
+        // user — so nobody has to manually rejoin, their client just
+        // navigates straight into the new room.
+        const seatsByUser = new Map();
+        for (const seat of newRoom.seats) {
+          if (!seat.userId) continue;
+          const list = seatsByUser.get(seat.userId) ?? [];
+          list.push({ id: seat.id, token: seat.token, armIndex: seat.armIndex, name: seat.name });
+          seatsByUser.set(seat.userId, list);
+        }
+        for (const [userId, seatsForUser] of seatsByUser) {
+          io.to(userChannel(userId)).emit("room:rematchReady", { roomCode: newRoom.code, seats: seatsForUser });
+        }
+
+        ack?.({ roomCode: newRoom.code });
+      })
+    );
 
     socket.on("room:leave", ({ roomCode }) => {
       const room = getRoom(roomCode);

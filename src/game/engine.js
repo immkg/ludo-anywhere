@@ -16,6 +16,7 @@ export function createGame(seats) {
       armIndex: s.armIndex,
       tokens: Array(TOKENS_PER_SEAT).fill(YARD),
       finished: false,
+      suspended: false,
     })),
     currentSeatIndex: 0,
     diceValue: null,
@@ -24,7 +25,23 @@ export function createGame(seats) {
     consecutiveSixes: 0,
     status: "playing",
     winnerSeatId: null,
+    // Ordered list of seatIds as they finish — 1st place first. Play
+    // continues past the first finish; the game only truly ends once at
+    // most one seat is left unfinished (see moveToken), so a 4-seat game
+    // can produce up to 3 placements before the last remaining seat is
+    // the implicit loser (see placementFor).
+    placements: [],
   };
+}
+
+// 1-indexed finishing rank for a seat: its position in `placements`, or
+// (once the game has ended) state.seats.length for whichever seat never
+// finished — the always-exactly-one loser. Returns null for an
+// unfinished seat in a game that's still playing (no rank yet).
+export function placementFor(state, seatId) {
+  const rank = state.placements.indexOf(seatId);
+  if (rank !== -1) return rank + 1;
+  return state.status === "finished" ? state.seats.length : null;
 }
 
 export function getCurrentSeat(state) {
@@ -106,9 +123,20 @@ function advanceSeatIndex(state) {
   const n = state.seats.length;
   for (let step = 1; step <= n; step++) {
     const candidate = (state.currentSeatIndex + step) % n;
-    if (!state.seats[candidate].finished) return candidate;
+    if (!state.seats[candidate].finished && !state.seats[candidate].suspended) return candidate;
   }
   return state.currentSeatIndex;
+}
+
+// A suspended seat is a pause, not a resolution: it blocks the round from
+// ending (it might resume and still finish, or still be "the loser") the
+// same way it blocks taking turns. The round is only truly over once at
+// most one seat is left that's neither finished nor suspended, *and*
+// nothing is currently suspended.
+function isRoundOver(seats) {
+  const active = seats.filter((s) => !s.finished && !s.suspended).length;
+  const suspended = seats.some((s) => s.suspended);
+  return active <= 1 && !suspended;
 }
 
 function endTurn(state) {
@@ -194,9 +222,62 @@ export function moveToken(state, seatId, tokenIndex) {
   let next = { ...state, seats, diceValue: null };
 
   if (seatFinished) {
-    return { ...next, status: "finished", winnerSeatId: seatId, consecutiveSixes: 0 };
+    const placements = [...state.placements, seatId];
+    next = { ...next, placements };
+
+    // Play continues past the first finish — the round only truly ends
+    // once isRoundOver says so, at which point the one seat still neither
+    // finished nor suspended is the implicit loser (see placementFor). A
+    // finishing move never grants a bonus turn regardless of the roll:
+    // there's nothing left for this seat to do, so play always passes on.
+    if (isRoundOver(seats)) {
+      return { ...next, status: "finished", winnerSeatId: placements[0], consecutiveSixes: 0 };
+    }
+    return endTurn(next);
   }
 
   const bonusTurn = dice === 6 || captured || to === finishLine;
   return bonusTurn ? next : endTurn(next);
+}
+
+// Host-triggered pause: the seat is skipped for turns but its tokens stay
+// exactly where they are (and stay capturable) — a resolution, not an
+// end-state, so it never affects placements/round-over on its own. If it
+// was this seat's turn, play passes on immediately.
+export function suspendSeat(state, seatId) {
+  const seats = state.seats.map((s) => (s.id === seatId ? { ...s, suspended: true } : s));
+  const next = { ...state, seats };
+  return state.seats[state.currentSeatIndex]?.id === seatId ? endTurn(next) : next;
+}
+
+// Host-triggered removal: tokens are cleared back to the yard and the
+// seat drops out of active play for good — unlike a suspension, there's
+// nothing to resume. Reuses `finished` to get turn-skipping and
+// round-over accounting for free (see advanceSeatIndex/isRoundOver), but
+// deliberately never enters `placements`, so placementFor ranks a
+// removed seat last along with anyone else who never finished. Callers
+// are expected to have already refused to remove a seat that's already
+// won (placementFor(state, seatId) === 1..3) — this function doesn't
+// re-check that itself.
+export function removeSeatFromGame(state, seatId) {
+  const seats = state.seats.map((s) =>
+    s.id === seatId ? { ...s, tokens: Array(TOKENS_PER_SEAT).fill(YARD), finished: true, suspended: false } : s
+  );
+  let next = { ...state, seats };
+
+  if (isRoundOver(seats)) {
+    return { ...next, status: "finished", winnerSeatId: state.placements[0] ?? null, consecutiveSixes: 0 };
+  }
+  return state.seats[state.currentSeatIndex]?.id === seatId ? endTurn(next) : next;
+}
+
+// Makes a seat playable again — the opposite of removeSeatFromGame's
+// terminal `finished`, and also how a suspension ends, whether that's the
+// original account reconnecting or a different one claiming the seat
+// (see rooms.js's reconnectSeats/claimSeat). Tokens are left exactly as
+// they are: already at the yard if this seat had been removed, or
+// wherever they were sitting if it had only been suspended.
+export function reactivateSeat(state, seatId) {
+  const seats = state.seats.map((s) => (s.id === seatId ? { ...s, finished: false, suspended: false } : s));
+  return { ...state, seats };
 }

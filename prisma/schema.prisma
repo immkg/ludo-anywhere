@@ -134,6 +134,11 @@ model GamePlayer {
   name      String
   armIndex  Int
   isWinner  Boolean        @default(false)
+  // 1-indexed finishing rank (1st/2nd/3rd place, up to 3 winners) or the
+  // total seat count for the one seat that never finished — see
+  // game.placements / placementFor() in src/game/engine.js. Nullable only
+  // for rows saved before this field existed.
+  placement Int?
   profileId String?
   game      Game           @relation(fields: [gameId], references: [id], onDelete: Cascade)
   profile   PlayerProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)

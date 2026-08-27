@@ -3,6 +3,10 @@ export type GameSeat = {
   armIndex: number;
   tokens: number[]; // -1 = yard, ring cells, then home column, ending at "finished"
   finished: boolean;
+  // Paused by the host — skipped in turn order, tokens stay put and stay
+  // capturable. Distinct from `finished`: a suspended seat can resume and
+  // keep playing normally (see suspendSeat/resumeSeat in engine.js).
+  suspended: boolean;
 };
 
 export type GameStatus = "playing" | "finished";
@@ -22,4 +26,7 @@ export type GameState = {
   consecutiveSixes: number;
   status: GameStatus;
   winnerSeatId: string | null;
+  // Ordered seatIds as they finish (1st place first) — play continues
+  // past the first finish; see placementFor in src/game/engine.js.
+  placements: string[];
 };

@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { createGame, rollDice, moveToken, getValidMoves, pickAutoMoveToken } from "@/game/engine";
+import { createGame, rollDice, moveToken, getValidMoves, pickAutoMoveToken, placementFor } from "@/game/engine";
 import { armForSeatIndex, colorForArm, YARD, finished as finishLine, trackSteps } from "@/game/board";
 import { cn } from "@/lib/utils";
 import Dice from "@/components/game/Dice";
@@ -53,6 +53,7 @@ export default function TestModeView() {
   const canMove = game.status === "playing" && game.diceValue != null && validMoves.length > 0;
   const seatByArm = new Map<number, Seat>(seats.map((s) => [s.armIndex, s]));
   const nameFor = (seatId: string) => seats.find((s) => s.id === seatId)?.name ?? seatId;
+  const placementForArm = (seat: Seat | undefined) => (seat ? placementFor(game, seat.id) : null);
 
   function updateGame(fn: (g: GameState) => GameState) {
     setState((s) => ({ ...s, game: fn(s.game) }));
@@ -108,13 +109,23 @@ export default function TestModeView() {
     });
   }
 
+  // Mirrors moveToken's own finish/continue-play logic (see engine.js) —
+  // duplicated here rather than reused because there's no legal roll that
+  // reaches this state on demand, same reasoning as the rest of this file's
+  // "reach past the engine's normal API" controls.
   function handleForceWin(seatIndex: number) {
     updateGame((g) => {
-      const winner = g.seats[seatIndex];
-      const nextSeats = g.seats.map((seat, i) =>
+      const seats = g.seats.map((seat, i) =>
         i === seatIndex ? { ...seat, tokens: seat.tokens.map(() => finishLine()), finished: true } : seat
       );
-      return { ...g, seats: nextSeats, status: "finished", winnerSeatId: winner.id, diceValue: null };
+      const winnerId = seats[seatIndex].id;
+      const placements = g.placements.includes(winnerId) ? g.placements : [...g.placements, winnerId];
+      const active = seats.filter((s) => !s.finished && !s.suspended).length;
+      const anySuspended = seats.some((s) => s.suspended);
+      if (active <= 1 && !anySuspended) {
+        return { ...g, seats, placements, status: "finished", winnerSeatId: placements[0], diceValue: null };
+      }
+      return { ...g, seats, placements, diceValue: null };
     });
   }
 
@@ -151,7 +162,11 @@ export default function TestModeView() {
 
         {game.status === "finished" && (
           <div className="mx-4 shrink-0 rounded-xl border border-line bg-surface-2 px-3 py-2 text-center text-sm font-semibold">
-            Winner: {nameFor(game.winnerSeatId ?? "")}
+            {game.placements.map((id, i) => `${i + 1}. ${nameFor(id)}`).join(" · ")}
+            {game.seats
+              .filter((s) => !game.placements.includes(s.id))
+              .map((s) => ` · Lost: ${nameFor(s.id)}`)
+              .join("")}
           </div>
         )}
 
@@ -160,6 +175,7 @@ export default function TestModeView() {
             seat={seatByArm.get(0) ?? null}
             avatarFirst
             isTurn={seatByArm.get(0)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(0))}
           />
           {/* Absolutely centered so it never competes with the corners for
               row width — placed inline instead, a long name could squeeze
@@ -176,6 +192,7 @@ export default function TestModeView() {
             seat={seatByArm.get(1) ?? null}
             avatarFirst={false}
             isTurn={seatByArm.get(1)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(1))}
           />
         </div>
 
@@ -194,6 +211,7 @@ export default function TestModeView() {
             seat={seatByArm.get(3) ?? null}
             avatarFirst
             isTurn={seatByArm.get(3)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(3))}
           />
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="pointer-events-auto">
@@ -212,6 +230,7 @@ export default function TestModeView() {
             seat={seatByArm.get(2) ?? null}
             avatarFirst={false}
             isTurn={seatByArm.get(2)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(2))}
           />
         </div>
       </div>

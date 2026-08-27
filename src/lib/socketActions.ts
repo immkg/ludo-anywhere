@@ -3,7 +3,19 @@ import { getDeviceId } from "@/lib/identity";
 import type { OwnedSeat } from "@/types/room";
 
 export type SeatRequest = { profileId: string };
-type Ack = { error?: string; roomCode?: string; seats?: OwnedSeat[] };
+export type ClaimableSeat = { id: string; name: string };
+// `pending` means the join needs host approval — see room:join in
+// server.js. `seats` is absent until room:joinApproved arrives later.
+// `midGame` means the room's already playing — nothing was joined; pick
+// one of `claimableSeats` and call claimSeat() instead.
+type Ack = {
+  error?: string;
+  roomCode?: string;
+  seats?: OwnedSeat[];
+  pending?: boolean;
+  midGame?: boolean;
+  claimableSeats?: ClaimableSeat[];
+};
 
 function emitWithAck(event: string, payload: unknown): Promise<Ack> {
   return new Promise((resolve, reject) => {
@@ -41,6 +53,33 @@ export function moveToken(roomCode: string, seatId: string, tokenIndex: number) 
 
 export function leaveRoom(roomCode: string) {
   getSocket().emit("room:leave", { roomCode });
+}
+
+export function removeSeat(roomCode: string, seatId: string) {
+  return emitWithAck("room:removeSeat", { roomCode, seatId });
+}
+
+export function suspendSeat(roomCode: string, seatId: string) {
+  return emitWithAck("room:suspendSeat", { roomCode, seatId });
+}
+
+export function resumeSeat(roomCode: string, seatId: string) {
+  return emitWithAck("room:resumeSeat", { roomCode, seatId });
+}
+
+export function transferHost(roomCode: string, toSeatId: string) {
+  return emitWithAck("room:transferHost", { roomCode, toSeatId });
+}
+
+export function claimSeat(roomCode: string, seatId: string, profileId: string) {
+  return emitWithAck("room:claimSeat", { roomCode, seatId, profileId });
+}
+
+// Resolves to the new room's code once it's actually started — the seats
+// themselves arrive separately via the room:rematchReady push (see
+// useSocketConnection), same as an approved join.
+export function rematch(roomCode: string) {
+  return emitWithAck("room:rematch", { roomCode });
 }
 
 export function inviteFriendToRoom(roomCode: string, friendUserId: string) {
