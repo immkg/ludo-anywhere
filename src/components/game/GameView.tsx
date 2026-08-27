@@ -79,6 +79,17 @@ export default function GameView({ room }: { room: Room }) {
         onTokenTap={handleTokenTap}
       />
 
+      {/* Konva draws to a <canvas>, which carries no semantics of its own,
+          so screen readers need this separate text description of which
+          tokens (if any) can currently be tapped. */}
+      <p className="sr-only" aria-live="polite">
+        {isMyTurn && validMoves.length > 0
+          ? `Your turn: ${validMoves.length} token${validMoves.length === 1 ? "" : "s"} can move now.`
+          : isMyTurn
+            ? "Your turn: roll the dice."
+            : ""}
+      </p>
+
       <div className="mx-auto flex w-full max-w-lg items-center justify-between px-1">
         <PlayerCorner seat={seatByArm.get(3) ?? null} avatarFirst isTurn={seatByArm.get(3)?.id === currentSeat?.id} />
         <PlayerCorner
