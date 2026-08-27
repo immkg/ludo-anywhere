@@ -70,7 +70,9 @@ function endTurn(state) {
 
 // Rolls the dice for the current seat. If the roll leaves no legal move
 // (nothing off the yard and nothing on the board), or the seat has now
-// rolled three sixes in a row, the turn is auto-forfeited and passed on.
+// rolled three sixes in a row, the turn is auto-forfeited and passed on. If
+// exactly one token can legally move, that move is played automatically
+// rather than waiting on a tap that has only one possible answer.
 export function rollDice(state) {
   if (state.status !== "playing" || state.diceValue != null) return state;
 
@@ -85,8 +87,10 @@ export function rollDice(state) {
 
   const rolled = { ...state, diceValue: dice, lastRoll: dice, rollSeq, consecutiveSixes };
   const seat = getCurrentSeat(rolled);
-  const hasMove = getValidMoves(rolled, seat.id).length > 0;
-  return hasMove ? rolled : endTurn(rolled);
+  const moves = getValidMoves(rolled, seat.id);
+  if (moves.length === 0) return endTurn(rolled);
+  if (moves.length === 1) return moveToken(rolled, seat.id, moves[0]);
+  return rolled;
 }
 
 export function moveToken(state, seatId, tokenIndex) {
