@@ -36,7 +36,7 @@ export default function InviteLinkCard() {
         </Button>
         <Button
           className="flex-1"
-          onClick={() => url && shareOnWhatsApp(`Add me as a friend on Ludo! ${url}`)}
+          onClick={() => url && shareOnWhatsApp(`Add me as a friend on MyLudo! ${url}`)}
           disabled={!url}
         >
           WhatsApp

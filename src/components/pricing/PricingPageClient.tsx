@@ -86,7 +86,7 @@ export default function PricingPageClient() {
           amount: order.amountInr * 100,
           currency: "INR",
           order_id: order.orderId,
-          name: "Ludo Anywhere",
+          name: "MyLudo",
           description: purposeLabel(purpose),
           prefill: { email: session.user.email },
           theme: { color: "#ff6b3d" },

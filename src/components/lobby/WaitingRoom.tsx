@@ -73,7 +73,7 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
           </p>
         )}
         <button
-          onClick={() => shareOnWhatsApp(`Join my Ludo room! ${roomJoinUrl(room.code)}`)}
+          onClick={() => shareOnWhatsApp(`Join my Ludo room on MyLudo! ${roomJoinUrl(room.code)}`)}
           className="mt-2 text-xs font-semibold text-accent underline"
         >
           Share on WhatsApp

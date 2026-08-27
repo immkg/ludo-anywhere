@@ -1,6 +1,7 @@
-# Ludo Multiplayer
+# MyLudo
 
-A mobile-first, browser-based multiplayer Ludo. Create a room or join one with
+Live at [myludo.life](https://www.myludo.life). A mobile-first, browser-based
+multiplayer Ludo. Create a room or join one with
 a short code — 2 to 4 players total, split across devices however you like:
 one phone with all 4 seats, four separate devices with one seat each, or any
 mix in between (e.g. one device holding 2 seats, another holding 2). Everyone

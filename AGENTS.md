@@ -1,6 +1,6 @@
-# Ludo Multiplayer
+# MyLudo
 
-Mobile-first, browser-based multiplayer Ludo. 2–4 players, join a room with
+Live at myludo.life. Mobile-first, browser-based multiplayer Ludo. 2–4 players, join a room with
 a short code. Google sign-in is required, but as a *device* login — actual
 players are separate profile records seated into rooms (see "Accounts,
 players & history" below). See `README.md` for the full player-facing
