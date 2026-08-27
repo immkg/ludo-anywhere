@@ -36,24 +36,33 @@ type BoardProps = {
   onTokenTap: (seatId: string, tokenIndex: number) => void;
 };
 
-function useContainerWidth() {
+// Measures both dimensions (not just width) because the board's container
+// isn't always wider than it is tall — on a short/landscape viewport the
+// available height is the tighter constraint. The Stage below is always
+// square, so sizing it off width alone would let it overflow the container
+// vertically whenever height is the binding side.
+function useContainerSize() {
   const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const observer = new ResizeObserver((entries) => setWidth(entries[0].contentRect.width));
+    const observer = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setSize({ width, height });
+    });
     observer.observe(el);
-    setWidth(el.getBoundingClientRect().width);
+    const rect = el.getBoundingClientRect();
+    setSize({ width: rect.width, height: rect.height });
     return () => observer.disconnect();
   }, []);
 
-  return [ref, width] as const;
+  return [ref, size] as const;
 }
 
 export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTokenTap }: BoardProps) {
-  const [containerRef, width] = useContainerWidth();
+  const [containerRef, containerSize] = useContainerSize();
   const layout = buildBoardLayout();
   const activeArms = new Set(game.seats.map((s) => s.armIndex));
 
@@ -92,7 +101,7 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
     });
   });
 
-  const size = width || 1;
+  const size = Math.min(containerSize.width, containerSize.height) || 1;
   const scale = size / BOARD_SIZE;
 
   const gridMargin = CELL * 0.85;
@@ -100,7 +109,7 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
   const gridMax = Math.max(...layout.arms.flatMap((a) => [a.block.x + a.block.width, a.block.y + a.block.height]));
 
   return (
-    <div ref={containerRef} className="w-full max-w-lg mx-auto aspect-square touch-none select-none">
+    <div ref={containerRef} className="flex h-full w-full items-center justify-center touch-none select-none">
       <Stage width={size} height={size} scaleX={scale} scaleY={scale}>
         <Layer>
           <Rect

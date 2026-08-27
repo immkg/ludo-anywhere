@@ -16,7 +16,7 @@ import type { Room, Seat } from "@/types/room";
 // Konva needs a real <canvas>/window, so this can't run during SSR.
 const Board = dynamic(() => import("@/components/game/Board"), {
   ssr: false,
-  loading: () => <div className="aspect-square w-full max-w-lg mx-auto" />,
+  loading: () => <div className="h-full w-full" />,
 });
 
 const AUTO_MOVE_MS = 15000;
@@ -83,8 +83,8 @@ export default function GameView({ room }: { room: Room }) {
   };
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-lg flex-col gap-4 px-4 py-4">
-      <div className="mx-auto flex w-full max-w-lg items-center justify-between px-1">
+    <div className="mx-auto flex h-dvh w-full flex-col gap-4 py-4">
+      <div className="flex shrink-0 items-center justify-between px-4">
         <PlayerCorner seat={seatByArm.get(0) ?? null} avatarFirst isTurn={seatByArm.get(0)?.id === currentSeat?.id} />
         <PlayerCorner
           seat={seatByArm.get(1) ?? null}
@@ -93,13 +93,15 @@ export default function GameView({ room }: { room: Room }) {
         />
       </div>
 
-      <Board
-        game={game}
-        isMyTurn={isMyTurn}
-        currentSeatId={currentSeat?.id ?? null}
-        validMoves={validMoves}
-        onTokenTap={handleTokenTap}
-      />
+      <div className="min-h-0 flex-1">
+        <Board
+          game={game}
+          isMyTurn={isMyTurn}
+          currentSeatId={currentSeat?.id ?? null}
+          validMoves={validMoves}
+          onTokenTap={handleTokenTap}
+        />
+      </div>
 
       {/* Konva draws to a <canvas>, which carries no semantics of its own,
           so screen readers need this separate text description of which
@@ -112,7 +114,7 @@ export default function GameView({ room }: { room: Room }) {
             : ""}
       </p>
 
-      <div className="mx-auto flex w-full max-w-lg items-center justify-between px-1">
+      <div className="flex shrink-0 items-center justify-between px-4">
         <PlayerCorner seat={seatByArm.get(3) ?? null} avatarFirst isTurn={seatByArm.get(3)?.id === currentSeat?.id} />
         <PlayerCorner
           seat={seatByArm.get(2) ?? null}
@@ -121,7 +123,7 @@ export default function GameView({ room }: { room: Room }) {
         />
       </div>
 
-      <div className="flex items-center justify-center">
+      <div className="flex shrink-0 items-center justify-center px-4">
         <Dice
           lastRoll={game.lastRoll}
           rollSeq={game.rollSeq}
