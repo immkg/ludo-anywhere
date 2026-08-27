@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 const MIN_SPIN_MS = 650;
@@ -10,6 +10,7 @@ const LAND_SECONDS = 0.55;
 const LAND_EASE = [0.16, 1, 0.3, 1] as const;
 const CUBE_SIZE = 64; // px — matches h-16 w-16
 const HALF = CUBE_SIZE / 2;
+const AUTO_ROLL_MS = 5000;
 
 const PIP_LAYOUTS: Record<number, [number, number][]> = {
   1: [[1, 1]],
@@ -144,6 +145,19 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, color }: Dice
     };
   }, []);
 
+  // Ref so the auto-roll timer doesn't restart on every re-render — the
+  // parent passes a fresh onRoll closure each time it renders.
+  const onRollRef = useRef(onRoll);
+  useEffect(() => {
+    onRollRef.current = onRoll;
+  }, [onRoll]);
+
+  useEffect(() => {
+    if (!canRoll || isRolling) return;
+    const timer = setTimeout(() => onRollRef.current(), AUTO_ROLL_MS);
+    return () => clearTimeout(timer);
+  }, [canRoll, isRolling]);
+
   function handleClick() {
     if (!canRoll || isRolling) return;
     spinStartRef.current = Date.now();
@@ -162,6 +176,43 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, color }: Dice
       )}
       style={{ perspective: 300, ...(canRoll && !isRolling ? ({ "--tw-ring-color": color } as CSSProperties) : {}) }}
     >
+      {canRoll && !isRolling && (
+        <svg
+          className="pointer-events-none absolute -inset-1.5 h-[calc(100%+12px)] w-[calc(100%+12px)] -rotate-90"
+          viewBox="0 0 100 100"
+        >
+          <motion.rect
+            x="2"
+            y="2"
+            width="96"
+            height="96"
+            rx="22"
+            fill="none"
+            stroke={color}
+            strokeWidth="4"
+            strokeLinecap="round"
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: AUTO_ROLL_MS / 1000, ease: "linear" }}
+          />
+        </svg>
+      )}
+
+      <AnimatePresence>
+        {canRoll && !isRolling && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl border-2 bg-surface text-xs font-bold uppercase tracking-wide"
+            style={{ borderColor: color, color }}
+          >
+            Roll
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div
         className="relative h-full w-full"
         style={{ transformStyle: "preserve-3d" }}
