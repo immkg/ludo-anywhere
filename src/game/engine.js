@@ -50,6 +50,58 @@ export function getValidMoves(state, seatId) {
   return moves;
 }
 
+// Chooses which legal token to auto-move when the player doesn't act in
+// time: a move that captures an opponent wins outright, then a move that
+// lands on a safe cell, then (among what's left) the token that ends up
+// furthest along its track — i.e. closest to home. Ties are broken at
+// random rather than always favoring the same token index.
+export function pickAutoMoveToken(state, seatId) {
+  const seat = getCurrentSeat(state);
+  if (!seat || seat.id !== seatId) return null;
+
+  const legal = getValidMoves(state, seatId);
+  if (legal.length === 0) return null;
+  if (legal.length === 1) return legal[0];
+
+  const dice = state.diceValue;
+  const track = trackSteps();
+
+  const candidates = legal.map((tokenIndex) => {
+    const from = seat.tokens[tokenIndex];
+    const to = from === YARD ? 0 : from + dice;
+    const onRing = to < track;
+    const safe = !onRing || isSafeRelativeCell(seat.armIndex, to);
+    const captures = onRing && !safe && wouldCapture(state, seat, to);
+    return { tokenIndex, to, captures, safe };
+  });
+
+  const pickFurthest = (pool) => {
+    const maxTo = Math.max(...pool.map((c) => c.to));
+    const furthest = pool.filter((c) => c.to === maxTo);
+    return furthest[Math.floor(Math.random() * furthest.length)].tokenIndex;
+  };
+
+  const capturing = candidates.filter((c) => c.captures);
+  if (capturing.length > 0) return pickFurthest(capturing);
+
+  const safe = candidates.filter((c) => c.safe);
+  if (safe.length > 0) return pickFurthest(safe);
+
+  return pickFurthest(candidates);
+}
+
+function wouldCapture(state, seat, to) {
+  const track = trackSteps();
+  const targetGlobal = relativeToGlobalRing(seat.armIndex, to);
+  return state.seats.some((other) => {
+    if (other.id === seat.id) return false;
+    return other.tokens.some((pos) => {
+      if (pos === YARD || pos >= track) return false;
+      return relativeToGlobalRing(other.armIndex, pos) === targetGlobal;
+    });
+  });
+}
+
 function advanceSeatIndex(state) {
   const n = state.seats.length;
   for (let step = 1; step <= n; step++) {

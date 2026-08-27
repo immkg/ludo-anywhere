@@ -1,11 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useGame } from "@/hooks/useGame";
 import { rollDice as emitRollDice, moveToken as emitMoveToken } from "@/lib/socketActions";
 import { colorForArm } from "@/game/board";
+import { pickAutoMoveToken } from "@/game/engine";
 import Dice from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import Button from "@/components/ui/Button";
@@ -17,9 +19,28 @@ const Board = dynamic(() => import("@/components/game/Board"), {
   loading: () => <div className="aspect-square w-full max-w-lg mx-auto" />,
 });
 
+const AUTO_MOVE_MS = 15000;
+
 export default function GameView({ room }: { room: Room }) {
   const router = useRouter();
   const { game, currentSeat, isMyTurn, validMoves } = useGame();
+
+  // If a player doesn't tap a token in time, move one for them: prefer a
+  // capture, then a move that lands safe, then the token furthest along
+  // (closest to home). Resets whenever the game state actually changes
+  // (a roll, a move) so it only ever fires after 15s of real inactivity.
+  useEffect(() => {
+    if (!isMyTurn || !currentSeat || !game || game.diceValue == null || validMoves.length === 0) {
+      return;
+    }
+    const seatId = currentSeat.id;
+    const roomCode = room.code;
+    const timer = setTimeout(() => {
+      const tokenIndex = pickAutoMoveToken(game, seatId);
+      if (tokenIndex != null) emitMoveToken(roomCode, seatId, tokenIndex);
+    }, AUTO_MOVE_MS);
+    return () => clearTimeout(timer);
+  }, [isMyTurn, currentSeat, game, validMoves, room.code]);
 
   if (!game) {
     return <div className="flex min-h-dvh items-center justify-center text-ink-muted">Loading game…</div>;
@@ -50,6 +71,7 @@ export default function GameView({ room }: { room: Room }) {
   const seatByArm = new Map<number, Seat>(room.seats.map((s) => [s.armIndex, s]));
 
   const canRoll = isMyTurn && game.diceValue == null;
+  const canMove = isMyTurn && game.diceValue != null && validMoves.length > 0;
 
   const handleRoll = () => {
     if (!currentSeat || !canRoll) return;
@@ -105,6 +127,7 @@ export default function GameView({ room }: { room: Room }) {
           rollSeq={game.rollSeq}
           canRoll={canRoll}
           onRoll={handleRoll}
+          canMove={canMove}
           color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
         />
       </div>

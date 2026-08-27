@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { usePulse } from "@/hooks/useAnimatedPoint";
 
 const MIN_SPIN_MS = 650;
 const SPIN_LOOP_SECONDS = 0.5;
@@ -11,6 +12,7 @@ const LAND_EASE = [0.16, 1, 0.3, 1] as const;
 const CUBE_SIZE = 64; // px — matches h-16 w-16
 const HALF = CUBE_SIZE / 2;
 const AUTO_ROLL_MS = 5000;
+const AUTO_MOVE_MS = 15000;
 
 const PIP_LAYOUTS: Record<number, [number, number][]> = {
   1: [[1, 1]],
@@ -96,6 +98,10 @@ type DiceProps = {
   rollSeq: number;
   canRoll: boolean;
   onRoll: () => void;
+  // True while it's this device's turn and a token move is pending — drives
+  // the same countdown ring as canRoll, just on the longer auto-move clock,
+  // so a stalled move is just as visible as a stalled roll.
+  canMove: boolean;
   // The color of whichever seat currently needs to roll/move — stays put
   // (doesn't fade back to neutral) until that turn actually advances, so
   // the dice keeps reading as "this is so-and-so's turn" through bonus
@@ -103,7 +109,7 @@ type DiceProps = {
   color: string;
 };
 
-export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, color }: DiceProps) {
+export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, color }: DiceProps) {
   const [isRolling, setIsRolling] = useState(false);
   const [orientation, setOrientation] = useState(() => LANDING_ORIENTATION[lastRoll ?? 1]);
   const prevRollSeqRef = useRef(rollSeq);
@@ -158,6 +164,13 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, color }: Dice
     return () => clearTimeout(timer);
   }, [canRoll, isRolling]);
 
+  // Same "you need to act" pulse used on movable tokens, applied here while
+  // the dice sits disabled waiting on a token tap — set directly (not
+  // through framer's animate/transition) so it stays a crisp, uninterrupted
+  // breathing loop instead of getting smoothed by the cube's own landing
+  // transition.
+  const pulseScale = usePulse(canMove && !isRolling, 1, 1.15, 900);
+
   function handleClick() {
     if (!canRoll || isRolling) return;
     spinStartRef.current = Date.now();
@@ -176,8 +189,14 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, color }: Dice
       )}
       style={{ perspective: 300, ...(canRoll && !isRolling ? ({ "--tw-ring-color": color } as CSSProperties) : {}) }}
     >
-      {canRoll && !isRolling && (
+      {(canRoll || canMove) && !isRolling && (
         <svg
+          // Keyed by phase so switching straight from "waiting to move" to
+          // "waiting to roll" (a bonus turn after a six/capture, with no
+          // isRolling window in between to naturally unmount this) forces a
+          // fresh mount instead of the bar jumping mid-animation onto the
+          // other phase's duration.
+          key={canRoll ? "roll" : "move"}
           className="pointer-events-none absolute -inset-1.5 h-[calc(100%+12px)] w-[calc(100%+12px)] -rotate-90"
           viewBox="0 0 100 100"
         >
@@ -193,7 +212,7 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, color }: Dice
             strokeLinecap="round"
             initial={{ pathLength: 0 }}
             animate={{ pathLength: 1 }}
-            transition={{ duration: AUTO_ROLL_MS / 1000, ease: "linear" }}
+            transition={{ duration: (canRoll ? AUTO_ROLL_MS : AUTO_MOVE_MS) / 1000, ease: "linear" }}
           />
         </svg>
       )}
@@ -213,28 +232,33 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, color }: Dice
         )}
       </AnimatePresence>
 
-      <motion.div
+      <div
         className="relative h-full w-full"
-        style={{ transformStyle: "preserve-3d" }}
-        animate={{
-          rotateX: orientation.x,
-          rotateY: orientation.y,
-          scale: isRolling ? [1, 1.25, 1.05] : 1,
-        }}
-        transition={{
-          rotateX: isRolling
-            ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
-            : { duration: LAND_SECONDS, ease: LAND_EASE },
-          rotateY: isRolling
-            ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
-            : { duration: LAND_SECONDS, ease: LAND_EASE },
-          scale: isRolling ? { duration: 0.35, ease: "easeOut" } : { duration: LAND_SECONDS, ease: LAND_EASE },
-        }}
+        style={{ transform: `scale(${pulseScale})`, transformStyle: "preserve-3d" }}
       >
-        {[1, 2, 3, 4, 5, 6].map((value) => (
-          <Face key={value} value={value} color={color} />
-        ))}
-      </motion.div>
+        <motion.div
+          className="relative h-full w-full"
+          style={{ transformStyle: "preserve-3d" }}
+          animate={{
+            rotateX: orientation.x,
+            rotateY: orientation.y,
+            scale: isRolling ? [1, 1.25, 1.05] : 1,
+          }}
+          transition={{
+            rotateX: isRolling
+              ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
+              : { duration: LAND_SECONDS, ease: LAND_EASE },
+            rotateY: isRolling
+              ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
+              : { duration: LAND_SECONDS, ease: LAND_EASE },
+            scale: isRolling ? { duration: 0.35, ease: "easeOut" } : { duration: LAND_SECONDS, ease: LAND_EASE },
+          }}
+        >
+          {[1, 2, 3, 4, 5, 6].map((value) => (
+            <Face key={value} value={value} color={color} />
+          ))}
+        </motion.div>
+      </div>
     </button>
   );
 }
