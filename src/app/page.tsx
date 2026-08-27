@@ -36,6 +36,12 @@ export default function HomePage() {
           Sign in with Google to create or join a room.
         </p>
       )}
+
+      {process.env.NODE_ENV !== "production" && (
+        <Button variant="ghost" onClick={() => router.push("/test")}>
+          Test mode
+        </Button>
+      )}
     </main>
   );
 }
