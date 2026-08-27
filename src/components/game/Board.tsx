@@ -10,6 +10,24 @@ const INK = "#2B2016";
 const CREAM = "#FFFDF6";
 const BOARD_SIZE = 1000;
 
+// Inactive arms fade their color toward CREAM. Blocks, home columns, and
+// the center pinwheel all reach into the shared middle cross of the grid,
+// where an inactive arm's shape can sit directly on top of an active
+// neighbor's opaque color (e.g. arm 1's home column runs down the same
+// grid column arm 0's block fills). Faking the fade with plain Konva
+// `opacity` blends against whatever was painted underneath instead of a
+// neutral base, so the neighbor's color bleeds through as mud. Baking the
+// fade into a solid, opaque color up front keeps the result the same
+// regardless of paint order.
+function faded(hex: string, amount: number) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const base = { r: 255, g: 253, b: 246 }; // CREAM
+  const mix = (channel: number, baseChannel: number) => Math.round(channel * amount + baseChannel * (1 - amount));
+  return `rgb(${mix(r, base.r)}, ${mix(g, base.g)}, ${mix(b, base.b)})`;
+}
+
 type BoardProps = {
   game: GameState;
   isMyTurn: boolean;
@@ -101,19 +119,21 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
           />
 
           {/* each arm's solid-color quadrant */}
-          {layout.arms.map((arm) => (
-            <Rect
-              key={arm.color.id}
-              x={arm.block.x}
-              y={arm.block.y}
-              width={arm.block.width}
-              height={arm.block.height}
-              fill={arm.color.hex}
-              stroke={INK}
-              strokeWidth={2.5}
-              opacity={activeArms.has(arm.armIndex) ? 1 : 0.3}
-            />
-          ))}
+          {layout.arms.map((arm) => {
+            const active = activeArms.has(arm.armIndex);
+            return (
+              <Rect
+                key={arm.color.id}
+                x={arm.block.x}
+                y={arm.block.y}
+                width={arm.block.width}
+                height={arm.block.height}
+                fill={active ? arm.color.hex : faded(arm.color.hex, 0.3)}
+                stroke={active ? INK : faded(INK, 0.3)}
+                strokeWidth={2.5}
+              />
+            );
+          })}
 
           {/* the "cage": a white inset square with a ~1-cell colored
               border, where each arm's 4 waiting tokens sit — matches a
@@ -170,22 +190,25 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
 
           {/* home column: each arm's final track into the center, colored
               like a real board so it reads as "your lane" against the
-              white shared ring. */}
-          {layout.arms.flatMap((arm) =>
-            arm.homeColumn.map((cell, i) => (
+              white shared ring. When an arm is inactive its cells drop
+              the per-cell ink border — at reduced opacity, adjoining
+              borders double up into a muddy grid line, so a borderless
+              tile reads as a clean flat tint instead. */}
+          {layout.arms.flatMap((arm) => {
+            const active = activeArms.has(arm.armIndex);
+            return arm.homeColumn.map((cell, i) => (
               <Rect
                 key={`home-${arm.armIndex}-${i}`}
                 x={cell.x - CELL / 2}
                 y={cell.y - CELL / 2}
                 width={CELL}
                 height={CELL}
-                fill={arm.color.hex}
-                stroke={INK}
-                strokeWidth={1.5}
-                opacity={activeArms.has(arm.armIndex) ? 1 : 0.35}
+                fill={active ? arm.color.hex : faded(arm.color.hex, 0.35)}
+                stroke={active ? INK : undefined}
+                strokeWidth={active ? 1.5 : 0}
               />
-            ))
-          )}
+            ));
+          })}
 
           {/* yard: token wells sit directly on the color, like a real
               board — no separate white tray behind them. */}
@@ -208,17 +231,19 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
               top of the ring/home cells so its clean triangles cover the
               hub instead of the home column's individually-bordered end
               cells showing through as a grid. */}
-          {layout.arms.map((arm) => (
-            <Line
-              key={`pin-${arm.color.id}`}
-              points={arm.pinwheel.flatMap((p) => [p.x, p.y])}
-              closed
-              fill={arm.color.hex}
-              stroke={INK}
-              strokeWidth={1.5}
-              opacity={activeArms.has(arm.armIndex) ? 1 : 0.3}
-            />
-          ))}
+          {layout.arms.map((arm) => {
+            const active = activeArms.has(arm.armIndex);
+            return (
+              <Line
+                key={`pin-${arm.color.id}`}
+                points={arm.pinwheel.flatMap((p) => [p.x, p.y])}
+                closed
+                fill={active ? arm.color.hex : faded(arm.color.hex, 0.3)}
+                stroke={active ? INK : faded(INK, 0.3)}
+                strokeWidth={1.5}
+              />
+            );
+          })}
 
           {placed.map((t) => {
             const { offsetX, offsetY } = spreadByKey.get(t.key)!;
