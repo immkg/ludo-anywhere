@@ -60,8 +60,14 @@ Required — without this set up, no one can create or join a room. Setup:
    `http://localhost:3001/api/auth/callback/google` for local dev).
 3. Copy `.env.example` to `.env.local` and fill in `DATABASE_URL`,
    `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_SECRET` (generate with
-   `openssl rand -base64 33`). In production on a non-Vercel/Cloudflare
-   host (e.g. Railway), also set `AUTH_TRUST_HOST=true`.
+   `openssl rand -base64 33`), and `AUTH_URL` — set to the exact origin
+   the app is reachable at (`http://localhost:3001` locally, your real
+   domain in production). This one's not optional: since `server.js` is a
+   custom Node server rather than `next dev`/`next start`, Next can't
+   reliably derive its own origin from the raw request, so without
+   `AUTH_URL` Google sign-in fails with `redirect_uri_mismatch`. In
+   production on a non-Vercel/Cloudflare host (e.g. Railway), also set
+   `AUTH_TRUST_HOST=true`.
 4. Run `npm run db:migrate:dev` to create the tables (`npm run db:migrate`
    — i.e. `prisma migrate deploy` — in production/CI instead).
 

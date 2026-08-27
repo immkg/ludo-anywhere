@@ -105,9 +105,28 @@ fallback). See `.env.example` for the full list and where each value comes
 from: `DATABASE_URL` (Postgres), `AUTH_GOOGLE_ID` /
 `AUTH_GOOGLE_SECRET` (Google OAuth client), `AUTH_SECRET` (session signing
 — generate with `openssl rand -base64 33`, needed even in local dev or
-Auth.js errors on every `/api/auth/*` request), and `AUTH_TRUST_HOST=true`
-in production on any host that isn't Vercel/Cloudflare Pages (e.g.
-Railway).
+Auth.js errors on every `/api/auth/*` request), and `AUTH_URL` (the exact
+origin the app is reachable at, e.g. `http://localhost:3001` or the real
+production domain).
+
+`AUTH_URL` isn't optional despite what its name suggests — `server.js` is a
+custom Node server (`next({ dev })`, no `hostname`/`port` passed), and in
+that setup Next.js can't reliably derive its own origin from the raw
+incoming request, so `next-auth`'s route handler falls back to an internal
+default when building OAuth redirect/callback URLs (observed: `next dev`'s
+canonical default port 3000 locally regardless of the real port; on
+Railway, `localhost:<internal-port>`) instead of the real one — breaking
+Google sign-in with `redirect_uri_mismatch`. **Do not "fix" this by passing
+`hostname`/`port` to `next({...})` instead** — that was tried, and while it
+happens to produce a plausible-looking origin for one specific access
+pattern in dev, it hijacks request-URL reconstruction unconditionally
+(including in production, where it produced `localhost:8080` — the
+internal container port — instead of the public Railway domain, breaking
+prod OAuth entirely). `AUTH_URL` overrides the origin correctly regardless
+of this quirk (`reqWithEnvURL` in `next-auth/lib/env.js`), which is why
+it's the fix. Setting it also implies `trustHost`, but set
+`AUTH_TRUST_HOST=true` too in production on any host that isn't
+Vercel/Cloudflare Pages (e.g. Railway) — harmless belt-and-suspenders.
 
 ## Conventions
 

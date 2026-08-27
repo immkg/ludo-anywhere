@@ -19,7 +19,7 @@ import { resolveSeatProfiles } from "./src/server/profiles.js";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT) || 3001;
-const app = next({ dev, hostname: "localhost", port });
+const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
