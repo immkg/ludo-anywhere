@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Razorpay from "razorpay";
 import { prisma } from "@/lib/prisma";
 import { getPricingConfig, logEvent } from "@/lib/entitlements";
+import { trackUmami } from "@/server/umami.js";
 
 // The only place a Payment is ever marked PAID and an Entitlement/
 // CreditBatch is ever granted — never the client's own post-checkout
@@ -83,6 +84,13 @@ async function handleCaptured(paymentEntity: { id: string; order_id: string }) {
   if (granted) {
     const eventType = payment.purpose === "PACK" ? "pack_purchased" : "subscription_started";
     await logEvent(eventType, payment.userId, { purpose: payment.purpose, amountInr: payment.amountInr });
+    // revenue/currency are Umami's special property names for its Revenue
+    // report — see docs.umami.is/docs/revenue.
+    trackUmami(
+      eventType,
+      { purpose: payment.purpose, revenue: payment.amountInr, currency: "INR" },
+      payment.userId,
+    );
   }
 }
 
@@ -96,5 +104,6 @@ async function handleFailed(paymentEntity: { order_id: string }) {
   });
   if (updated.count > 0) {
     await logEvent("payment_failed", payment.userId, { purpose: payment.purpose });
+    trackUmami("payment_failed", { purpose: payment.purpose }, payment.userId);
   }
 }

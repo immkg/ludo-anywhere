@@ -28,6 +28,7 @@ import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
 import { resolveSeatProfiles } from "./src/server/profiles.js";
 import { resolveCharge, checkGameStart, logEvent } from "./src/server/entitlements.js";
+import { trackUmami } from "./src/server/umami.js";
 import {
   markOnline,
   markOffline,
@@ -66,11 +67,9 @@ app.prepare().then(() => {
     saveGameHistory(room).catch((err) => {
       console.error("Failed to save game history", err);
     });
-    logEvent("game_completed", hostUserId(room), {
-      roomCode: room.code,
-      playerCount: room.seats.length,
-      sponsored: room.sponsored,
-    });
+    const props = { roomCode: room.code, playerCount: room.seats.length, sponsored: room.sponsored };
+    logEvent("game_completed", hostUserId(room), props);
+    trackUmami("game_completed", props, hostUserId(room));
   }
 
   const userChannel = (userId) => `user:${userId}`;
@@ -154,6 +153,7 @@ app.prepare().then(() => {
       const userId =
         socket.data.userId ?? (await getAuthenticatedUserId(socket.handshake.headers.cookie));
       logEvent(type, userId ?? null, properties ?? {});
+      trackUmami(type, properties ?? {}, userId ?? null);
     });
 
     socket.on(
@@ -284,10 +284,12 @@ app.prepare().then(() => {
         // `pending` and returns early without logging anything (see
         // above), so without this the entire "shared a room link, someone
         // new joined" path was invisible in AnalyticsEvent.
-        logEvent("player_joined", toUserId, {
+        const joinProps = {
           roomCode: room.code,
           source: pending?.claimSeatId ? "claim" : pending ? "link" : "friend_request",
-        });
+        };
+        logEvent("player_joined", toUserId, joinProps);
+        trackUmami("player_joined", joinProps, toUserId);
       })
     );
 
@@ -324,6 +326,7 @@ app.prepare().then(() => {
         setUserRoom(userId, room.code);
         broadcastPresence(userId).catch(logPresenceError("room:create presence update"));
         logEvent("room_created", userId, { maxPlayers });
+        trackUmami("room_created", { maxPlayers }, userId);
       })
     );
 
@@ -434,7 +437,9 @@ app.prepare().then(() => {
         broadcastRoom(room);
         setUserRoom(reconnectUserId, room.code);
         broadcastPresence(reconnectUserId).catch(logPresenceError("room:join presence update"));
-        logEvent("player_joined", reconnectUserId, { roomCode: room.code });
+        const ownSeatProps = { roomCode: room.code, source: "own_seat" };
+        logEvent("player_joined", reconnectUserId, ownSeatProps);
+        trackUmami("player_joined", ownSeatProps, reconnectUserId);
       })
     );
 
@@ -462,12 +467,14 @@ app.prepare().then(() => {
 
       broadcastRoom(room);
       broadcastGame(room);
-      logEvent("game_started", hostUserId(room), {
+      const startProps = {
         roomCode: room.code,
         playerCount: room.seats.length,
         source: charged.source,
         sponsored: charged.sponsored,
-      });
+      };
+      logEvent("game_started", hostUserId(room), startProps);
+      trackUmami("game_started", startProps, hostUserId(room));
 
       // The room is no longer an open lobby, so it's no longer something a
       // friend could "ask to join" — clear it out of everyone's presence.
@@ -718,13 +725,15 @@ app.prepare().then(() => {
           return ack?.({ error: startError });
         }
 
-        logEvent("game_started", hostUserId(newRoom), {
+        const rematchProps = {
           roomCode: newRoom.code,
           playerCount: newRoom.seats.length,
           source: charged.source,
           sponsored: charged.sponsored,
           rematchOf: room.code,
-        });
+        };
+        logEvent("game_started", hostUserId(newRoom), rematchProps);
+        trackUmami("game_started", rematchProps, hostUserId(newRoom));
 
         // Push each distinct account's new seats directly — mirrors how
         // room:joinRequest:approve already pushes seats to a specific
