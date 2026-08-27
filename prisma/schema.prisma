@@ -9,15 +9,19 @@ datasource db {
 // --- Auth.js (NextAuth) models, shaped for @auth/prisma-adapter ---
 
 model User {
-  id            String        @id @default(cuid())
-  name          String?
-  email         String?       @unique
-  emailVerified DateTime?
-  image         String?
-  createdAt     DateTime      @default(now())
-  accounts      Account[]
-  sessions      Session[]
-  profiles      UserProfile[]
+  id                  String        @id @default(cuid())
+  name                String?
+  email               String?       @unique
+  emailVerified       DateTime?
+  image               String?
+  createdAt           DateTime      @default(now())
+  lastSeenAt          DateTime?
+  inviteToken         String?       @unique
+  accounts            Account[]
+  sessions            Session[]
+  profiles            UserProfile[]
+  friendshipsSent     Friendship[]  @relation("FriendshipsSent")
+  friendshipsReceived Friendship[]  @relation("FriendshipsReceived")
 }
 
 model Account {
@@ -81,6 +85,30 @@ model UserProfile {
   profile   PlayerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@id([userId, profileId])
+}
+
+// --- Friends ---
+//
+// Friendship is between Users (signed-in Google accounts) rather than
+// PlayerProfiles — only a real account can receive/accept a request or show
+// up as online. A row starts "pending" (sent by requester) and becomes
+// "accepted" once the addressee accepts, or is deleted on decline/unfriend.
+// A row created via a personal invite link skips straight to "accepted"
+// since visiting that private link already is the mutual consent.
+
+model Friendship {
+  id          String    @id @default(cuid())
+  requesterId String
+  addresseeId String
+  status      String    @default("pending") // pending | accepted
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
+  requester   User      @relation("FriendshipsSent", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee   User      @relation("FriendshipsReceived", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
+  @@index([requesterId, status])
 }
 
 // --- Game history ---

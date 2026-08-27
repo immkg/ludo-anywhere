@@ -1,24 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { joinRoom } from "@/lib/socketActions";
+import { joinRoom, requestToJoinRoom } from "@/lib/socketActions";
 import { saveOwnedSeats } from "@/lib/identity";
+import { getSocket } from "@/lib/socket";
 import { useRoomStore } from "@/store/useRoomStore";
 import { useProfiles } from "@/hooks/useProfiles";
+import { useFriends } from "@/hooks/useFriends";
+import { usePresenceStore } from "@/store/usePresenceStore";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import NumberPicker from "@/components/ui/NumberPicker";
 import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
+import FriendAvatar from "@/components/friends/FriendAvatar";
+import type { OwnedSeat } from "@/types/room";
 
 export default function JoinRoom() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session } = useSession();
   const addMySeats = useRoomStore((s) => s.addMySeats);
   const { profiles, createProfile } = useProfiles();
 
-  const [roomCode, setRoomCode] = useState("");
+  const [roomCode, setRoomCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
   const [seats, setSeats] = useState<SeatDraft[]>(defaultSeats(1, []));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,9 +66,68 @@ export default function JoinRoom() {
     }
   };
 
+  const { friends } = useFriends();
+  const presence = usePresenceStore((s) => s.byUserId);
+  const [askingUserId, setAskingUserId] = useState<string | null>(null);
+
+  // The requester never types anything for this flow — the host approves
+  // with just their own profile (see room:joinRequest:approve in
+  // server.js), so the result/decline is a one-off push tied to whichever
+  // request is currently pending, not a store other pages need.
+  useEffect(() => {
+    const socket = getSocket();
+    const onApproved = ({ roomCode: approvedCode, seats: approvedSeats }: { roomCode: string; seats: OwnedSeat[] }) => {
+      saveOwnedSeats(approvedCode, approvedSeats);
+      addMySeats(approvedSeats);
+      router.push(`/room/${approvedCode}`);
+    };
+    const onDeclined = () => {
+      setAskingUserId(null);
+      setError("The host declined your request to join");
+    };
+    socket.on("room:joinApproved", onApproved);
+    socket.on("room:joinRequest:declined", onDeclined);
+    return () => {
+      socket.off("room:joinApproved", onApproved);
+      socket.off("room:joinRequest:declined", onDeclined);
+    };
+  }, [router, addMySeats]);
+
+  const handleAskToJoin = async (friendUserId: string, friendRoomCode: string) => {
+    setAskingUserId(friendUserId);
+    setError(null);
+    try {
+      await requestToJoinRoom(friendRoomCode);
+    } catch (e) {
+      setAskingUserId(null);
+      setError(e instanceof Error ? e.message : "Could not send request");
+    }
+  };
+
+  const friendsPlayingNow = friends.filter((f) => presence[f.userId]?.online && presence[f.userId]?.roomCode);
+
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
       <h1 className="text-2xl font-extrabold">Join room</h1>
+
+      {friendsPlayingNow.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
+          <p className="text-sm font-semibold text-ink-muted">Friends playing now</p>
+          {friendsPlayingNow.map((friend) => (
+            <div key={friend.userId} className="flex items-center gap-3">
+              <FriendAvatar image={friend.image} />
+              <p className="min-w-0 flex-1 truncate text-sm">{friend.name ?? friend.email}</p>
+              <button
+                disabled={askingUserId === friend.userId}
+                onClick={() => handleAskToJoin(friend.userId, presence[friend.userId]!.roomCode!)}
+                className="shrink-0 text-xs font-semibold text-accent underline disabled:text-ink-muted"
+              >
+                {askingUserId === friend.userId ? "Waiting…" : "Ask to join"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div>
         <label className="text-sm font-semibold text-ink-muted">Room code</label>

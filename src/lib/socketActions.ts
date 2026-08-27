@@ -42,3 +42,25 @@ export function moveToken(roomCode: string, seatId: string, tokenIndex: number) 
 export function leaveRoom(roomCode: string) {
   getSocket().emit("room:leave", { roomCode });
 }
+
+export function inviteFriendToRoom(roomCode: string, friendUserId: string) {
+  return emitWithAck("room:invite", { roomCode, friendUserId });
+}
+
+export function requestToJoinRoom(roomCode: string) {
+  return emitWithAck("room:joinRequest", { roomCode });
+}
+
+export function approveJoinRequest(roomCode: string, toUserId: string) {
+  return emitWithAck("room:joinRequest:approve", { roomCode, toUserId });
+}
+
+export function declineJoinRequest(roomCode: string, toUserId: string) {
+  getSocket().emit("room:joinRequest:decline", { roomCode, toUserId });
+}
+
+export function refreshPresence(): Promise<{ presence: Record<string, { online: boolean; roomCode: string | null }> }> {
+  return new Promise((resolve) => {
+    getSocket().emit("presence:refresh", {}, resolve);
+  });
+}
