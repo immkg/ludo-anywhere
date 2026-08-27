@@ -1,6 +1,13 @@
 # MyLudo
 
-Live at [myludo.life](https://www.myludo.life). A mobile-first, browser-based
+[![Live](https://img.shields.io/badge/live-myludo.life-ff6b3d?style=flat-square)](https://www.myludo.life)
+[![Next.js](https://img.shields.io/badge/Next.js-16.2.2-000000?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520.9-339933?style=flat-square&logo=node.js&logoColor=white)](.nvmrc)
+[![License](https://img.shields.io/badge/license-proprietary-8a7c6a?style=flat-square)](LICENSE)
+
+<img src="docs/images/board-hero.jpg" alt="MyLudo game board mid-game, showing the classic 4-arm cross with glossy gem tokens in red, green, blue, and yellow" width="100%" />
+
+**[myludo.life](https://www.myludo.life)** — a mobile-first, browser-based
 multiplayer Ludo. Create a room or join one with
 a short code — 2 to 4 players total, split across devices however you like:
 one phone with all 4 seats, four separate devices with one seat each, or any
@@ -15,6 +22,15 @@ group can play from one signed-in phone without everyone needing their own
 Google account. Colors are assigned automatically in join order (not
 picked), so a partially-filled board always blanks out symmetrically
 instead of depending on who grabbed which color.
+
+## Screenshots
+
+<table>
+<tr>
+<td><img src="docs/images/hero-logo.png" alt="MyLudo landing screen logo and tagline" width="100%" /><br/><sub>Landing screen</sub></td>
+<td><img src="docs/images/board-gameplay.jpg" alt="Mid-game view with a green token out on the shared track" width="100%" /><br/><sub>Mid-game — a token out on the shared track, dice ready to roll</sub></td>
+</tr>
+</table>
 
 ## Board
 
@@ -115,3 +131,20 @@ of this is just a UI-level restriction.
   the server (authoritative) and in the browser (to highlight which of your
   tokens have a legal move before you tap, and to compute board geometry for
   rendering).
+
+## SEO & metadata
+
+Handled through Next's file conventions (all under `src/app/`), so there's
+nothing to keep in sync by hand:
+
+- `layout.tsx` sets `metadataBase` (`https://www.myludo.life`), a title
+  template, description, keywords, canonical URL, and `openGraph`/`twitter`
+  metadata.
+- `opengraph-image.tsx` / `twitter-image.tsx` render a branded 1200×630 card
+  on the fly (`next/og`) — no static image to keep updated.
+- `icon.svg` / `favicon.ico` / `apple-icon.png` — the dice favicon, in the
+  sizes each surface expects.
+- `manifest.ts` — web app manifest for "Add to Home Screen".
+- `robots.ts` / `sitemap.ts` — generate `/robots.txt` and `/sitemap.xml`;
+  the only page listed is `/`, since everything else redirects signed-out
+  visitors there anyway.
