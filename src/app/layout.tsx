@@ -1,7 +1,14 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
 import SocketProvider from "@/components/SocketProvider";
 import AuthProvider from "@/components/AuthProvider";
+
+// Traffic-source analytics (Umami Cloud, myludo.life site). The website id
+// isn't a secret — it's already visible in every page's HTML — so it's
+// hardcoded rather than threaded through an env var. Gated to production so
+// `npm run dev` traffic doesn't pollute real visitor stats.
+const UMAMI_WEBSITE_ID = "524c74cf-e122-4629-a2a3-a9c75790f6f8";
 
 const SITE_URL = "https://www.myludo.life";
 const SITE_NAME = "MyLudo";
@@ -61,6 +68,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-dvh" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {process.env.NODE_ENV === "production" && (
+          <Script
+            src="https://cloud.umami.is/script.js"
+            data-website-id={UMAMI_WEBSITE_ID}
+            strategy="afterInteractive"
+          />
+        )}
         <AuthProvider>
           <SocketProvider>{children}</SocketProvider>
         </AuthProvider>
