@@ -1,6 +1,7 @@
 import { getSocket } from "@/lib/socket";
 import { getDeviceId } from "@/lib/identity";
 import type { OwnedSeat } from "@/types/room";
+import type { Reaction } from "@/components/game/ReactionPicker";
 
 export type SeatRequest = { profileId: string };
 export type ClaimableSeat = { id: string; name: string };
@@ -119,4 +120,10 @@ export function refreshPresence(): Promise<{ presence: Record<string, { online: 
   return new Promise((resolve) => {
     getSocket().emit("presence:refresh", {}, resolve);
   });
+}
+
+// Ephemeral, fire-and-forget — the sender already shows it locally
+// (GameView.tsx), this just relays it to everyone else in the room.
+export function sendReaction(roomCode: string, reaction: Reaction) {
+  getSocket().emit("game:reaction", { roomCode, reaction });
 }

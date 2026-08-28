@@ -529,6 +529,27 @@ app.prepare().then(() => {
       finishRoomIfNeeded(room);
     });
 
+    // Ephemeral emoji/sticker reaction — fire-and-forget, no game-state
+    // change, just relayed to everyone else currently viewing this room.
+    // Payload shape is validated (not just trusted) since a hand-crafted
+    // client could otherwise broadcast arbitrary strings/paths to others.
+    socket.on("game:reaction", ({ roomCode, reaction } = {}) => {
+      if (!getRoom(roomCode) || !socket.rooms.has(roomCode)) return;
+      if (reaction?.kind === "emoji" && typeof reaction.value === "string" && reaction.value.length <= 8) {
+        socket.to(roomCode).emit("game:reaction", { kind: "emoji", value: reaction.value });
+      } else if (
+        reaction?.kind === "sticker" &&
+        typeof reaction.src === "string" &&
+        reaction.src.startsWith("/brand/stickers/")
+      ) {
+        socket.to(roomCode).emit("game:reaction", {
+          kind: "sticker",
+          src: reaction.src,
+          alt: typeof reaction.alt === "string" ? reaction.alt.slice(0, 60) : "",
+        });
+      }
+    });
+
     socket.on(
       "room:removeSeat",
       withAck(async ({ roomCode, seatId }, ack) => {

@@ -2,13 +2,19 @@
 
 import { useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { IconSmiley, IconPalette } from "@/components/game/gameIcons";
+import { IconSmiley, IconPalette, IconKebab } from "@/components/game/gameIcons";
 import ReactionPicker, { type Reaction } from "@/components/game/ReactionPicker";
 
-// A small floating bar with just the two reaction triggers — tapping one
-// opens a picker of options, selecting one shows it briefly over the board
-// (see GameView.tsx). Not tied to any player seat.
-export default function ReactionBar({ onReact }: { onReact: (reaction: Reaction) => void }) {
+// A small floating bar of game-wide controls (not tied to any player seat):
+// the two reaction triggers, and "more" for the room-wide Game Menu (see
+// GameMenu.tsx, opened by GameView).
+export default function ReactionBar({
+  onReact,
+  onMore,
+}: {
+  onReact: (reaction: Reaction) => void;
+  onMore: () => void;
+}) {
   const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | null>(null);
 
   return (
@@ -44,6 +50,14 @@ export default function ReactionBar({ onReact }: { onReact: (reaction: Reaction)
           )}
         </AnimatePresence>
       </div>
+
+      <button
+        onClick={onMore}
+        aria-label="More options"
+        className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-ink-muted transition hover:bg-surface-2 hover:text-ink"
+      >
+        <IconKebab className="h-5 w-5" />
+      </button>
     </div>
   );
 }

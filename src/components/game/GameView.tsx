@@ -16,12 +16,15 @@ import {
   transferHost,
   endGame as emitEndGame,
   rematch,
+  sendReaction,
 } from "@/lib/socketActions";
+import { getSocket } from "@/lib/socket";
 import { colorForArm } from "@/game/board";
 import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor } from "@/game/engine";
 import Dice from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import ReactionBar from "@/components/game/ReactionBar";
+import GameMenu from "@/components/game/GameMenu";
 import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
@@ -44,19 +47,41 @@ export default function GameView({ room }: { room: Room }) {
   const mySeats = useRoomStore((s) => s.mySeats);
   const isHost = !!room.hostSeatId && mySeats.some((s) => s.id === room.hostSeatId);
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
+  const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [rematchLoading, setRematchLoading] = useState(false);
   const [rematchError, setRematchError] = useState<string | null>(null);
   const [activeReaction, setActiveReaction] = useState<Reaction | null>(null);
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reduceMotion = useReducedMotion();
 
-  const handleReact = (reaction: Reaction) => {
+  const showReaction = (reaction: Reaction) => {
     setActiveReaction(reaction);
     if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
     reactionTimerRef.current = setTimeout(() => setActiveReaction(null), REACTION_DISPLAY_MS);
   };
+  const handleReact = (reaction: Reaction) => {
+    showReaction(reaction);
+    sendReaction(room.code, reaction);
+  };
   useEffect(() => () => {
     if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
+  }, []);
+
+  // Reactions broadcast from other seats/spectators in the same room — the
+  // sender already shows theirs locally via handleReact above, so this only
+  // ever fires for reactions someone else sent (see game:reaction in
+  // server.js, which relays to everyone but the sender).
+  useEffect(() => {
+    const socket = getSocket();
+    const onIncoming = (reaction: Reaction) => {
+      setActiveReaction(reaction);
+      if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
+      reactionTimerRef.current = setTimeout(() => setActiveReaction(null), REACTION_DISPLAY_MS);
+    };
+    socket.on("game:reaction", onIncoming);
+    return () => {
+      socket.off("game:reaction", onIncoming);
+    };
   }, []);
 
   const handleRematch = async () => {
@@ -192,6 +217,7 @@ export default function GameView({ room }: { room: Room }) {
           onClose={() => setSelectedSeatId(null)}
         />
       )}
+      {gameMenuOpen && <GameMenu roomCode={room.code} isHost={isHost} onClose={() => setGameMenuOpen(false)} />}
 
       <div className="relative flex shrink-0 items-center justify-between px-4">
         <PlayerCorner
@@ -204,7 +230,7 @@ export default function GameView({ room }: { room: Room }) {
         />
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div className="pointer-events-auto">
-            <ReactionBar onReact={handleReact} />
+            <ReactionBar onReact={handleReact} onMore={() => setGameMenuOpen(true)} />
           </div>
         </div>
         <PlayerCorner
@@ -235,13 +261,13 @@ export default function GameView({ room }: { room: Room }) {
               className="pointer-events-none absolute inset-0 flex items-center justify-center"
             >
               {activeReaction.kind === "emoji" ? (
-                <span className="text-[75cqmin] leading-none drop-shadow-lg">{activeReaction.value}</span>
+                <span className="text-[60cqmin] leading-none drop-shadow-lg">{activeReaction.value}</span>
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={activeReaction.src}
                   alt={activeReaction.alt}
-                  className="h-[75cqmin] w-[75cqmin] object-contain drop-shadow-lg"
+                  className="h-[60cqmin] w-[60cqmin] object-contain drop-shadow-lg"
                 />
               )}
             </motion.div>
