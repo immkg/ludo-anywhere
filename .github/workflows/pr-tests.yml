@@ -1,0 +1,98 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+
+      - name: Install dependencies (head)
+        run: npm ci
+
+      - name: Run tests (head)
+        id: head_tests
+        run: npx vitest run --reporter=json --outputFile=${{ runner.temp }}/vitest-head.json
+        continue-on-error: true
+
+      - name: Prepare base branch worktree
+        id: base_worktree
+        run: git worktree add --detach "${{ runner.temp }}/base-branch" "origin/${{ github.base_ref }}"
+        continue-on-error: true
+
+      - name: Install dependencies (base)
+        if: steps.base_worktree.outcome == 'success'
+        working-directory: ${{ runner.temp }}/base-branch
+        run: npm ci
+        continue-on-error: true
+
+      - name: Run tests (base)
+        if: steps.base_worktree.outcome == 'success'
+        working-directory: ${{ runner.temp }}/base-branch
+        run: npx vitest run --reporter=json --outputFile=${{ runner.temp }}/vitest-base.json
+        continue-on-error: true
+
+      - name: Build test summary
+        run: |
+          node scripts/ci/summarize-test-results.mjs \
+            "${{ runner.temp }}/vitest-head.json" "$GITHUB_WORKSPACE" \
+            "${{ runner.temp }}/vitest-base.json" "${{ runner.temp }}/base-branch" \
+            "${{ runner.temp }}/comment.md"
+
+      - name: Post sticky test-results comment
+        uses: actions/github-script@v7
+        env:
+          COMMENT_PATH: ${{ runner.temp }}/comment.md
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync(process.env.COMMENT_PATH, "utf8");
+            const marker = "<!-- pr-test-results -->";
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail job if tests failed
+        if: steps.head_tests.outcome == 'failure'
+        run: exit 1
