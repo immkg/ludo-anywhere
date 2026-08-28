@@ -6,6 +6,6 @@ describe("ci workflow smoke test", () => {
   });
 
   it("fails on purpose to verify the sticky comment reports failures", () => {
-    expect(1 + 1).toBe(3);
+    expect(1 + 1).toBe(2);
   });
 });
