@@ -15,6 +15,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # prisma generate (postinstall) only needs this to resolve config, not a live database.
+      DATABASE_URL: "postgresql://user:password@localhost:5432/db"
     steps:
       - name: Checkout PR head
         uses: actions/checkout@v4
