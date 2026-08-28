@@ -32,7 +32,7 @@ export default function Button({
       className={cn(
         "rounded-2xl font-semibold transition disabled:opacity-40 disabled:pointer-events-none",
         stacked
-          ? "flex min-h-16 items-center gap-3 px-4 py-2 text-left"
+          ? "flex min-h-16 items-center justify-center gap-3 px-4 py-2 text-left"
           : "min-h-12 px-5 text-base",
         VARIANT_CLASSES[variant],
         className
