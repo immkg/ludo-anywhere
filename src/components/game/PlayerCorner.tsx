@@ -55,8 +55,8 @@ export default function PlayerCorner({ seat, avatarFirst, isTurn, placement, sus
   const avatar = (
     <span className="relative shrink-0">
       <span
-        className="flex h-9 w-9 items-center justify-center rounded-full border-2 text-lg leading-none"
-        style={{ borderColor: color.hex, backgroundColor: `${color.hex}22` }}
+        className="flex h-9 w-9 items-center justify-center rounded-full border-2 text-lg leading-none shadow-sm"
+        style={{ borderColor: color.hex, backgroundColor: `${color.hex}2E` }}
       >
         {animalForSeat(seat.id)}
       </span>
@@ -64,13 +64,24 @@ export default function PlayerCorner({ seat, avatarFirst, isTurn, placement, sus
     </span>
   );
   const name = (
-    <span
-      className={cn("max-w-[6.5rem] truncate text-sm font-semibold", !avatarFirst && "text-right")}
-      style={{ color: color.hex }}
-      title={seat.name}
-    >
-      {seat.name}
-      {suspended && <span className="ml-1 text-xs font-normal text-ink-muted">(paused)</span>}
+    <span className={cn("flex min-w-0 flex-col", !avatarFirst && "items-end text-right")}>
+      <span
+        className="max-w-[6.5rem] truncate text-sm font-bold leading-tight"
+        style={{ color: color.hex }}
+        title={seat.name}
+      >
+        {seat.name}
+      </span>
+      {suspended && <span className="text-[11px] font-medium text-ink-muted">Paused</span>}
+      {isTurn && !suspended && (
+        <span className="flex items-center gap-1 text-[11px] font-bold" style={{ color: color.hex }}>
+          <span
+            className="motion-safe:animate-pulse h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: color.hex }}
+          />
+          Turn
+        </span>
+      )}
     </span>
   );
 
@@ -79,11 +90,13 @@ export default function PlayerCorner({ seat, avatarFirst, isTurn, placement, sus
   return (
     <Wrapper
       onClick={onClick}
-      className="flex items-center gap-2 rounded-full border px-2 py-1 transition-shadow"
+      aria-label={onClick ? `Manage ${seat.name}` : undefined}
+      className={cn("flex items-center gap-2 rounded-2xl border px-2.5 py-1.5 shadow-sm transition-shadow", onClick && "cursor-pointer")}
       style={{
-        borderColor: isTurn ? color.hex : "transparent",
-        boxShadow: isTurn ? `0 0 0 2px ${color.hex}44` : undefined,
-        opacity: seat.connected && !suspended ? 1 : 0.5,
+        backgroundColor: `${color.hex}1A`,
+        borderColor: isTurn ? color.hex : `${color.hex}40`,
+        boxShadow: isTurn ? `0 0 0 3px ${color.hex}33, 0 2px 6px ${color.hex}26` : undefined,
+        opacity: seat.connected && !suspended ? 1 : 0.55,
       }}
     >
       {avatarFirst ? (
