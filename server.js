@@ -337,7 +337,14 @@ app.prepare().then(() => {
         if (!room) return ack?.({ error: "Room not found" });
 
         const reconnectUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
-        const reconnected = reconnectSeats(room, knownTokens || [], socket.id, reconnectUserId);
+        // A request that's actually asking to seat one or more NEW profiles
+        // (e.g. the lobby's "Add Player") must not be swallowed by the
+        // userId-based reconnect fallback below — that fallback exists so a
+        // signed-in account can reclaim its OWN existing seat from a second
+        // device with no local tokens, not to silently no-op an add-seat
+        // request into "reconnect me to whichever seat I already have".
+        const wantsNewSeats = Array.isArray(seats) && seats.length > 0;
+        const reconnected = reconnectSeats(room, knownTokens || [], socket.id, wantsNewSeats ? null : reconnectUserId);
         if (reconnected.length > 0) {
           socket.join(room.code);
           ack?.({
