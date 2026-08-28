@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { declineRoomInvite } from "@/lib/socketActions";
 import { useNotificationsStore } from "@/store/useNotificationsStore";
 
 // Mounted once near the app root (see SocketProvider) so a friend's room
@@ -33,7 +34,10 @@ export default function RoomInviteBanner() {
             Join
           </button>
           <button
-            onClick={() => dismiss(invite.id)}
+            onClick={() => {
+              declineRoomInvite(invite.roomCode, invite.fromUserId);
+              dismiss(invite.id);
+            }}
             className="shrink-0 text-xs font-semibold text-ink-muted underline"
           >
             Dismiss

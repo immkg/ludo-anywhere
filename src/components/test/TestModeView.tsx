@@ -28,6 +28,7 @@ function buildSeats(count: number): Seat[] {
     armIndex: armForSeatIndex(i, count),
     deviceId: "test",
     connected: true,
+    profileId: null,
   }));
 }
 

@@ -16,6 +16,7 @@ import Input from "@/components/ui/Input";
 import NumberPicker from "@/components/ui/NumberPicker";
 import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
 import FriendAvatar from "@/components/friends/FriendAvatar";
+import { IconClock } from "@/components/lobby/icons";
 import type { OwnedSeat } from "@/types/room";
 
 export default function JoinRoom() {
@@ -152,118 +153,186 @@ export default function JoinRoom() {
   const friendsPlayingNow = friends.filter((f) => presence[f.userId]?.online && presence[f.userId]?.roomCode);
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-extrabold">Join room</h1>
-        <Link href="/" className="text-sm font-semibold text-ink-muted underline">
-          Home
-        </Link>
-      </div>
+    <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
+      <Link
+        href="/"
+        aria-label="Back to home"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink-muted"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
+      </Link>
 
-      {claimable ? (
-        <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
-          <p className="text-sm font-semibold text-ink-muted">
-            That game&rsquo;s already in progress
-            {claimable.length > 0 ? " — but you can take over an open seat:" : "."}
-          </p>
-          {claimable.length === 0 ? (
-            <p className="text-sm text-ink-muted">No seats are open to join right now.</p>
-          ) : (
-            claimable.map((seat) => (
-              <button
-                key={seat.id}
-                disabled={claimingId === seat.id}
-                onClick={() => handleClaim(seat.id)}
-                className="rounded-2xl border border-line bg-surface-2 px-4 py-3 text-left font-medium disabled:opacity-40"
-              >
-                {claimingId === seat.id ? "Joining…" : `Take over ${seat.name}’s seat`}
-              </button>
-            ))
-          )}
-          <button onClick={() => setClaimable(null)} className="text-sm font-semibold text-ink-muted underline">
-            Back
-          </button>
-        </div>
-      ) : waiting ? (
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-line p-6 text-center">
-          <p className="font-semibold">Waiting for the host to approve…</p>
-          <p className="text-sm text-ink-muted">
-            They&rsquo;ll see your request the moment they&rsquo;re back in the app.
-          </p>
-          <button
-            onClick={() => setWaiting(false)}
-            className="text-sm font-semibold text-ink-muted underline"
-          >
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <>
-      {friendsPlayingNow.length > 0 && (
-        <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
-          <p className="text-sm font-semibold text-ink-muted">Friends playing now</p>
-          {friendsPlayingNow.map((friend) => (
-            <div key={friend.userId} className="flex items-center gap-3">
-              <FriendAvatar image={friend.image} />
-              <p className="min-w-0 flex-1 truncate text-sm">{friend.name ?? friend.email}</p>
-              <button
-                disabled={askingUserId === friend.userId}
-                onClick={() => handleAskToJoin(friend.userId, presence[friend.userId]!.roomCode!)}
-                className="shrink-0 text-xs font-semibold text-accent underline disabled:text-ink-muted"
-              >
-                {askingUserId === friend.userId ? "Waiting…" : "Ask to join"}
+      <div className="mt-6 flex flex-col gap-8 md:mt-10 md:flex-row md:items-center md:gap-14 lg:gap-20">
+        <div className="flex w-full max-w-md flex-1 flex-col gap-6">
+          <div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/icon-join.png" alt="" aria-hidden className="hidden h-8 w-8 min-[390px]:block" />
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Join Room</h1>
+            <p className="mt-1.5 max-w-[34ch] text-sm text-ink-muted sm:text-base">
+              Enter the room code your host shared, or ask a friend who&rsquo;s already playing.
+            </p>
+          </div>
+
+          {claimable ? (
+            <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
+              <p className="text-sm font-semibold text-ink-muted">
+                That game&rsquo;s already in progress
+                {claimable.length > 0 ? " — but you can take over an open seat:" : "."}
+              </p>
+              {claimable.length === 0 ? (
+                <p className="text-sm text-ink-muted">No seats are open to join right now.</p>
+              ) : (
+                claimable.map((seat) => (
+                  <button
+                    key={seat.id}
+                    disabled={claimingId === seat.id}
+                    onClick={() => handleClaim(seat.id)}
+                    className="rounded-2xl border border-line bg-surface-2 px-4 py-3 text-left font-medium disabled:opacity-40"
+                  >
+                    {claimingId === seat.id ? "Joining…" : `Take over ${seat.name}’s seat`}
+                  </button>
+                ))
+              )}
+              <button onClick={() => setClaimable(null)} className="self-start text-sm font-semibold text-ink-muted underline">
+                Back
               </button>
             </div>
-          ))}
+          ) : waiting ? (
+            <div className="flex flex-col items-center gap-3 rounded-3xl border-2 border-dashed border-line p-8 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-accent">
+                <IconClock className="h-6 w-6" />
+              </span>
+              <p className="font-bold text-ink">Waiting for the host to approve…</p>
+              <p className="text-sm text-ink-muted">
+                They&rsquo;ll see your request the moment they&rsquo;re back in the app.
+              </p>
+              <button onClick={() => setWaiting(false)} className="text-sm font-semibold text-ink-muted underline">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <>
+              {friendsPlayingNow.length > 0 && (
+                <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface-2 p-3.5 sm:p-4">
+                  <p className="text-sm font-bold text-ink-muted">Friends playing now</p>
+                  {friendsPlayingNow.map((friend) => (
+                    <div key={friend.userId} className="flex items-center gap-3">
+                      <FriendAvatar image={friend.image} />
+                      <p className="min-w-0 flex-1 truncate text-sm">{friend.name ?? friend.email}</p>
+                      <button
+                        disabled={askingUserId === friend.userId}
+                        onClick={() => handleAskToJoin(friend.userId, presence[friend.userId]!.roomCode!)}
+                        className="shrink-0 text-xs font-semibold text-accent underline disabled:text-ink-muted"
+                      >
+                        {askingUserId === friend.userId ? "Waiting…" : "Ask to join"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3 rounded-3xl border-2 border-accent/25 bg-surface p-4 sm:p-5">
+                <label htmlFor="room-code" className="text-sm font-semibold text-ink-muted">
+                  Room code
+                </label>
+                <Input
+                  id="room-code"
+                  className="text-center text-2xl font-extrabold tracking-[0.3em] uppercase sm:text-3xl"
+                  placeholder="ABCDE"
+                  value={roomCode}
+                  maxLength={6}
+                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-semibold text-ink-muted">Players on this device</label>
+                <NumberPicker
+                  options={[1, 2, 3, 4]}
+                  value={seats.length}
+                  onChange={(n) => setSeats((prev) => defaultSeats(n, prev))}
+                />
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {seats.map((seat, i) => {
+                  const takenElsewhere = new Set(seats.filter((_, j) => j !== i).map((s) => s.profileId));
+                  return (
+                    <SeatRow
+                      key={i}
+                      index={i}
+                      seat={seat}
+                      previewArmIndex={null}
+                      profiles={profiles.filter((p) => !takenElsewhere.has(p.id))}
+                      onChange={(next) => setSeats((prev) => prev.map((s, j) => (j === i ? next : s)))}
+                      onCreateProfile={createProfile}
+                      showColorSwatch={false}
+                    />
+                  );
+                })}
+              </div>
+
+              <div className="flex items-end justify-center gap-1 min-[390px]:gap-1.5 md:hidden" aria-hidden>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/pawn-blue.png" alt="" className="h-10 w-auto min-[390px]:h-14" />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/pawn-yellow.png" alt="" className="h-10 w-auto min-[390px]:h-14" />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/dice.png" alt="" className="mx-0.5 h-8 w-auto translate-y-1.5 min-[390px]:h-11" />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/pawn-green.png" alt="" className="h-10 w-auto min-[390px]:h-14" />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/pawn-red.png" alt="" className="h-10 w-auto min-[390px]:h-14" />
+              </div>
+
+              {error && <p className="text-sm text-accent">{error}</p>}
+
+              <Button onClick={handleJoin} disabled={loading} className="w-full">
+                <span className="flex w-full items-center justify-center gap-2">
+                  {loading ? "Joining…" : "Join Room"}
+                  {!loading && (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>
+                  )}
+                </span>
+              </Button>
+            </>
+          )}
         </div>
-      )}
 
-      <div>
-        <label className="text-sm font-semibold text-ink-muted">Room code</label>
-        <Input
-          className="mt-2 text-center text-xl font-bold tracking-[0.3em] uppercase"
-          placeholder="ABCDE"
-          value={roomCode}
-          maxLength={6}
-          onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-        />
+        <div className="relative hidden shrink-0 md:flex md:w-[300px] md:justify-center lg:w-[380px]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/hero-illustration.png"
+            alt="Four players around a Ludo board"
+            className="w-full max-w-[260px] object-contain lg:max-w-[320px]"
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/star-yellow.png"
+            alt=""
+            aria-hidden
+            className="absolute -left-1 top-2 h-6 w-6 opacity-90 lg:h-7 lg:w-7"
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/cross-blue.png"
+            alt=""
+            aria-hidden
+            className="absolute right-2 top-8 h-4 w-4 opacity-80 lg:right-4"
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/star-red.png"
+            alt=""
+            aria-hidden
+            className="absolute bottom-6 right-0 h-5 w-5 opacity-80 lg:right-2"
+          />
+        </div>
       </div>
-
-      <div>
-        <label className="text-sm font-semibold text-ink-muted">Players on this device</label>
-        <NumberPicker
-          options={[1, 2, 3, 4]}
-          value={seats.length}
-          onChange={(n) => setSeats((prev) => defaultSeats(n, prev))}
-        />
-      </div>
-
-      <div className="flex flex-col gap-3">
-        {seats.map((seat, i) => {
-          const takenElsewhere = new Set(
-            seats.filter((_, j) => j !== i).map((s) => s.profileId)
-          );
-          return (
-            <SeatRow
-              key={i}
-              index={i}
-              seat={seat}
-              previewArmIndex={null}
-              profiles={profiles.filter((p) => !takenElsewhere.has(p.id))}
-              onChange={(next) => setSeats((prev) => prev.map((s, j) => (j === i ? next : s)))}
-              onCreateProfile={createProfile}
-            />
-          );
-        })}
-      </div>
-
-      {error && <p className="text-sm text-accent">{error}</p>}
-
-      <Button onClick={handleJoin} disabled={loading}>
-        {loading ? "Joining…" : "Join room"}
-      </Button>
-        </>
-      )}
-    </div>
+    </main>
   );
 }

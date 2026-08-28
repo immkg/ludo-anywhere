@@ -90,6 +90,12 @@ export function inviteFriendToRoom(roomCode: string, friendUserId: string) {
   return emitWithAck("room:invite", { roomCode, friendUserId });
 }
 
+// Fire-and-forget, same shape as declineJoinRequest — lets the inviter see
+// "Rejected" instead of an invite that looks permanently pending.
+export function declineRoomInvite(roomCode: string, hostUserId: string) {
+  getSocket().emit("room:invite:decline", { roomCode, hostUserId });
+}
+
 // Fire-and-forget analytics for a share-button tap — no ack, since the UI
 // never needs to know whether it landed. `type` must be one of the values
 // server.js's TRACKABLE_EVENTS allowlists, or the server just drops it.
