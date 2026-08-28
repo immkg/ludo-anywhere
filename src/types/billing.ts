@@ -17,8 +17,8 @@ export type EntitlementStatus = {
   };
 };
 
-export type RazorpayOrderResponse = {
+export type UropaiOrderResponse = {
   orderId: string;
   amountInr: number;
-  keyId: string;
+  checkoutUrl: string;
 };

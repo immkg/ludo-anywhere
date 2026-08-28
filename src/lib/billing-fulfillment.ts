@@ -1,52 +1,49 @@
-import { NextResponse } from "next/server";
-import Razorpay from "razorpay";
+import type { Payment } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getOrder } from "@/lib/uropai";
 import { getPricingConfig, logEvent } from "@/lib/entitlements";
 import { trackUmami } from "@/server/umami.js";
 
-// The only place a Payment is ever marked PAID and an Entitlement/
-// CreditBatch is ever granted — never the client's own post-checkout
-// callback, which only reflects /api/billing/status. Verifies the raw
-// body against X-Razorpay-Signature before touching anything; idempotent
-// via Payment.razorpayPaymentId's unique constraint and by only acting
-// when the row is still CREATED (a redelivered webhook — Razorpay retries
-// on any non-2xx — finds it already PAID/FAILED and no-ops).
-export async function POST(request: Request) {
-  const rawBody = await request.text();
-  const signature = request.headers.get("x-razorpay-signature");
-  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+// Uropai's webhook delivery is best-effort/advisory, not the source of
+// truth (per their docs) — so both the webhook route and the status
+// endpoint's polling call this to re-fetch the order from Uropai's API
+// before ever marking a Payment PAID/FAILED. Never trust the webhook
+// payload's own status field, or any client-side callback, directly.
+export async function reconcileOrder(uropaiOrderId: string): Promise<void> {
+  const payment = await prisma.payment.findUnique({ where: { uropaiOrderId } });
+  if (!payment || payment.status !== "CREATED") return; // already settled, or an order we don't know about
 
-  if (!signature || !secret || !Razorpay.validateWebhookSignature(rawBody, signature, secret)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+  // Reconciliation is best-effort: a lookup failure (Uropai's API down, or
+  // an order Uropai doesn't recognize — e.g. a stale pre-cutover row from
+  // before this gateway existed) must never break the caller, since both
+  // callers (the webhook and the status endpoint's poll) need to keep
+  // working regardless. It'll just get retried on the next poll/delivery.
+  let order;
+  try {
+    order = await getOrder(uropaiOrderId);
+  } catch (e) {
+    console.error(`reconcileOrder: failed to fetch order ${uropaiOrderId}`, e);
+    return;
   }
 
-  const event = JSON.parse(rawBody);
-  const paymentEntity = event?.payload?.payment?.entity;
-
-  if (event.event === "payment.captured" && paymentEntity) {
-    await handleCaptured(paymentEntity);
-  } else if (event.event === "payment.failed" && paymentEntity) {
-    await handleFailed(paymentEntity);
+  if (order.status === "PAID") {
+    await grantPayment(payment);
+  } else if (order.status === "FAILED" || order.status === "EXPIRED" || order.status === "CANCELLED") {
+    await failPayment(payment);
   }
-  // Any other event type is one we don't act on — still ack with 200 so
-  // Razorpay doesn't retry it forever.
-
-  return NextResponse.json({ ok: true });
+  // PENDING: leave as CREATED — a later poll or webhook delivery will settle it.
 }
 
-async function handleCaptured(paymentEntity: { id: string; order_id: string }) {
-  const payment = await prisma.payment.findUnique({ where: { razorpayOrderId: paymentEntity.order_id } });
-  if (!payment) return;
-
+async function grantPayment(payment: Payment) {
   const config = await getPricingConfig();
   const now = new Date();
 
   const granted = await prisma.$transaction(async (tx) => {
     const updated = await tx.payment.updateMany({
       where: { id: payment.id, status: "CREATED" },
-      data: { status: "PAID", verifiedAt: now, razorpayPaymentId: paymentEntity.id },
+      data: { status: "PAID", verifiedAt: now },
     });
-    if (updated.count === 0) return false; // already processed by an earlier delivery
+    if (updated.count === 0) return false; // already processed by a concurrent reconcile
 
     if (payment.purpose === "PACK") {
       await tx.creditBatch.create({
@@ -94,10 +91,7 @@ async function handleCaptured(paymentEntity: { id: string; order_id: string }) {
   }
 }
 
-async function handleFailed(paymentEntity: { order_id: string }) {
-  const payment = await prisma.payment.findUnique({ where: { razorpayOrderId: paymentEntity.order_id } });
-  if (!payment) return;
-
+async function failPayment(payment: Payment) {
   const updated = await prisma.payment.updateMany({
     where: { id: payment.id, status: "CREATED" },
     data: { status: "FAILED" },

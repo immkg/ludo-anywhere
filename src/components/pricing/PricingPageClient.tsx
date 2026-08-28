@@ -1,31 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import Script from "next/script";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Button from "@/components/ui/Button";
-import type { BillingPurpose, EntitlementStatus, RazorpayOrderResponse } from "@/types/billing";
-
-// Razorpay Checkout is loaded from their CDN as a plain script (not an npm
-// package) and attaches itself to `window.Razorpay` — this is the minimal
-// shape this page actually calls.
-type RazorpayCheckout = {
-  open: () => void;
-};
-type RazorpayConstructor = new (options: {
-  key: string;
-  amount: number;
-  currency: string;
-  order_id: string;
-  name: string;
-  description: string;
-  prefill?: { email?: string | null };
-  theme?: { color: string };
-  handler: () => void;
-  modal?: { ondismiss?: () => void };
-}) => RazorpayCheckout;
+import type { BillingPurpose, EntitlementStatus, UropaiOrderResponse } from "@/types/billing";
 
 async function fetchStatus(): Promise<EntitlementStatus | null> {
   const res = await fetch("/api/billing/status");
@@ -42,15 +22,15 @@ export default function PricingPageClient() {
   const [status, setStatus] = useState<EntitlementStatus | null>(null);
   const [buying, setBuying] = useState<BillingPurpose | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const scriptLoaded = useRef(false);
 
   useEffect(() => {
     fetchStatus().then(setStatus);
   }, []);
 
-  // While "processing", the purchase itself already succeeded at Razorpay —
-  // we're just waiting for the webhook to land and grant the entitlement,
-  // so poll briefly rather than trust the client-side checkout callback.
+  // While "processing", the user has been redirected back from Uropai's
+  // hosted checkout — we're just waiting for /api/billing/status to
+  // reconcile the order and grant the entitlement, so poll briefly rather
+  // than trust anything about the redirect itself.
   useEffect(() => {
     if (!processing) return;
     let attempts = 0;
@@ -68,39 +48,27 @@ export default function PricingPageClient() {
 
   const buy = useCallback(
     async (purpose: BillingPurpose) => {
-      if (!scriptLoaded.current || !session?.user) return;
+      if (!session?.user) return;
       setBuying(purpose);
       setError(null);
       try {
-        const res = await fetch("/api/billing/razorpay/order", {
+        const res = await fetch("/api/billing/uropai/order", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ purpose }),
         });
         if (!res.ok) throw new Error("Could not start checkout");
-        const order: RazorpayOrderResponse = await res.json();
-
-        const Razorpay = (window as unknown as { Razorpay: RazorpayConstructor }).Razorpay;
-        const checkout = new Razorpay({
-          key: order.keyId,
-          amount: order.amountInr * 100,
-          currency: "INR",
-          order_id: order.orderId,
-          name: "MyLudo",
-          description: purposeLabel(purpose),
-          prefill: { email: session.user.email },
-          theme: { color: "#ff6b3d" },
-          handler: () => router.push("/pricing?status=processing"),
-          modal: { ondismiss: () => setBuying(null) },
-        });
-        checkout.open();
+        const order: UropaiOrderResponse = await res.json();
+        // Uropai's checkout is a hosted redirect page, not an in-page
+        // modal — the user lands back on /pricing?status=processing (set
+        // as the order's returnUrl) once they're done there.
+        window.location.href = order.checkoutUrl;
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not start checkout");
-      } finally {
         setBuying(null);
       }
     },
-    [session, router]
+    [session]
   );
 
   const planType = status?.entitlement?.type ?? null;
@@ -108,12 +76,6 @@ export default function PricingPageClient() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
-      <Script
-        src="https://checkout.razorpay.com/v1/checkout.js"
-        onLoad={() => {
-          scriptLoaded.current = true;
-        }}
-      />
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-extrabold">Get more games</h1>
         <Link href="/" className="text-sm font-semibold text-ink-muted underline">
@@ -220,12 +182,6 @@ export default function PricingPageClient() {
       </p>
     </main>
   );
-}
-
-function purposeLabel(purpose: BillingPurpose) {
-  if (purpose === "PACK") return "Game Pack";
-  if (purpose === "MONTHLY") return "Monthly pass";
-  return "Annual pass";
 }
 
 function PlanStatusCard({ title, until, detail }: { title: string; until: string; detail: string }) {

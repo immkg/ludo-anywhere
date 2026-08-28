@@ -219,8 +219,8 @@ model Payment {
   purpose           String // PACK | MONTHLY | ANNUAL
   amountInr         Int
   discountInr       Int       @default(0) // e.g. the Monthly->Annual upgrade credit, for audit/analytics
-  razorpayOrderId   String    @unique
-  razorpayPaymentId String?   @unique
+  uropaiOrderId     String    @unique
+  tenantOrderRef    String    @unique // idempotency key sent to Uropai when creating the order
   status            String // CREATED | PAID | FAILED
   createdAt         DateTime  @default(now())
   verifiedAt        DateTime?

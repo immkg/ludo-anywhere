@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   // requests by default, which otherwise breaks hydration silently (page
   // renders, but no client JS ever attaches: buttons don't respond, and
   // session/state that depends on an effect never resolves).
-  allowedDevOrigins: ["192.168.1.10"],
+  allowedDevOrigins: ["192.168.1.10", "regular-aware-lemming.ngrok-free.app"],
 };
 
 export default nextConfig;
