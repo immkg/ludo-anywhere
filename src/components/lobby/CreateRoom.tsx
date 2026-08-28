@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { createRoom } from "@/lib/socketActions";
+import { createRoom, inviteFriendToRoom } from "@/lib/socketActions";
 import { saveOwnedSeats } from "@/lib/identity";
 import { useRoomStore } from "@/store/useRoomStore";
 import { useProfiles } from "@/hooks/useProfiles";
@@ -16,6 +16,8 @@ const PLAYER_COUNTS = [2, 3, 4] as const;
 
 export default function CreateRoom() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteFriendId = searchParams.get("invite");
   const { data: session } = useSession();
   const addMySeats = useRoomStore((s) => s.addMySeats);
   const { profiles, loading: profilesLoading } = useProfiles();
@@ -56,6 +58,10 @@ export default function CreateRoom() {
       if (!res.roomCode || !res.seats) throw new Error("Could not create room");
       saveOwnedSeats(res.roomCode, res.seats);
       addMySeats(res.seats);
+      // Came here via a friend's "Play" button on the Friends page — get
+      // the invite out to them as soon as the room exists, same emit
+      // WaitingRoom's own invite list uses.
+      if (inviteFriendId) inviteFriendToRoom(res.roomCode, inviteFriendId).catch(() => {});
       router.push(`/room/${res.roomCode}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create room");

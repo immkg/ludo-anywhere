@@ -1,6 +1,7 @@
 "use client";
 
 import { useFriends } from "@/hooks/useFriends";
+import RoomReadyBanner from "./RoomReadyBanner";
 import FriendsList from "./FriendsList";
 import FriendRequests from "./FriendRequests";
 import FriendSearch from "./FriendSearch";
@@ -12,15 +13,27 @@ export default function FriendsPageClient() {
 
   return (
     <div className="flex flex-col gap-6">
-      <FriendSearch search={search} onSendRequest={sendRequest} />
+      <RoomReadyBanner />
 
-      <FriendRequests incoming={incoming} outgoing={outgoing} onAccept={acceptRequest} onDecline={declineRequest} />
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="flex flex-col gap-6">
+          <FriendSearch search={search} onSendRequest={sendRequest} friends={friends} outgoing={outgoing} />
+        </div>
 
-      {loading ? (
-        <p className="text-ink-muted">Loading…</p>
-      ) : (
-        <FriendsList friends={friends} onRemove={removeFriend} />
-      )}
+        <div className="flex flex-col gap-6">
+          <FriendRequests incoming={incoming} outgoing={outgoing} onAccept={acceptRequest} onDecline={declineRequest} />
+
+          {loading ? (
+            <div className="flex flex-col gap-3" aria-hidden>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-16 animate-pulse rounded-2xl bg-surface-2" />
+              ))}
+            </div>
+          ) : (
+            <FriendsList friends={friends} onRemove={removeFriend} />
+          )}
+        </div>
+      </div>
 
       <InviteLinkCard />
     </div>

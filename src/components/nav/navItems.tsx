@@ -11,6 +11,10 @@ export const BLUE = "#1565E8";
 export const GREEN = "#1F9E4C";
 export const VIOLET = "#8b5cf6";
 export const GOLD = "var(--color-accent-2)";
+// Same red already used for the destructive "Sign out" action in
+// AccountSheet/DesktopSidebar — reused here so "danger" means one hue
+// app-wide instead of each screen picking its own.
+export const RED = "#E8262C";
 
 export type NavItem = {
   href: string;

@@ -1,4 +1,12 @@
-export default function FriendAvatar({ image }: { image?: string | null }) {
+const SIZES = { sm: "h-9 w-9", md: "h-11 w-11" } as const;
+
+export default function FriendAvatar({
+  image,
+  size = "sm",
+}: {
+  image?: string | null;
+  size?: keyof typeof SIZES;
+}) {
   if (image) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -6,9 +14,9 @@ export default function FriendAvatar({ image }: { image?: string | null }) {
         src={image}
         alt=""
         referrerPolicy="no-referrer"
-        className="h-9 w-9 shrink-0 rounded-full border border-line"
+        className={`${SIZES[size]} shrink-0 rounded-full border border-line object-cover`}
       />
     );
   }
-  return <span className="h-9 w-9 shrink-0 rounded-full border border-line bg-surface-2" />;
+  return <span className={`${SIZES[size]} shrink-0 rounded-full border border-line bg-surface-2`} />;
 }
