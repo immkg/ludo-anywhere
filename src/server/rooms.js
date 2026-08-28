@@ -359,6 +359,7 @@ export function serializeRoom(room) {
       armIndex: s.armIndex,
       deviceId: s.deviceId,
       connected: s.connected,
+      profileId: s.profileId ?? null,
     })),
   };
 }

@@ -289,7 +289,13 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
         </main>
       </div>
 
-      {addPlayerOpen && <AddPlayerModal roomCode={room.code} onClose={() => setAddPlayerOpen(false)} />}
+      {addPlayerOpen && (
+        <AddPlayerModal
+          roomCode={room.code}
+          seatedProfileIds={new Set(room.seats.map((s) => s.profileId).filter((id) => id != null))}
+          onClose={() => setAddPlayerOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -298,9 +304,18 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
 // leaving the lobby — reuses the same room:join path CreateRoom/JoinRoom
 // use, just from inside WaitingRoom. The server still enforces everything
 // (room not full, that profile not already seated elsewhere).
-function AddPlayerModal({ roomCode, onClose }: { roomCode: string; onClose: () => void }) {
+function AddPlayerModal({
+  roomCode,
+  seatedProfileIds,
+  onClose,
+}: {
+  roomCode: string;
+  seatedProfileIds: Set<string>;
+  onClose: () => void;
+}) {
   const addMySeats = useRoomStore((s) => s.addMySeats);
   const { profiles, createProfile } = useProfiles();
+  const availableProfiles = profiles.filter((p) => !seatedProfileIds.has(p.id));
   const [seat, setSeat] = useState<SeatDraft>(defaultSeats(1, [])[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -334,11 +349,14 @@ function AddPlayerModal({ roomCode, onClose }: { roomCode: string; onClose: () =
             Cancel
           </button>
         </div>
+        {availableProfiles.length === 0 && (
+          <p className="text-xs text-ink-muted">All your players are already in this room — add a new one below.</p>
+        )}
         <SeatRow
           index={0}
           seat={seat}
           previewArmIndex={null}
-          profiles={profiles}
+          profiles={availableProfiles}
           onChange={setSeat}
           onCreateProfile={createProfile}
         />

@@ -6,6 +6,7 @@ export type Seat = {
   armIndex: number;
   deviceId: string;
   connected: boolean;
+  profileId: string | null;
 };
 
 export type Room = {
