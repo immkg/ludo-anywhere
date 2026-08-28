@@ -28,6 +28,7 @@ export function useSocketConnection() {
   const applyPresenceUpdate = usePresenceStore((s) => s.applyUpdate);
   const addRoomInvite = useNotificationsStore((s) => s.addRoomInvite);
   const addJoinRequest = useNotificationsStore((s) => s.addJoinRequest);
+  const addDeclinedInvite = useNotificationsStore((s) => s.addDeclinedInvite);
 
   useEffect(() => {
     const socket = getSocket();
@@ -40,10 +41,12 @@ export function useSocketConnection() {
     const onPresenceSnapshot = (snapshot: Record<string, Presence>) => setPresenceSnapshot(snapshot);
     const onPresenceUpdate = (payload: { userId: string; online: boolean; roomCode: string | null }) =>
       applyPresenceUpdate(payload.userId, { online: payload.online, roomCode: payload.roomCode });
-    const onRoomInvited = (payload: { roomCode: string; fromName: string }) =>
+    const onRoomInvited = (payload: { roomCode: string; fromName: string; fromUserId: string }) =>
       addRoomInvite({ id: crypto.randomUUID(), ...payload });
     const onJoinRequestIncoming = (payload: { roomCode: string; fromUserId: string; fromName: string }) =>
       addJoinRequest({ id: crypto.randomUUID(), ...payload });
+    const onInviteDeclined = (payload: { roomCode: string; byUserId: string }) =>
+      addDeclinedInvite({ roomCode: payload.roomCode, userId: payload.byUserId });
     // A rematch's new seats are pushed directly (see room:rematch in
     // server.js) rather than requiring everyone to manually rejoin —
     // whoever's still on the finished game's screen gets navigated
@@ -63,6 +66,7 @@ export function useSocketConnection() {
     socket.on("presence:update", onPresenceUpdate);
     socket.on("room:invited", onRoomInvited);
     socket.on("room:joinRequest:incoming", onJoinRequestIncoming);
+    socket.on("room:invite:declined", onInviteDeclined);
     socket.on("room:rematchReady", onRematchReady);
 
     if (!socket.connected) {
@@ -80,6 +84,7 @@ export function useSocketConnection() {
       socket.off("presence:update", onPresenceUpdate);
       socket.off("room:invited", onRoomInvited);
       socket.off("room:joinRequest:incoming", onJoinRequestIncoming);
+      socket.off("room:invite:declined", onInviteDeclined);
       socket.off("room:rematchReady", onRematchReady);
     };
   }, [
@@ -93,5 +98,6 @@ export function useSocketConnection() {
     applyPresenceUpdate,
     addRoomInvite,
     addJoinRequest,
+    addDeclinedInvite,
   ]);
 }

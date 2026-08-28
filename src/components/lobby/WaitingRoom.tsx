@@ -12,6 +12,8 @@ import { useFriends } from "@/hooks/useFriends";
 import { useProfiles } from "@/hooks/useProfiles";
 import { usePresenceStore } from "@/store/usePresenceStore";
 import { useRoomStore } from "@/store/useRoomStore";
+import { useNotificationsStore } from "@/store/useNotificationsStore";
+import { cn } from "@/lib/utils";
 import Button from "@/components/ui/Button";
 import FriendAvatar from "@/components/friends/FriendAvatar";
 import Wordmark from "@/components/brand/Wordmark";
@@ -360,6 +362,7 @@ function AddPlayerModal({
           onChange={setSeat}
           onCreateProfile={createProfile}
           showColorSwatch={false}
+          placeholder="Select a player"
         />
         {error && <p className="text-xs text-accent">{error}</p>}
         <Button onClick={handleAdd} disabled={loading}>
@@ -373,6 +376,7 @@ function AddPlayerModal({
 function InviteFriends({ roomCode }: { roomCode: string }) {
   const { friends, loading } = useFriends();
   const presence = usePresenceStore((s) => s.byUserId);
+  const declinedInvites = useNotificationsStore((s) => s.declinedInvites);
   const [invitedIds, setInvitedIds] = useState<Set<string>>(new Set());
 
   if (loading) return null;
@@ -384,22 +388,36 @@ function InviteFriends({ roomCode }: { roomCode: string }) {
 
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface-2 p-3">
-      {online.map((friend) => (
-        <div key={friend.userId} className="flex items-center gap-3">
-          <FriendAvatar image={friend.image} />
-          <p className="min-w-0 flex-1 truncate text-sm">{friend.name ?? friend.email}</p>
-          <button
-            disabled={invitedIds.has(friend.userId)}
-            onClick={() => {
-              inviteFriendToRoom(roomCode, friend.userId).catch(() => {});
-              setInvitedIds((prev) => new Set(prev).add(friend.userId));
-            }}
-            className="shrink-0 text-xs font-semibold text-accent underline disabled:text-ink-muted"
-          >
-            {invitedIds.has(friend.userId) ? "Invited" : "Invite"}
-          </button>
-        </div>
-      ))}
+      {online.map((friend) => {
+        // Presence already tracks which room a friend is currently seated
+        // in (see usePresenceStore/room:update's setUserRoom calls) — reuse
+        // that instead of guessing from a local "I clicked invite" flag.
+        const joined = presence[friend.userId]?.roomCode === roomCode;
+        const declined = declinedInvites.some((d) => d.roomCode === roomCode && d.userId === friend.userId);
+        const invited = invitedIds.has(friend.userId);
+        const settled = joined || declined;
+        const label = joined ? "Joined" : declined ? "Rejected" : invited ? "Invited" : "Invite";
+
+        return (
+          <div key={friend.userId} className="flex items-center gap-3">
+            <FriendAvatar image={friend.image} />
+            <p className="min-w-0 flex-1 truncate text-sm">{friend.name ?? friend.email}</p>
+            <button
+              disabled={settled || invited}
+              onClick={() => {
+                inviteFriendToRoom(roomCode, friend.userId).catch(() => {});
+                setInvitedIds((prev) => new Set(prev).add(friend.userId));
+              }}
+              className={cn(
+                "shrink-0 text-xs font-semibold",
+                settled ? "text-ink-muted" : "text-accent underline disabled:text-ink-muted"
+              )}
+            >
+              {label}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

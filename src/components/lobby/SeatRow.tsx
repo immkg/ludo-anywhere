@@ -25,6 +25,10 @@ type SeatRowProps = {
   // WaitingRoom's Add Player modal has no such preview to give (colors
   // there depend on join order at the time), so it hides the swatch.
   showColorSwatch?: boolean;
+  // Defaults to "Player {index + 1}", which reads correctly for JoinRoom's
+  // fixed-position seat list but is meaningless in WaitingRoom's Add Player
+  // modal (there's no seat number to speak of — override it there).
+  placeholder?: string;
 };
 
 export default function SeatRow({
@@ -35,6 +39,7 @@ export default function SeatRow({
   onChange,
   onCreateProfile,
   showColorSwatch = true,
+  placeholder,
 }: SeatRowProps) {
   const color = previewArmIndex == null ? null : colorForArm(previewArmIndex);
   const [adding, setAdding] = useState(false);
@@ -94,7 +99,7 @@ export default function SeatRow({
             onChange={(e) => handleSelect(e.target.value)}
           >
             <option value="" disabled>
-              Player {index + 1}
+              {placeholder ?? `Player ${index + 1}`}
             </option>
             {profiles.map((p) => (
               <option key={p.id} value={p.id}>

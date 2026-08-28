@@ -168,13 +168,24 @@ app.prepare().then(() => {
         }
 
         const fromSeat = room.seats.find((s) => s.userId === userId);
+        room.invitedUserIds.add(friendUserId);
         io.to(userChannel(friendUserId)).emit("room:invited", {
           roomCode: room.code,
           fromName: fromSeat?.name ?? "A friend",
+          fromUserId: userId,
         });
         ack?.({});
       })
     );
+
+    // Fire-and-forget, same pattern as room:joinRequest:decline — the
+    // inviter just wants to see "declined" rather than being left thinking
+    // the invite is still pending forever.
+    socket.on("room:invite:decline", async ({ roomCode, hostUserId }) => {
+      const byUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+      if (!byUserId || !hostUserId) return;
+      io.to(userChannel(hostUserId)).emit("room:invite:declined", { roomCode, byUserId });
+    });
 
     socket.on(
       "room:joinRequest",
@@ -409,11 +420,13 @@ app.prepare().then(() => {
         }
 
         // A genuinely new account (no seat here yet) needs host approval —
-        // reconnecting to an owned seat (handled above) and an
-        // already-seated account adding another of its own profiles both
-        // stay instant, since there's nobody meaningful to ask.
+        // reconnecting to an owned seat (handled above), an already-seated
+        // account adding another of its own profiles, and an account the
+        // host explicitly invited by name (room:invite) all stay instant,
+        // since there's nobody meaningful left to ask.
         const alreadySeated = room.seats.some((s) => s.userId === reconnectUserId);
-        if (!alreadySeated) {
+        const preInvited = room.invitedUserIds.has(reconnectUserId);
+        if (!alreadySeated && !preInvited) {
           if (room.seats.length + resolved.seats.length > room.maxPlayers) {
             return ack?.({ error: "Room is full" });
           }
@@ -435,6 +448,7 @@ app.prepare().then(() => {
           userId: reconnectUserId,
         });
         if (error) return ack?.({ error });
+        room.invitedUserIds.delete(reconnectUserId);
 
         socket.join(room.code);
         ack?.({
@@ -537,8 +551,12 @@ app.prepare().then(() => {
           // Force their socket out of this room's channel so they stop
           // receiving updates for a room they're no longer seated in — the
           // room:update broadcast itself already makes their client show
-          // "You're not seated in this room" (see RoomPageClient.tsx).
-          if (removedSeat?.socketId) {
+          // "You're not seated in this room" (see RoomPageClient.tsx). But
+          // that socket may still legitimately own another seat here (e.g.
+          // the host removing a second profile added from their own
+          // device) — don't evict it out from under its own remaining seat.
+          const socketStillSeated = room.seats.some((s) => s.socketId === removedSeat?.socketId);
+          if (removedSeat?.socketId && !socketStillSeated) {
             io.sockets.sockets.get(removedSeat.socketId)?.leave(room.code);
           }
 

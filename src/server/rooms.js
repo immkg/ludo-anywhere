@@ -46,6 +46,10 @@ export function createRoom({ maxPlayers }) {
     // already-seated account adding another of its own profiles both
     // stay instant (see server.js's room:join handler).
     pendingRequests: new Map(),
+    // userIds the host has explicitly invited via room:invite — their next
+    // join skips the approval step too, since the host already vouched for
+    // them by name (see server.js's room:join handler).
+    invitedUserIds: new Set(),
   };
   rooms.set(code, room);
   return room;
