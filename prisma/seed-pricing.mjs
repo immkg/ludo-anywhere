@@ -19,9 +19,9 @@ const data = {
   // below are picked so the displayed "% off" lands on 50 / 60 / 80 at
   // these actual prices (9/99/599) — see percentOff() in src/lib/pricing.ts.
   //
-  // Game Pack is a 24-hour pass, not a long-lived balance — 5 credits
-  // usable within a day of purchase, then whatever's unused just expires.
-  gamePack: { priceInr: 9, credits: 5, expiryHours: 24, originalPriceInr: 18 }, // 50% off
+  // Game Pack is a week-long pass, not a long-lived balance — 25 credits
+  // usable within a week of purchase, then whatever's unused just expires.
+  gamePack: { priceInr: 49, credits: 25, expiryHours: 24 * 7, originalPriceInr: 98 }, // 50% off
   monthly: {
     priceInr: 99,
     days: 30,
