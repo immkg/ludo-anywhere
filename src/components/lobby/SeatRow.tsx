@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { colorForArm } from "@/game/board";
+import { cn } from "@/lib/utils";
 import Input from "@/components/ui/Input";
 import type { PlayerProfile } from "@/types/profile";
 
@@ -20,6 +21,10 @@ type SeatRowProps = {
   profiles: PlayerProfile[];
   onChange: (seat: SeatDraft) => void;
   onCreateProfile: (name: string, email: string) => Promise<PlayerProfile>;
+  // JoinRoom shows this to preview the color a seat will be assigned;
+  // WaitingRoom's Add Player modal has no such preview to give (colors
+  // there depend on join order at the time), so it hides the swatch.
+  showColorSwatch?: boolean;
 };
 
 export default function SeatRow({
@@ -29,6 +34,7 @@ export default function SeatRow({
   profiles,
   onChange,
   onCreateProfile,
+  showColorSwatch = true,
 }: SeatRowProps) {
   const color = previewArmIndex == null ? null : colorForArm(previewArmIndex);
   const [adding, setAdding] = useState(false);
@@ -64,11 +70,13 @@ export default function SeatRow({
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-3">
       <div className="flex items-center gap-3">
-        <span
-          className="h-9 w-9 shrink-0 rounded-full border border-line"
-          style={{ backgroundColor: color?.hex ?? "transparent" }}
-          title={color?.label ?? "Assigned when the room fills"}
-        />
+        {showColorSwatch && (
+          <span
+            className="h-9 w-9 shrink-0 rounded-full border border-line"
+            style={{ backgroundColor: color?.hex ?? "transparent" }}
+            title={color?.label ?? "Assigned when the room fills"}
+          />
+        )}
         {adding ? (
           <div className="flex flex-1 flex-col gap-2">
             <Input placeholder="Name" value={name} maxLength={20} onChange={(e) => setName(e.target.value)} />
@@ -99,7 +107,7 @@ export default function SeatRow({
       </div>
 
       {adding && (
-        <div className="flex items-center gap-4 pl-12">
+        <div className={cn("flex items-center gap-4", showColorSwatch && "pl-12")}>
           <button
             type="button"
             onClick={handleAdd}
@@ -118,7 +126,7 @@ export default function SeatRow({
         </div>
       )}
 
-      {error && <p className="pl-12 text-xs text-accent">{error}</p>}
+      {error && <p className={cn("text-xs text-accent", showColorSwatch && "pl-12")}>{error}</p>}
     </div>
   );
 }

@@ -359,6 +359,7 @@ function AddPlayerModal({
           profiles={availableProfiles}
           onChange={setSeat}
           onCreateProfile={createProfile}
+          showColorSwatch={false}
         />
         {error && <p className="text-xs text-accent">{error}</p>}
         <Button onClick={handleAdd} disabled={loading}>
