@@ -1,27 +1,69 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getPendingRequestCount, getDisplayName } from "@/lib/nav-data";
 import AuthenticatedNav from "@/components/nav/AuthenticatedNav";
+import LeaderboardFilterBar from "@/components/leaderboard/LeaderboardFilterBar";
+import LeaderboardRows, { type LeaderboardPlayer } from "@/components/leaderboard/LeaderboardRows";
+import ScoringInfoPanel from "@/components/leaderboard/ScoringInfoPanel";
+import { totalPoints } from "@/lib/scoring";
+import { RANGE_OPTIONS, SCOPE_OPTIONS } from "@/components/leaderboard/leaderboardFilterOptions";
 
-type Row = { id: string; name: string; email: string; games: number; wins: number };
+type Row = {
+  id: string;
+  name: string;
+  email: string;
+  wins: number;
+  losses: number;
+};
 
-export default async function LeaderboardPage() {
+function rangeStartFor(range: string): Date | null {
+  const now = new Date();
+  if (range === "month") {
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  if (range === "week") {
+    const day = now.getDay(); // 0 = Sunday
+    const diffToMonday = (day + 6) % 7;
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMonday);
+    return start;
+  }
+  return null;
+}
+
+export default async function LeaderboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string; scope?: string }>;
+}) {
   const session = await auth();
   if (!session?.user) redirect("/");
 
-  const [players, pendingRequestCount] = await Promise.all([
+  const { range: rawRange, scope: rawScope } = await searchParams;
+  const range = RANGE_OPTIONS.some((o) => o.value === rawRange) ? rawRange! : "all";
+  const scope = SCOPE_OPTIONS.some((o) => o.value === rawScope) ? rawScope! : "all";
+  const rangeStart = rangeStartFor(range);
+
+  const myEmail = session.user.email?.toLowerCase() ?? null;
+
+  const [myLinks, players, pendingRequestCount] = await Promise.all([
+    prisma.userProfile.findMany({ where: { userId: session.user.id }, select: { profileId: true } }),
     prisma.gamePlayer.findMany({
-      where: { profileId: { not: null } },
+      where: {
+        profileId: { not: null },
+        ...(rangeStart ? { game: { endedAt: { gte: rangeStart } } } : {}),
+      },
       include: { profile: true, game: true },
     }),
     getPendingRequestCount(session.user.id),
   ]);
 
+  const myProfileIds = new Set(myLinks.map((l) => l.profileId));
+
   const byProfile = new Map<string, Row>();
   for (const p of players) {
     if (!p.profile) continue;
+    if (scope === "mine" && !myProfileIds.has(p.profileId as string)) continue;
     // A game the host ended early never resolved for whoever hadn't
     // already finished — no win, no loss, so it doesn't count as a game
     // played for them either (see engine.js's endGame).
@@ -31,15 +73,31 @@ export default async function LeaderboardPage() {
       id: p.profileId as string,
       name: p.profile.name,
       email: p.profile.email,
-      games: 0,
       wins: 0,
+      losses: 0,
     };
-    row.games += 1;
     if (p.isWinner) row.wins += 1;
+    else row.losses += 1;
     byProfile.set(p.profileId as string, row);
   }
 
-  const rows = Array.from(byProfile.values()).sort((a, b) => b.wins - a.wins || b.games - a.games);
+  const ranked: LeaderboardPlayer[] = Array.from(byProfile.values())
+    .map((row) => ({ ...row, points: totalPoints(row.wins, row.losses) }))
+    .sort((a, b) => b.points - a.points || b.wins - a.wins || a.name.localeCompare(b.name))
+    .map((row, i) => {
+      const isMe = row.email.toLowerCase() === myEmail;
+      return {
+        id: row.id,
+        rank: i + 1,
+        name: row.name,
+        email: row.email,
+        image: isMe ? session.user.image ?? null : null,
+        wins: row.wins,
+        losses: row.losses,
+        points: row.points,
+        isMe,
+      };
+    });
 
   return (
     <AuthenticatedNav
@@ -48,33 +106,24 @@ export default async function LeaderboardPage() {
       userImage={session.user.image ?? null}
       pendingRequestCount={pendingRequestCount}
     >
-      <main className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-extrabold">Leaderboard</h1>
-          <Link href="/" className="text-sm font-semibold text-ink-muted underline">
-            Home
-          </Link>
+      <main className="mx-auto flex min-h-dvh max-w-4xl flex-col gap-6 px-4 pb-10 pt-6 sm:gap-7 sm:px-6 sm:pt-8 lg:px-10 lg:pt-10">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">Leaderboard</h1>
+            <p className="mt-1 text-sm text-ink-muted sm:text-base">Top players ranked by total points.</p>
+          </div>
+          <LeaderboardFilterBar range={range} scope={scope} />
         </div>
 
-        {rows.length === 0 ? (
-          <p className="text-ink-muted">No finished games yet.</p>
+        <ScoringInfoPanel />
+
+        {ranked.length === 0 ? (
+          <div className="rounded-2xl border border-line bg-surface p-6 text-center">
+            <p className="font-semibold text-ink">Nobody on the leaderboard yet.</p>
+            <p className="mt-1 text-sm text-ink-muted">Play some games to start climbing.</p>
+          </div>
         ) : (
-          <ul className="flex flex-col gap-3">
-            {rows.map((row, i) => (
-              <li
-                key={row.id}
-                className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3"
-              >
-                <span className="w-6 shrink-0 text-center text-sm font-bold text-ink-muted">{i + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{row.name}</p>
-                  <p className="truncate text-xs text-ink-muted">
-                    {row.games} played · {row.wins} won · {row.games - row.wins} lost
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <LeaderboardRows players={ranked} />
         )}
       </main>
     </AuthenticatedNav>

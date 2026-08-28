@@ -3,7 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import FilterDropdown from "@/components/ui/FilterDropdown";
 import { IconPerson } from "@/components/home/icons";
-import { RANGE_OPTIONS } from "./historyFilterOptions";
+import { RANGE_OPTIONS, SCOPE_OPTIONS } from "./leaderboardFilterOptions";
 
 function CalendarIcon() {
   return (
@@ -14,29 +14,15 @@ function CalendarIcon() {
   );
 }
 
-export default function HistoryFilterBar({
-  players,
-  range,
-  player,
-}: {
-  players: { id: string; name: string }[];
-  range: string;
-  player: string;
-}) {
+export default function LeaderboardFilterBar({ range, scope }: { range: string; scope: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const playerOptions = [
-    { value: "all", label: "All players" },
-    ...players.map((p) => ({ value: p.id, label: p.name })),
-  ];
-
-  const update = (key: "range" | "player", nextValue: string) => {
+  const update = (key: "range" | "scope", nextValue: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (nextValue === "all") params.delete(key);
     else params.set(key, nextValue);
-    params.delete("limit");
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
   };
@@ -51,11 +37,11 @@ export default function HistoryFilterBar({
         onChange={(v) => update("range", v)}
       />
       <FilterDropdown
-        ariaLabel="Filter by player"
+        ariaLabel="Filter by player scope"
         icon={<IconPerson className="h-4 w-4 text-ink-muted" />}
-        value={player}
-        options={playerOptions}
-        onChange={(v) => update("player", v)}
+        value={scope}
+        options={SCOPE_OPTIONS}
+        onChange={(v) => update("scope", v)}
       />
     </div>
   );
