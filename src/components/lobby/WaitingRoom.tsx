@@ -1,30 +1,60 @@
 "use client";
 
 import { useState } from "react";
-import { colorForArm } from "@/game/board";
-import { startGame, inviteFriendToRoom, removeSeat, joinRoom, trackShare } from "@/lib/socketActions";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { armForSeatIndex, colorForArm } from "@/game/board";
+import { startGame, inviteFriendToRoom, removeSeat, joinRoom, trackShare, leaveRoom } from "@/lib/socketActions";
 import { shareOnWhatsApp, roomJoinUrl } from "@/lib/share";
-import { saveOwnedSeats } from "@/lib/identity";
+import { saveOwnedSeats, clearOwnedSeats } from "@/lib/identity";
 import { useFriends } from "@/hooks/useFriends";
 import { useProfiles } from "@/hooks/useProfiles";
 import { usePresenceStore } from "@/store/usePresenceStore";
 import { useRoomStore } from "@/store/useRoomStore";
 import Button from "@/components/ui/Button";
 import FriendAvatar from "@/components/friends/FriendAvatar";
+import Wordmark from "@/components/brand/Wordmark";
+import AppIconMark from "@/components/brand/AppIconMark";
 import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
-import Link from "next/link";
-import type { Room } from "@/types/room";
-import type { OwnedSeat } from "@/types/room";
+import { OccupiedSeatCard, EmptySeatCard } from "@/components/lobby/PlayerSeatCard";
+import {
+  IconCheck,
+  IconClock,
+  IconCopy,
+  IconExit,
+  IconGlobe,
+  IconGrid,
+  IconLink,
+  IconPlay,
+  IconTrophy,
+  IconUsers,
+} from "@/components/lobby/icons";
+import type { Room, OwnedSeat } from "@/types/room";
 
 // A room always needs at least a host and one opponent — mirrors the
 // floor enforced server-side in src/server/rooms.js's removeSeat().
 const MIN_PLAYERS = 2;
 
+// Links into existing pages so the desktop shell's sidebar isn't a dead
+// end — this component doesn't own those routes, it just points at them.
+const NAV_ITEMS = [
+  { href: "#", label: "Lobby", icon: IconGrid, active: true },
+  { href: "/friends", label: "Friends", icon: IconUsers, active: false },
+  { href: "/leaderboard", label: "Leaderboard", icon: IconTrophy, active: false },
+  { href: "/history", label: "History", icon: IconClock, active: false },
+];
+
 export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: OwnedSeat[] }) {
+  const router = useRouter();
+  const { data: session } = useSession();
   const [copied, setCopied] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [addPlayerOpen, setAddPlayerOpen] = useState(false);
   const error = useRoomStore((s) => s.error);
   const setError = useRoomStore((s) => s.setError);
+  const resetRoomStore = useRoomStore((s) => s.reset);
   const isHost = !!room.hostSeatId && mySeats.some((s) => s.id === room.hostSeatId);
   const canStart = isHost && room.seats.length >= 2;
   const openSlots = Math.max(0, room.maxPlayers - room.seats.length);
@@ -40,92 +70,226 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
     }
   };
 
+  const handleShareLink = () => {
+    trackShare("room_shared", { roomCode: room.code });
+    shareOnWhatsApp(`Join my Ludo room on MyLudo! ${roomJoinUrl(room.code)}`);
+  };
+
+  const handleLeave = () => {
+    leaveRoom(room.code);
+    clearOwnedSeats(room.code);
+    resetRoomStore();
+    router.push("/");
+  };
+
   return (
-    <div className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
-      {error && (
-        <div className="flex items-start justify-between gap-3 rounded-2xl border border-accent bg-surface p-3">
-          <p className="text-sm">
-            {error}
-            {error.includes("used up today") && (
-              <>
-                {" "}
-                <Link href="/pricing" className="font-semibold text-accent underline">
-                  Get more games
-                </Link>
-              </>
-            )}
-          </p>
-          <button onClick={() => setError(null)} className="shrink-0 text-xs text-ink-muted underline">
-            Dismiss
+    <div className="min-h-dvh">
+      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-4 sm:px-6 lg:px-8">
+        <div className="flex items-center gap-2">
+          <AppIconMark className="h-7 w-7 sm:h-8 sm:w-8" />
+          <Wordmark className="text-lg sm:text-xl" />
+        </div>
+        <div className="flex items-center gap-3">
+          {session?.user && (
+            <div className="hidden items-center gap-2 md:flex">
+              {session.user.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={session.user.image}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="h-9 w-9 shrink-0 rounded-full border border-line"
+                />
+              ) : (
+                <span className="h-9 w-9 shrink-0 rounded-full border border-line bg-surface-2" />
+              )}
+              <div className="min-w-0 leading-tight">
+                <p className="truncate text-sm font-bold text-ink">{session.user.name ?? session.user.email}</p>
+                {isHost && <p className="text-xs font-semibold text-accent">Host</p>}
+              </div>
+            </div>
+          )}
+          <button
+            onClick={handleLeave}
+            className="flex h-11 items-center gap-1.5 rounded-full border border-line px-3 text-sm font-semibold text-ink-muted hover:border-accent/50 hover:text-accent md:px-4"
+          >
+            <IconExit className="h-4 w-4 shrink-0" />
+            <span className="hidden md:inline">Leave Room</span>
           </button>
         </div>
-      )}
+      </header>
 
-      <div className="text-center">
-        <p className="text-sm text-ink-muted">Room code</p>
-        <button onClick={handleCopy} className="text-4xl font-extrabold tracking-[0.2em]">
-          {room.code}
-        </button>
-        <p className="mt-1 text-xs text-ink-muted">{copied ? "Copied!" : "Tap to copy and share"}</p>
-        {room.sponsored && !isHost && (
-          <p className="mt-1 text-xs font-semibold text-accent">
-            {hostName ?? "The host"} is hosting — this game&apos;s on them
-          </p>
-        )}
-        <button
-          onClick={() => {
-            trackShare("room_shared", { roomCode: room.code });
-            shareOnWhatsApp(`Join my Ludo room on MyLudo! ${roomJoinUrl(room.code)}`);
-          }}
-          className="mt-2 text-xs font-semibold text-accent underline"
-        >
-          Share on WhatsApp
-        </button>
-      </div>
+      <div className="mx-auto flex w-full max-w-6xl gap-6 px-5 pb-10 sm:px-6 lg:px-8">
+        <aside className="hidden lg:flex lg:w-52 lg:shrink-0 lg:flex-col lg:gap-1 lg:pt-1">
+          {NAV_ITEMS.map((item) =>
+            item.active ? (
+              <div
+                key={item.label}
+                aria-current="page"
+                className="flex items-center gap-2.5 rounded-2xl bg-accent/12 px-3 py-2.5 text-sm font-bold text-accent"
+              >
+                <item.icon className="h-5 w-5 shrink-0" />
+                {item.label}
+              </div>
+            ) : (
+              <Link
+                key={item.label}
+                href={item.href}
+                className="flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-semibold text-ink-muted hover:bg-surface-2 hover:text-ink"
+              >
+                <item.icon className="h-5 w-5 shrink-0" />
+                {item.label}
+              </Link>
+            )
+          )}
+        </aside>
 
-      {isHost && <IncomingJoinRequests roomCode={room.code} />}
+        <main className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row md:items-start">
+          <div className="flex min-w-0 flex-1 flex-col gap-6 md:max-w-xl">
+            <div className="flex items-center justify-between gap-3">
+              <h1 className="text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">Room Lobby</h1>
+              <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-sm font-bold text-ink">
+                <IconUsers className="h-4 w-4 text-accent" />
+                {room.seats.length}/{room.maxPlayers}
+              </span>
+            </div>
 
-      <div className="flex flex-col gap-2">
-        {room.seats.map((seat) => {
-          const mine = mySeats.some((s) => s.id === seat.id);
-          const color = colorForArm(seat.armIndex);
-          const canRemove = isHost && seat.id !== room.hostSeatId && room.seats.length > MIN_PLAYERS;
-          return (
-            <div key={seat.id} className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3">
-              <span className="h-4 w-4 rounded-full" style={{ backgroundColor: color.hex }} />
-              <span className="flex-1 font-medium">{seat.name}</span>
-              {seat.id === room.hostSeatId && <span className="text-xs text-ink-muted">Host</span>}
-              {mine && <span className="text-xs font-semibold text-accent">You</span>}
-              {!seat.connected && <span className="text-xs text-ink-muted">Offline</span>}
-              {canRemove && (
-                <button
-                  onClick={() => removeSeat(room.code, seat.id).catch(() => {})}
-                  aria-label={`Remove ${seat.name}`}
-                  className="shrink-0 text-ink-muted hover:text-accent"
-                >
-                  ✕
+            {error && (
+              <div className="flex items-start justify-between gap-3 rounded-2xl border border-accent bg-surface p-3">
+                <p className="text-sm">
+                  {error}
+                  {error.includes("used up today") && (
+                    <>
+                      {" "}
+                      <Link href="/pricing" className="font-semibold text-accent underline">
+                        Get more games
+                      </Link>
+                    </>
+                  )}
+                </p>
+                <button onClick={() => setError(null)} className="shrink-0 text-xs text-ink-muted underline">
+                  Dismiss
                 </button>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3 rounded-3xl border-2 border-accent/25 bg-surface p-4 sm:p-5">
+              <p className="text-sm text-ink-muted">Share this code with your friends</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCopy}
+                  className="min-w-0 flex-1 rounded-2xl border border-line bg-surface-2 py-3 text-center text-3xl font-extrabold tracking-[0.25em] text-ink sm:text-4xl"
+                >
+                  {room.code}
+                </button>
+                <button
+                  onClick={handleCopy}
+                  aria-label={copied ? "Room code copied" : "Copy room code"}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-line bg-surface-2 text-ink-muted hover:text-accent"
+                >
+                  {copied ? <IconCheck className="h-5 w-5 text-accent" /> : <IconCopy className="h-5 w-5" />}
+                </button>
+              </div>
+
+              {room.sponsored && !isHost && (
+                <p className="text-xs font-semibold text-accent">
+                  {hostName ?? "The host"} is hosting — this game&apos;s on them
+                </p>
+              )}
+
+              <div className="flex gap-2">
+                <Button variant="secondary" className="flex-1" onClick={handleShareLink}>
+                  <span className="flex items-center justify-center gap-2">
+                    <IconLink className="h-4 w-4" /> Share Link
+                  </span>
+                </Button>
+                <Button variant="secondary" className="flex-1" onClick={() => setInviteOpen((v) => !v)}>
+                  <span className="flex items-center justify-center gap-2">
+                    <IconUsers className="h-4 w-4" /> Invite Friends
+                  </span>
+                </Button>
+              </div>
+
+              {inviteOpen && <InviteFriends roomCode={room.code} />}
+            </div>
+
+            {isHost && <IncomingJoinRequests roomCode={room.code} />}
+
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-bold text-ink-muted">
+                Players ({room.seats.length}/{room.maxPlayers})
+              </h2>
+              <div className="grid grid-cols-2 gap-3">
+                {room.seats.map((seat) => {
+                  const mine = mySeats.some((s) => s.id === seat.id);
+                  const canRemove = isHost && seat.id !== room.hostSeatId && room.seats.length > MIN_PLAYERS;
+                  return (
+                    <OccupiedSeatCard
+                      key={seat.id}
+                      seat={seat}
+                      isMine={mine}
+                      isHostSeat={seat.id === room.hostSeatId}
+                      canRemove={canRemove}
+                      onRemove={() => removeSeat(room.code, seat.id).catch(() => {})}
+                    />
+                  );
+                })}
+                {Array.from({ length: openSlots }, (_, i) => {
+                  const arm = armForSeatIndex(room.seats.length + i, room.maxPlayers);
+                  return (
+                    <EmptySeatCard
+                      key={i}
+                      seatNumber={room.seats.length + i + 1}
+                      previewColorHex={colorForArm(arm).hex}
+                      onAdd={() => setAddPlayerOpen(true)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 rounded-2xl border border-line bg-surface-2 p-3 text-xs sm:text-sm">
+              <IconGlobe className="h-5 w-5 shrink-0 text-ink-muted" />
+              <p className="text-ink-muted">
+                <span className="font-semibold text-ink">Anyone with the code can join</span> · Players can join
+                from any device.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              {isHost ? (
+                <div className="flex flex-col items-center gap-1.5">
+                  <Button disabled={!canStart} onClick={() => startGame(room.code, room.hostSeatId!)} className="w-full">
+                    <span className="flex items-center justify-center gap-2">
+                      <IconPlay className="h-4 w-4" /> Start Game
+                    </span>
+                  </Button>
+                  {!canStart && (
+                    <p className="flex items-center gap-1.5 text-xs text-ink-muted">
+                      <IconClock className="h-3.5 w-3.5" /> Waiting for players…
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="flex items-center justify-center gap-1.5 text-center text-ink-muted">
+                  <IconClock className="h-4 w-4 shrink-0" /> Waiting for the host to start…
+                </p>
               )}
             </div>
-          );
-        })}
-        {Array.from({ length: openSlots }, (_, i) => (
-          <div key={i} className="rounded-2xl border border-dashed border-line px-4 py-3 text-ink-muted">
-            Waiting for player…
           </div>
-        ))}
+
+          <div className="hidden shrink-0 items-start justify-center pt-2 md:flex md:w-[260px] lg:w-[320px]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/brand/hero-illustration.png"
+              alt="A Ludo board set up for four players"
+              className="w-full max-w-[260px] object-contain lg:max-w-[300px]"
+            />
+          </div>
+        </main>
       </div>
 
-      {openSlots > 0 && <AddPlayer roomCode={room.code} />}
-      {openSlots > 0 && <InviteFriends roomCode={room.code} />}
-
-      {isHost ? (
-        <Button disabled={!canStart} onClick={() => startGame(room.code, room.hostSeatId!)}>
-          {room.seats.length < 2 ? "Need at least 2 players" : "Start game"}
-        </Button>
-      ) : (
-        <p className="text-center text-ink-muted">Waiting for the host to start…</p>
-      )}
+      {addPlayerOpen && <AddPlayerModal roomCode={room.code} onClose={() => setAddPlayerOpen(false)} />}
     </div>
   );
 }
@@ -134,21 +298,12 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
 // leaving the lobby — reuses the same room:join path CreateRoom/JoinRoom
 // use, just from inside WaitingRoom. The server still enforces everything
 // (room not full, that profile not already seated elsewhere).
-function AddPlayer({ roomCode }: { roomCode: string }) {
+function AddPlayerModal({ roomCode, onClose }: { roomCode: string; onClose: () => void }) {
   const addMySeats = useRoomStore((s) => s.addMySeats);
   const { profiles, createProfile } = useProfiles();
-  const [open, setOpen] = useState(false);
   const [seat, setSeat] = useState<SeatDraft>(defaultSeats(1, [])[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  if (!open) {
-    return (
-      <button onClick={() => setOpen(true)} className="text-sm font-semibold text-accent underline">
-        + Add another player
-      </button>
-    );
-  }
 
   const handleAdd = async () => {
     if (!seat.profileId) {
@@ -162,8 +317,7 @@ function AddPlayer({ roomCode }: { roomCode: string }) {
       if (!res.seats) throw new Error("Could not add player");
       saveOwnedSeats(roomCode, res.seats);
       addMySeats(res.seats);
-      setOpen(false);
-      setSeat({ profileId: null });
+      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add player");
     } finally {
@@ -172,27 +326,26 @@ function AddPlayer({ roomCode }: { roomCode: string }) {
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
-      <SeatRow
-        index={0}
-        seat={seat}
-        previewArmIndex={null}
-        profiles={profiles}
-        onChange={setSeat}
-        onCreateProfile={createProfile}
-      />
-      {error && <p className="text-xs text-accent">{error}</p>}
-      <div className="flex items-center gap-4">
-        <button
-          onClick={handleAdd}
-          disabled={loading}
-          className="text-sm font-semibold text-accent disabled:opacity-40"
-        >
+    <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+      <div className="flex w-full max-w-sm flex-col gap-3 rounded-2xl bg-surface p-4">
+        <div className="flex items-center justify-between">
+          <p className="font-bold text-ink">Add a player</p>
+          <button onClick={onClose} className="text-sm font-semibold text-ink-muted underline">
+            Cancel
+          </button>
+        </div>
+        <SeatRow
+          index={0}
+          seat={seat}
+          previewArmIndex={null}
+          profiles={profiles}
+          onChange={setSeat}
+          onCreateProfile={createProfile}
+        />
+        {error && <p className="text-xs text-accent">{error}</p>}
+        <Button onClick={handleAdd} disabled={loading}>
           {loading ? "Adding…" : "Add player"}
-        </button>
-        <button onClick={() => setOpen(false)} className="text-sm font-semibold text-ink-muted underline">
-          Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -203,14 +356,15 @@ function InviteFriends({ roomCode }: { roomCode: string }) {
   const presence = usePresenceStore((s) => s.byUserId);
   const [invitedIds, setInvitedIds] = useState<Set<string>>(new Set());
 
-  if (loading || friends.length === 0) return null;
+  if (loading) return null;
 
   const online = friends.filter((f) => presence[f.userId]?.online);
-  if (online.length === 0) return null;
+  if (online.length === 0) {
+    return <p className="text-center text-xs text-ink-muted">No friends online right now.</p>;
+  }
 
   return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
-      <p className="text-sm font-semibold text-ink-muted">Invite friends</p>
+    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface-2 p-3">
       {online.map((friend) => (
         <div key={friend.userId} className="flex items-center gap-3">
           <FriendAvatar image={friend.image} />
