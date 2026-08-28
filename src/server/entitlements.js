@@ -156,6 +156,10 @@ export async function getEntitlementStatus(userId, prisma = getPrisma()) {
   return {
     entitlement: entitlement ? { type: entitlement.type, expiresAt: entitlement.expiresAt } : null,
     creditsRemaining: totalCredits,
+    // Soonest-expiring active batch — credits are spent FIFO (see
+    // availableCredits' ordering), so this is the expiry that actually
+    // matters to the UI even when multiple packs are stacked.
+    creditsExpireAt: credits[0]?.expiresAt ?? null,
     freeRemaining,
   };
 }

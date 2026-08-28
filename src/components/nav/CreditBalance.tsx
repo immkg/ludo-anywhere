@@ -9,18 +9,20 @@ import { cn } from "@/lib/utils";
 
 // Same fetch + framing as the entitlement summary AccountBar used to show
 // (see git history) — an existing usage entitlement, not an in-game
-// currency, so it always names what it's for ("credits left" / "Monthly
-// plan"), never just a bare number. Billing/entitlement logic itself is
-// untouched; this only reads /api/billing/status the same way the old
-// component did.
+// currency, so it always names what it's for ("games left" / "Game
+// Pass"), never just a bare number. Billing/entitlement logic itself is
+// untouched (still MONTHLY/ANNUAL under the hood); this only reads
+// /api/billing/status the same way the old component did, with
+// customer-facing names for a one-time-purchase model — no subscriptions,
+// so no "renews"/"cancel anytime" language here either.
 function summarize(status: EntitlementStatus): { label: string; cta: string } {
   if (status.entitlement) {
     const until = new Date(status.entitlement.expiresAt).toLocaleDateString();
-    const planName = status.entitlement.type === "ANNUAL" ? "Annual plan" : "Monthly plan";
+    const planName = status.entitlement.type === "ANNUAL" ? "Game Pass Annual" : "Game Pass";
     return { label: `${planName} · until ${until}`, cta: status.entitlement.type === "ANNUAL" ? "Plan" : "Upgrade" };
   }
   if (status.creditsRemaining > 0) {
-    return { label: `${status.creditsRemaining} credits left`, cta: "Buy more" };
+    return { label: `${status.creditsRemaining} games left`, cta: "Buy more" };
   }
   const label = status.freeRemaining > 0 ? `${status.freeRemaining} free today` : "No free games left today";
   return { label, cta: "Get more" };

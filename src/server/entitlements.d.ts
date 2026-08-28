@@ -28,6 +28,7 @@ export type ChargeDecision =
 export type EntitlementStatus = {
   entitlement: { type: "MONTHLY" | "ANNUAL"; expiresAt: Date } | null;
   creditsRemaining: number;
+  creditsExpireAt: Date | null;
   freeRemaining: number;
 };
 

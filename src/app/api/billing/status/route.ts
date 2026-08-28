@@ -38,16 +38,19 @@ export async function GET() {
         originalPriceInr: config.gamePack.originalPriceInr,
         percentOff: percentOff(config.gamePack.originalPriceInr, config.gamePack.priceInr),
         credits: config.gamePack.credits,
+        days: Math.round(config.gamePack.expiryHours / 24),
       },
       monthly: {
         priceInr: config.monthly.priceInr,
         originalPriceInr: config.monthly.originalPriceInr,
         percentOff: percentOff(config.monthly.originalPriceInr, config.monthly.priceInr),
+        days: config.monthly.days,
       },
       annual: {
         priceInr: config.annual.priceInr,
         originalPriceInr: config.annual.originalPriceInr,
         percentOff: percentOff(config.annual.originalPriceInr, config.annual.priceInr),
+        days: config.annual.days,
       },
     },
   });

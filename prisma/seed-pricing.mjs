@@ -15,25 +15,24 @@ const data = {
   // originalPriceInr is the strikethrough "was" price the pricing page
   // shows next to the real price, purely for the "X% off" framing — it
   // isn't charged, doesn't need to be realistic, and is a config value
-  // like everything else here so it can be tuned without a deploy. Values
-  // below are picked so the displayed "% off" lands on 50 / 60 / 80 at
-  // these actual prices (9/99/599) — see percentOff() in src/lib/pricing.ts.
+  // like everything else here so it can be tuned without a deploy — see
+  // percentOff() in src/lib/pricing.ts.
   //
   // Game Pack is a week-long pass, not a long-lived balance — 25 credits
   // usable within a week of purchase, then whatever's unused just expires.
-  gamePack: { priceInr: 49, credits: 25, expiryHours: 24 * 7, originalPriceInr: 98 }, // 50% off
+  gamePack: { priceInr: 49, credits: 25, expiryHours: 24 * 7, originalPriceInr: 99 }, // ~50% off
   monthly: {
-    priceInr: 99,
+    priceInr: 149,
     days: 30,
     fairUseCapPerDay: 50,
-    originalPriceInr: 250, // 60% off
+    originalPriceInr: 499, // ~70% off
     // A Monthly subscriber upgrading to Annual gets credit for the days
     // they'd otherwise lose — most credit right after activating, tapering
     // to 0 by the time they'd have renewed anyway. See
     // src/lib/entitlements.ts's getAnnualUpgradeOffer().
     upgradeToAnnualMaxDiscountInr: 49,
   },
-  annual: { priceInr: 599, days: 365, fairUseCapPerDay: 50, originalPriceInr: 2995 }, // 80% off, exact
+  annual: { priceInr: 999, days: 365, fairUseCapPerDay: 50, originalPriceInr: 4999 }, // ~80% off
   enforcementEnabled: true,
 };
 
