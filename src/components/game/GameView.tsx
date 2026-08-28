@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/useGameStore";
 import { useRoomStore } from "@/store/useRoomStore";
@@ -21,6 +21,8 @@ import { colorForArm } from "@/game/board";
 import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor } from "@/game/engine";
 import Dice from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
+import ReactionBar from "@/components/game/ReactionBar";
+import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
 import type { Room, Seat } from "@/types/room";
@@ -33,6 +35,7 @@ const Board = dynamic(() => import("@/components/game/Board"), {
 });
 
 const AUTO_MOVE_MS = 15000;
+const REACTION_DISPLAY_MS = 1600;
 
 export default function GameView({ room }: { room: Room }) {
   const router = useRouter();
@@ -43,6 +46,18 @@ export default function GameView({ room }: { room: Room }) {
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
   const [rematchLoading, setRematchLoading] = useState(false);
   const [rematchError, setRematchError] = useState<string | null>(null);
+  const [activeReaction, setActiveReaction] = useState<Reaction | null>(null);
+  const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reduceMotion = useReducedMotion();
+
+  const handleReact = (reaction: Reaction) => {
+    setActiveReaction(reaction);
+    if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
+    reactionTimerRef.current = setTimeout(() => setActiveReaction(null), REACTION_DISPLAY_MS);
+  };
+  useEffect(() => () => {
+    if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
+  }, []);
 
   const handleRematch = async () => {
     setRematchLoading(true);
@@ -187,6 +202,11 @@ export default function GameView({ room }: { room: Room }) {
           suspended={suspendedForArm(seatByArm.get(0))}
           onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
         />
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="pointer-events-auto">
+            <ReactionBar onReact={handleReact} />
+          </div>
+        </div>
         <PlayerCorner
           seat={seatByArm.get(1) ?? null}
           avatarFirst={false}
@@ -197,7 +217,7 @@ export default function GameView({ room }: { room: Room }) {
         />
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 [container-type:size]">
         <Board
           game={game}
           isMyTurn={isMyTurn}
@@ -205,6 +225,28 @@ export default function GameView({ room }: { room: Room }) {
           validMoves={validMoves}
           onTokenTap={handleTokenTap}
         />
+        <AnimatePresence>
+          {activeReaction && (
+            <motion.div
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.4 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              className="pointer-events-none absolute inset-0 flex items-center justify-center"
+            >
+              {activeReaction.kind === "emoji" ? (
+                <span className="text-[75cqmin] leading-none drop-shadow-lg">{activeReaction.value}</span>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={activeReaction.src}
+                  alt={activeReaction.alt}
+                  className="h-[75cqmin] w-[75cqmin] object-contain drop-shadow-lg"
+                />
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Konva draws to a <canvas>, which carries no semantics of its own,
