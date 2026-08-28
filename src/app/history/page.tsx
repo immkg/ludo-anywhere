@@ -2,6 +2,8 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { colorForArm } from "@/game/board";
+import { getPendingRequestCount, getDisplayName } from "@/lib/nav-data";
+import AuthenticatedNav from "@/components/nav/AuthenticatedNav";
 import Button from "@/components/ui/Button";
 
 const ORDINALS = ["1st", "2nd", "3rd"];
@@ -39,56 +41,66 @@ export default async function HistoryPage() {
     })
   ).map((l) => l.profileId);
 
-  const played = await prisma.gamePlayer.findMany({
-    where: { profileId: { in: myProfileIds } },
-    include: { game: { include: { players: true } } },
-    orderBy: { game: { endedAt: "desc" } },
-    take: 50,
-  });
+  const [played, pendingRequestCount] = await Promise.all([
+    prisma.gamePlayer.findMany({
+      where: { profileId: { in: myProfileIds } },
+      include: { game: { include: { players: true } } },
+      orderBy: { game: { endedAt: "desc" } },
+      take: 50,
+    }),
+    getPendingRequestCount(session.user.id),
+  ]);
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-extrabold">Game history</h1>
-        <Link href="/" className="text-sm font-semibold text-ink-muted underline">
-          Home
-        </Link>
-      </div>
+    <AuthenticatedNav
+      displayName={getDisplayName(session.user)}
+      email={session.user.email ?? null}
+      userImage={session.user.image ?? null}
+      pendingRequestCount={pendingRequestCount}
+    >
+      <main className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-extrabold">Game history</h1>
+          <Link href="/" className="text-sm font-semibold text-ink-muted underline">
+            Home
+          </Link>
+        </div>
 
-      {played.length === 0 ? (
-        <p className="text-ink-muted">No finished games yet — play a room to see it here.</p>
-      ) : (
-        <ul className="flex flex-col gap-3">
-          {played.map((entry) => {
-            const opponents = entry.game.players.filter((p) => p.seatId !== entry.seatId);
-            const color = colorForArm(entry.armIndex);
-            return (
-              <li
-                key={entry.id}
-                className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3"
-              >
-                <span
-                  className="h-9 w-9 shrink-0 rounded-full border border-line"
-                  style={{ backgroundColor: color.hex }}
-                  title={color.label}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">
-                    Room {entry.game.roomCode} ·{" "}
-                    {placementLabel(entry.isWinner, entry.placement, entry.game.endedEarly)}
-                  </p>
-                  <p className="truncate text-xs text-ink-muted">
-                    vs {opponents.map((o) => o.name).join(", ") || "—"}
-                  </p>
-                </div>
-                <span className="shrink-0 text-xs text-ink-muted">
-                  {entry.game.endedAt.toLocaleDateString()}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </main>
+        {played.length === 0 ? (
+          <p className="text-ink-muted">No finished games yet — play a room to see it here.</p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {played.map((entry) => {
+              const opponents = entry.game.players.filter((p) => p.seatId !== entry.seatId);
+              const color = colorForArm(entry.armIndex);
+              return (
+                <li
+                  key={entry.id}
+                  className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3"
+                >
+                  <span
+                    className="h-9 w-9 shrink-0 rounded-full border border-line"
+                    style={{ backgroundColor: color.hex }}
+                    title={color.label}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">
+                      Room {entry.game.roomCode} ·{" "}
+                      {placementLabel(entry.isWinner, entry.placement, entry.game.endedEarly)}
+                    </p>
+                    <p className="truncate text-xs text-ink-muted">
+                      vs {opponents.map((o) => o.name).join(", ") || "—"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-xs text-ink-muted">
+                    {entry.game.endedAt.toLocaleDateString()}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </main>
+    </AuthenticatedNav>
   );
 }
