@@ -90,7 +90,7 @@ Required — without this set up, no one can create or join a room. Setup:
 
 **Google login = device, not player.** Signing in identifies whoever's
 holding the device, not who's playing — that's what a **player profile**
-(`/profiles`, "Manage players") is for. A profile is just a name + email;
+(`/profiles`, "Players") is for. A profile is just a name + email;
 your own shows up automatically (created from your Google identity on
 first sign-in) and can't be removed. Add more inline while creating/joining
 a room (each `SeatRow` has a "+ Add new player…" option) or from

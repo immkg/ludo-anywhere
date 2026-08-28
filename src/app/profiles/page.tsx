@@ -20,7 +20,7 @@ export default async function ProfilesPage() {
     >
       <main className="mx-auto flex min-h-dvh max-w-sm flex-col gap-6 px-6 py-8">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-extrabold">Manage players</h1>
+          <h1 className="text-2xl font-extrabold">Players</h1>
           <Link href="/" className="text-sm font-semibold text-ink-muted underline">
             Home
           </Link>

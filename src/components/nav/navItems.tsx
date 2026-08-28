@@ -21,7 +21,7 @@ export type NavItem = {
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/friends", label: "Friends", icon: <IconUsers />, color: GREEN },
-  { href: "/profiles", label: "Manage players", icon: <IconPerson />, color: BLUE },
+  { href: "/profiles", label: "Players", icon: <IconPerson />, color: BLUE },
   { href: "/history", label: "History", icon: <IconClock />, color: VIOLET },
   { href: "/leaderboard", label: "Leaderboard", icon: <IconTrophy />, color: GOLD },
 ];

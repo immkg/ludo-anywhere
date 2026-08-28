@@ -44,7 +44,7 @@ type PlayerCornerProps = {
   suspended?: boolean;
   // Set (host only — see GameView.tsx) to make this seat tappable, opening
   // that player's manage-player actions instead of a dedicated separate
-  // "Manage players" control.
+  // "Players" control.
   onClick?: () => void;
 };
 

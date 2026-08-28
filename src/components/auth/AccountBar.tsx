@@ -96,7 +96,7 @@ export default function AccountBar() {
           )}
         </Link>
         <Link href="/profiles" className="whitespace-nowrap text-xs text-ink-muted underline">
-          Manage players
+          Players
         </Link>
         <Link href="/history" className="whitespace-nowrap text-xs text-ink-muted underline">
           History
