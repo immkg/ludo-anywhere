@@ -22,6 +22,7 @@ export default function PricingPageClient() {
   const [status, setStatus] = useState<EntitlementStatus | null>(null);
   const [buying, setBuying] = useState<BillingPurpose | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelayed, setConfirmDelayed] = useState(false);
 
   useEffect(() => {
     fetchStatus().then(setStatus);
@@ -29,21 +30,32 @@ export default function PricingPageClient() {
 
   // While "processing", the user has been redirected back from Uropai's
   // hosted checkout — we're just waiting for /api/billing/status to
-  // reconcile the order and grant the entitlement, so poll briefly rather
-  // than trust anything about the redirect itself.
+  // reconcile the order and grant the entitlement. Uropai's webhook has
+  // been observed taking 30-40s to actually arrive (their TEST environment
+  // settles through a real underlying gateway sandbox), so this polls for
+  // up to 2 minutes rather than giving up after a few seconds — stopping
+  // early as soon as credits/entitlement actually change from what they
+  // were right before checkout.
   useEffect(() => {
     if (!processing) return;
+    const baseline = status;
     let attempts = 0;
     const interval = setInterval(async () => {
       attempts += 1;
       const next = await fetchStatus();
       if (next) setStatus(next);
-      if (attempts >= 5) {
+      const changed =
+        next &&
+        baseline &&
+        (next.creditsRemaining !== baseline.creditsRemaining || next.entitlement?.expiresAt !== baseline.entitlement?.expiresAt);
+      if (changed || attempts >= 40) {
         clearInterval(interval);
+        if (!changed) setConfirmDelayed(true);
         router.replace("/pricing");
       }
-    }, 2000);
+    }, 3000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- baseline is captured once when processing starts, not re-read every render
   }, [processing, router]);
 
   const buy = useCallback(
@@ -86,6 +98,11 @@ export default function PricingPageClient() {
       {processing && (
         <p className="rounded-2xl border border-line bg-surface-2 p-3 text-sm text-ink-muted">
           Confirming your payment…
+        </p>
+      )}
+      {confirmDelayed && (
+        <p className="rounded-2xl border border-line bg-surface-2 p-3 text-sm text-ink-muted">
+          Still confirming your payment — this can take a minute. Refresh in a bit if it doesn&apos;t show up here.
         </p>
       )}
       {error && <p className="text-sm text-accent">{error}</p>}
