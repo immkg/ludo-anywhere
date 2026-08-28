@@ -535,33 +535,52 @@ app.prepare().then(() => {
         const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
         const room = getRoom(roomCode);
         if (!room) return ack?.({ error: "Room not found" });
-        if (!callerUserId || hostUserId(room) !== callerUserId) {
-          return ack?.({ error: "Only the host can remove a player" });
+        if (!callerUserId) return ack?.({ error: "Sign in with Google to do that" });
+
+        const targetSeat = room.seats.find((s) => s.id === seatId);
+        if (!targetSeat) return ack?.({ error: "Player not found" });
+        if (targetSeat.id === room.hostSeatId) {
+          return ack?.({ error: "The host can't remove their own seat" });
         }
+        const isHostCaller = hostUserId(room) === callerUserId;
 
         // Lobby: the seat is gone entirely, same as always. Mid-game: the
         // seat stays visible (dimmed, no crown) and becomes claimable —
         // see room:claimSeat — so their socket isn't kicked out the way a
         // lobby removal's is.
         if (room.status === "lobby") {
-          const removedSeat = room.seats.find((s) => s.id === seatId);
+          // The host can remove anyone but themselves; any other signed-in
+          // account can only remove seats it added itself (e.g. a second
+          // profile seated from its own device) — matches the canRemove
+          // check in WaitingRoom.tsx. Mid-game removal below stays
+          // host-only — kicking a paused player is more consequential.
+          const isOwnSeat = targetSeat.userId === callerUserId;
+          if (!isHostCaller && !isOwnSeat) {
+            return ack?.({ error: "You can only remove your own players" });
+          }
+
+          const removedSeat = targetSeat;
           const { error } = removeSeat(room, seatId);
           if (error) return ack?.({ error });
 
-          // Force their socket out of this room's channel so they stop
-          // receiving updates for a room they're no longer seated in — the
-          // room:update broadcast itself already makes their client show
-          // "You're not seated in this room" (see RoomPageClient.tsx). But
-          // that socket may still legitimately own another seat here (e.g.
+          // Broadcast the final state first, while the removed player's
+          // socket is still in this room's channel — that's what makes
+          // their client show "You're not seated in this room" immediately
+          // (see RoomPageClient.tsx's reactive myRelevantSeats check).
+          // Evicting the socket before this broadcast (the previous order
+          // here) meant it never received the update reflecting its own
+          // removal, and the UI stayed stale until a manual reload forced
+          // a fresh room:join. Only evict afterward — and only if that
+          // socket doesn't still legitimately own another seat here (e.g.
           // the host removing a second profile added from their own
           // device) — don't evict it out from under its own remaining seat.
+          broadcastRoom(room);
+          ack?.({});
+
           const socketStillSeated = room.seats.some((s) => s.socketId === removedSeat?.socketId);
           if (removedSeat?.socketId && !socketStillSeated) {
             io.sockets.sockets.get(removedSeat.socketId)?.leave(room.code);
           }
-
-          broadcastRoom(room);
-          ack?.({});
 
           if (removedSeat?.userId) {
             clearUserRoom(removedSeat.userId, room.code);
@@ -569,6 +588,8 @@ app.prepare().then(() => {
           }
           return;
         }
+
+        if (!isHostCaller) return ack?.({ error: "Only the host can remove a player" });
 
         const { error } = midGameRemoveSeat(room, seatId);
         if (error) return ack?.({ error });

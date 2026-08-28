@@ -129,16 +129,16 @@ export function addSeats(room, requests, { socketId, deviceId, userId }) {
   return { room, seats: newSeats };
 }
 
-// Host-only, lobby-only: drops one seat to free up the slot. Refuses to
-// go below 2 players — a room always needs at least a host and one
-// opponent — and reassigns hostSeatId the same way a lobby disconnect
+// Lobby-only: drops one seat to free up the slot. Who's allowed to remove
+// which seat is enforced by the caller (room:removeSeat in server.js) —
+// the host can remove anyone but themselves, and can go all the way down
+// to hosting alone. Reassigns hostSeatId the same way a lobby disconnect
 // already does (see handleSocketDisconnect) if the removed seat was the
 // host. Not a ban: the removed player can rejoin with the room code like
 // anyone else.
 export function removeSeat(room, seatId) {
   if (!room) return { error: "Room not found" };
   if (room.status !== "lobby") return { error: "Game already started" };
-  if (room.seats.length <= 2) return { error: "A room needs at least 2 players" };
 
   const seat = room.seats.find((s) => s.id === seatId);
   if (!seat) return { error: "Player not found" };

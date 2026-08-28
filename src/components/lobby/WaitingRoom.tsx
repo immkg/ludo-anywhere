@@ -35,10 +35,6 @@ import {
 } from "@/components/lobby/icons";
 import type { Room, OwnedSeat } from "@/types/room";
 
-// A room always needs at least a host and one opponent — mirrors the
-// floor enforced server-side in src/server/rooms.js's removeSeat().
-const MIN_PLAYERS = 2;
-
 // Links into existing pages so the desktop shell's sidebar isn't a dead
 // end — this component doesn't own those routes, it just points at them.
 const NAV_ITEMS = [
@@ -149,12 +145,27 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
         <main className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row md:items-start">
           <div className="flex min-w-0 flex-1 flex-col gap-6 md:max-w-xl">
             <div className="flex items-center justify-between gap-3">
-              <h1 className="text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">Room Lobby</h1>
+              {isHost ? (
+                <Button disabled={!canStart} onClick={() => startGame(room.code, room.hostSeatId!)} className="flex-1">
+                  <span className="flex items-center justify-center gap-2">
+                    <IconPlay className="h-4 w-4" /> Start Game
+                  </span>
+                </Button>
+              ) : (
+                <p className="flex items-center gap-1.5 text-sm font-semibold text-ink-muted">
+                  <IconClock className="h-4 w-4 shrink-0" /> Waiting for host to start…
+                </p>
+              )}
               <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-sm font-bold text-ink">
                 <IconUsers className="h-4 w-4 text-accent" />
                 {room.seats.length}/{room.maxPlayers}
               </span>
             </div>
+            {isHost && !canStart && (
+              <p className="flex items-center gap-1.5 text-xs text-ink-muted">
+                <IconClock className="h-3.5 w-3.5" /> Waiting for players…
+              </p>
+            )}
 
             {error && (
               <div className="flex items-start justify-between gap-3 rounded-2xl border border-accent bg-surface p-3">
@@ -202,12 +213,12 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
               <div className="flex gap-2">
                 <Button variant="secondary" className="flex-1" onClick={handleShareLink}>
                   <span className="flex items-center justify-center gap-2">
-                    <IconLink className="h-4 w-4" /> Share Link
+                    <IconLink className="h-4 w-4" /> Share
                   </span>
                 </Button>
                 <Button variant="secondary" className="flex-1" onClick={() => setInviteOpen((v) => !v)}>
                   <span className="flex items-center justify-center gap-2">
-                    <IconUsers className="h-4 w-4" /> Invite Friends
+                    <IconUsers className="h-4 w-4" /> Invite
                   </span>
                 </Button>
               </div>
@@ -224,7 +235,11 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
               <div className="grid grid-cols-2 gap-3">
                 {room.seats.map((seat) => {
                   const mine = mySeats.some((s) => s.id === seat.id);
-                  const canRemove = isHost && seat.id !== room.hostSeatId && room.seats.length > MIN_PLAYERS;
+                  // The host can remove anyone but themselves (down to
+                  // hosting alone); a non-host device can only remove seats
+                  // it added itself — see the matching check in
+                  // room:removeSeat (server.js).
+                  const canRemove = seat.id !== room.hostSeatId && (isHost || mine);
                   return (
                     <OccupiedSeatCard
                       key={seat.id}
@@ -253,30 +268,8 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
             <div className="flex items-center gap-2.5 rounded-2xl border border-line bg-surface-2 p-3 text-xs sm:text-sm">
               <IconGlobe className="h-5 w-5 shrink-0 text-ink-muted" />
               <p className="text-ink-muted">
-                <span className="font-semibold text-ink">Anyone with the code can join</span> · Players can join
-                from any device.
+                <span className="font-semibold text-ink">Anyone with the code can join</span> · from any device.
               </p>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              {isHost ? (
-                <div className="flex flex-col items-center gap-1.5">
-                  <Button disabled={!canStart} onClick={() => startGame(room.code, room.hostSeatId!)} className="w-full">
-                    <span className="flex items-center justify-center gap-2">
-                      <IconPlay className="h-4 w-4" /> Start Game
-                    </span>
-                  </Button>
-                  {!canStart && (
-                    <p className="flex items-center gap-1.5 text-xs text-ink-muted">
-                      <IconClock className="h-3.5 w-3.5" /> Waiting for players…
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p className="flex items-center justify-center gap-1.5 text-center text-ink-muted">
-                  <IconClock className="h-4 w-4 shrink-0" /> Waiting for the host to start…
-                </p>
-              )}
             </div>
           </div>
 

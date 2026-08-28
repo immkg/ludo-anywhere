@@ -13,8 +13,6 @@ import { useFriends } from "@/hooks/useFriends";
 import { usePresenceStore } from "@/store/usePresenceStore";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
-import NumberPicker from "@/components/ui/NumberPicker";
-import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
 import FriendAvatar from "@/components/friends/FriendAvatar";
 import { IconClock } from "@/components/lobby/icons";
 import type { OwnedSeat } from "@/types/room";
@@ -24,10 +22,9 @@ export default function JoinRoom() {
   const searchParams = useSearchParams();
   const { data: session } = useSession();
   const addMySeats = useRoomStore((s) => s.addMySeats);
-  const { profiles, createProfile } = useProfiles();
+  const { profiles, loading: profilesLoading, createProfile } = useProfiles();
 
   const [roomCode, setRoomCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
-  const [seats, setSeats] = useState<SeatDraft[]>(defaultSeats(1, []));
   const [loading, setLoading] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,33 +34,30 @@ export default function JoinRoom() {
   const [claimable, setClaimable] = useState<ClaimableSeat[] | null>(null);
   const [claimingId, setClaimingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (seats[0]?.profileId) return;
+  // Joining a room is always "join as me" — no separate player-picker step.
+  // Resolves the profile that represents the signed-in account itself,
+  // creating one from the Google name/email if this account has never
+  // joined/created a room before.
+  const resolveMyProfileId = async (): Promise<string> => {
     const myEmail = session?.user?.email?.toLowerCase();
-    const mine = profiles.find((p) => p.email === myEmail);
-    if (mine) setSeats((prev) => prev.map((s, i) => (i === 0 ? { profileId: mine.id } : s)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profiles, session?.user?.email]);
+    const existing = profiles.find((p) => p.email === myEmail);
+    if (existing) return existing.id;
+    if (!session?.user?.email) throw new Error("Sign in with Google to join a room");
+    const created = await createProfile(session.user.name || "Player", session.user.email);
+    return created.id;
+  };
 
   const handleJoin = async () => {
-    if (roomCode.trim().length < 4) {
+    const code = roomCode.trim().toUpperCase();
+    if (code.length < 4) {
       setError("Enter the room code");
-      return;
-    }
-    if (seats.some((s) => !s.profileId)) {
-      setError("Pick a player for every seat");
-      return;
-    }
-    const profileIds = seats.map((s) => s.profileId);
-    if (new Set(profileIds).size !== profileIds.length) {
-      setError("Each player can only be seated once");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const finalSeats = seats.map((s) => ({ profileId: s.profileId as string }));
-      const res = await joinRoom(roomCode.trim(), finalSeats);
+      const profileId = await resolveMyProfileId();
+      const res = await joinRoom(code, [{ profileId }]);
       // A brand-new account's join needs host approval — see room:join in
       // server.js. The eventual result arrives later via the same
       // room:joinApproved/room:joinRequest:declined listeners below that
@@ -89,11 +83,10 @@ export default function JoinRoom() {
   };
 
   const handleClaim = async (seatId: string) => {
-    const profileId = seats[0]?.profileId;
-    if (!profileId) return;
     setClaimingId(seatId);
     setError(null);
     try {
+      const profileId = await resolveMyProfileId();
       const res = await claimSeat(roomCode.trim(), seatId, profileId);
       if (res.pending) {
         setClaimable(null);
@@ -166,15 +159,6 @@ export default function JoinRoom() {
 
       <div className="mt-6 flex flex-col gap-8 md:mt-10 md:flex-row md:items-center md:gap-14 lg:gap-20">
         <div className="flex w-full max-w-md flex-1 flex-col gap-6">
-          <div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/icon-join.png" alt="" aria-hidden className="hidden h-8 w-8 min-[390px]:block" />
-            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Join Room</h1>
-            <p className="mt-1.5 max-w-[34ch] text-sm text-ink-muted sm:text-base">
-              Enter the room code your host shared, or ask a friend who&rsquo;s already playing.
-            </p>
-          </div>
-
           {claimable ? (
             <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
               <p className="text-sm font-semibold text-ink-muted">
@@ -214,6 +198,15 @@ export default function JoinRoom() {
             </div>
           ) : (
             <>
+              <div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand/icon-join.png" alt="" aria-hidden className="hidden h-8 w-8 min-[390px]:block" />
+                <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Join Room</h1>
+                <p className="mt-1.5 max-w-[34ch] text-sm text-ink-muted sm:text-base">
+                  Enter the room code your host shared, or ask a friend who&rsquo;s already playing.
+                </p>
+              </div>
+
               {friendsPlayingNow.length > 0 && (
                 <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface-2 p-3.5 sm:p-4">
                   <p className="text-sm font-bold text-ink-muted">Friends playing now</p>
@@ -243,35 +236,14 @@ export default function JoinRoom() {
                   placeholder="ABCDE"
                   value={roomCode}
                   maxLength={6}
-                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                  onChange={(e) => {
+                    setRoomCode(e.target.value.toUpperCase());
+                    setError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleJoin();
+                  }}
                 />
-              </div>
-
-              <div>
-                <label className="text-sm font-semibold text-ink-muted">Players on this device</label>
-                <NumberPicker
-                  options={[1, 2, 3, 4]}
-                  value={seats.length}
-                  onChange={(n) => setSeats((prev) => defaultSeats(n, prev))}
-                />
-              </div>
-
-              <div className="flex flex-col gap-3">
-                {seats.map((seat, i) => {
-                  const takenElsewhere = new Set(seats.filter((_, j) => j !== i).map((s) => s.profileId));
-                  return (
-                    <SeatRow
-                      key={i}
-                      index={i}
-                      seat={seat}
-                      previewArmIndex={null}
-                      profiles={profiles.filter((p) => !takenElsewhere.has(p.id))}
-                      onChange={(next) => setSeats((prev) => prev.map((s, j) => (j === i ? next : s)))}
-                      onCreateProfile={createProfile}
-                      showColorSwatch={false}
-                    />
-                  );
-                })}
               </div>
 
               <div className="flex items-end justify-center gap-1 min-[390px]:gap-1.5 md:hidden" aria-hidden>
@@ -289,7 +261,7 @@ export default function JoinRoom() {
 
               {error && <p className="text-sm text-accent">{error}</p>}
 
-              <Button onClick={handleJoin} disabled={loading} className="w-full">
+              <Button onClick={handleJoin} disabled={loading || profilesLoading} className="w-full">
                 <span className="flex w-full items-center justify-center gap-2">
                   {loading ? "Joining…" : "Join Room"}
                   {!loading && (
