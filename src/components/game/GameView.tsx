@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useGame } from "@/hooks/useGame";
@@ -54,15 +54,31 @@ export default function GameView({ room }: { room: Room }) {
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reduceMotion = useReducedMotion();
 
-  // Geometry for the dice's "flick" throw (see Dice.tsx) — the board's
-  // on-screen bounds and the dice's own resting spot, both measured live
-  // since either can change (viewport resize, the host-only join-requests
-  // banner appearing/disappearing above). Expressed in viewport pixels, so
-  // no shared coordinate ancestor is needed — Dice only ever uses the
-  // difference between the two.
+  // Geometry for the board square and the dice's "flick" throw (see
+  // Dice.tsx), both measured live since either can change (viewport resize,
+  // a player row's height changing, the host-only join-requests banner
+  // appearing/disappearing above). Expressed in viewport pixels, so no
+  // shared coordinate ancestor is needed — Dice only ever uses the
+  // difference between two of them.
+  //
+  // The board area can't just be a flex-1 box around <Board/> (which
+  // self-centers within whatever container it's given): in portrait, that
+  // leaves the container far taller than the square Board actually draws,
+  // pushing the player rows away from the board instead of hugging it. So
+  // boardAreaRef (flex-1) and the two row refs measure the *true* leftover
+  // space and each row's own height, boardSize is computed by subtracting
+  // one from the other, and that exact pixel size is applied to
+  // boardSlotRef directly — collapsing it to the square instead of
+  // stretching to fill the leftover box. boardAreaRef's own
+  // `justify-center` then centers the now-tightly-sized row+board+row
+  // cluster as a whole, so any true surplus space lands outside it.
   const rootRef = useRef<HTMLDivElement>(null);
+  const boardAreaRef = useRef<HTMLDivElement>(null);
+  const topRowRef = useRef<HTMLDivElement>(null);
+  const bottomRowRef = useRef<HTMLDivElement>(null);
   const boardSlotRef = useRef<HTMLDivElement>(null);
   const diceWrapRef = useRef<HTMLDivElement>(null);
+  const [boardSize, setBoardSize] = useState<number | null>(null);
   const [diceGeometry, setDiceGeometry] = useState<{
     restPoint: { x: number; y: number };
     safeRegion: { left: number; top: number; size: number };
@@ -70,44 +86,53 @@ export default function GameView({ room }: { room: Room }) {
   const [lastThrowStyle, setLastThrowStyle] = useState<ThrowStyle>("tap");
   const hasGame = Boolean(game);
 
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
+  useLayoutEffect(() => {
+    const areaEl = boardAreaRef.current;
+    const topRowEl = topRowRef.current;
+    const bottomRowEl = bottomRowRef.current;
+    const diceEl = diceWrapRef.current;
+    if (!areaEl || !topRowEl || !bottomRowEl || !diceEl) return;
     const recompute = () => {
-      const boardEl = boardSlotRef.current;
-      const diceEl = diceWrapRef.current;
-      if (!boardEl || !diceEl) return;
-      const boardRect = boardEl.getBoundingClientRect();
+      const areaRect = areaEl.getBoundingClientRect();
+      const topRowHeight = topRowEl.getBoundingClientRect().height;
+      const bottomRowHeight = bottomRowEl.getBoundingClientRect().height;
+      const availableHeight = areaRect.height - topRowHeight - bottomRowHeight;
+      if (areaRect.width <= 0 || availableHeight <= 0) return;
+      const size = Math.min(areaRect.width, availableHeight);
+      setBoardSize(size);
+
+      // Derived analytically (not via a second getBoundingClientRect pass
+      // on boardSlotRef) so the dice geometry is correct the same frame the
+      // new boardSize is applied, rather than one render behind.
+      const clusterHeight = topRowHeight + size + bottomRowHeight;
+      const clusterTop = areaRect.top + (areaRect.height - clusterHeight) / 2;
+      const boardTop = clusterTop + topRowHeight;
+      const boardLeft = areaRect.left + (areaRect.width - size) / 2;
       const diceRect = diceEl.getBoundingClientRect();
-      if (boardRect.width === 0 || boardRect.height === 0) return;
-      // Mirrors Board.tsx's own `size = min(width, height)` centering so
-      // this lines up with the board it actually renders, without needing
-      // Board.tsx to expose that value itself.
-      const boardSize = Math.min(boardRect.width, boardRect.height);
-      const boardLeft = boardRect.left + (boardRect.width - boardSize) / 2;
-      const boardTop = boardRect.top + (boardRect.height - boardSize) / 2;
       // An 80%-of-the-board square, centered, so a throw never lands flush
       // against the edge.
-      const safeSize = boardSize * 0.8;
+      const safeSize = size * 0.8;
       setDiceGeometry({
         restPoint: { x: diceRect.left + diceRect.width / 2, y: diceRect.top + diceRect.height / 2 },
         safeRegion: {
-          left: boardLeft + (boardSize - safeSize) / 2,
-          top: boardTop + (boardSize - safeSize) / 2,
+          left: boardLeft + (size - safeSize) / 2,
+          top: boardTop + (size - safeSize) / 2,
           size: safeSize,
         },
       });
     };
     const observer = new ResizeObserver(recompute);
-    observer.observe(root);
+    observer.observe(areaEl);
+    observer.observe(topRowEl);
+    observer.observe(bottomRowEl);
     recompute();
     return () => observer.disconnect();
     // Re-attempts once `game` first becomes available: on initial load
     // `game` starts null (see the "Loading game…" branch below, which
     // renders without these refs at all), so the very first run of this
-    // effect finds `rootRef.current` unmounted and bails out; without this
-    // dependency it would never run again once the real board/dice DOM
-    // exists, leaving restPoint/safeRegion permanently null.
+    // effect finds every ref unmounted and bails out; without this
+    // dependency it would never run again once the real layout exists,
+    // leaving boardSize/diceGeometry permanently null.
   }, [hasGame]);
 
   const showReaction = (reaction: Reaction) => {
@@ -273,12 +298,7 @@ export default function GameView({ room }: { room: Room }) {
   };
 
   return (
-    <div ref={rootRef} className="mx-auto flex h-dvh w-full flex-col gap-2 overflow-hidden py-2">
-      {isHost && (
-        <div className="shrink-0 px-4">
-          <IncomingJoinRequests roomCode={room.code} />
-        </div>
-      )}
+    <div ref={rootRef} className="mx-auto flex h-dvh w-full flex-col overflow-y-auto">
       {selectedSeatId && (
         <PlayerActionsModal
           room={room}
@@ -289,106 +309,122 @@ export default function GameView({ room }: { room: Room }) {
       )}
       {gameMenuOpen && <GameMenu roomCode={room.code} isHost={isHost} onClose={() => setGameMenuOpen(false)} />}
 
-      <div className="relative flex shrink-0 items-center justify-between px-4">
-        <PlayerCorner
-          seat={seatByArm.get(0) ?? null}
-          avatarFirst
-          isTurn={seatByArm.get(0)?.id === currentSeat?.id}
-          placement={placementForArm(seatByArm.get(0))}
-          suspended={suspendedForArm(seatByArm.get(0))}
-          onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
-        />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="pointer-events-auto">
-            <ReactionBar onReact={handleReact} onMore={() => setGameMenuOpen(true)} />
-          </div>
-        </div>
-        <PlayerCorner
-          seat={seatByArm.get(1) ?? null}
-          avatarFirst={false}
-          isTurn={seatByArm.get(1)?.id === currentSeat?.id}
-          placement={placementForArm(seatByArm.get(1))}
-          suspended={suspendedForArm(seatByArm.get(1))}
-          onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
-        />
+      {/* The game bar and dice bar stay pinned to the viewport's top/bottom
+          edges (root scrolls instead of clipping, so sticky has a scroll
+          context to stick within on short viewports); the player rows sit
+          as ordinary flex siblings immediately against the board instead. */}
+      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-4 py-2">
+        <ReactionBar onReact={handleReact} onMore={() => setGameMenuOpen(true)} />
       </div>
 
-      <div ref={boardSlotRef} className="relative min-h-0 flex-1 [container-type:size]">
-        <Board
-          game={game}
-          isMyTurn={isMyTurn}
-          currentSeatId={currentSeat?.id ?? null}
-          validMoves={validMoves}
-          onTokenTap={handleTokenTap}
-        />
-        <AnimatePresence>
-          {activeReaction && (
-            <motion.div
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.4 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
-              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="pointer-events-none absolute inset-0 flex items-center justify-center"
-            >
-              {activeReaction.kind === "emoji" ? (
-                <span className="text-[60cqmin] leading-none drop-shadow-lg">{activeReaction.value}</span>
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={activeReaction.src}
-                  alt={activeReaction.alt}
-                  className="h-[60cqmin] w-[60cqmin] object-contain drop-shadow-lg"
-                />
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+      {isHost && (
+        <div className="shrink-0 px-4 pt-2">
+          <IncomingJoinRequests roomCode={room.code} />
+        </div>
+      )}
+
+      <div ref={boardAreaRef} className="flex min-h-0 flex-1 flex-col items-center justify-center">
+        <div ref={topRowRef} className="flex w-full shrink-0 items-center justify-between px-4 pb-2">
+          <PlayerCorner
+            seat={seatByArm.get(0) ?? null}
+            avatarFirst
+            isTurn={seatByArm.get(0)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(0))}
+            suspended={suspendedForArm(seatByArm.get(0))}
+            onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
+          />
+          <PlayerCorner
+            seat={seatByArm.get(1) ?? null}
+            avatarFirst={false}
+            isTurn={seatByArm.get(1)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(1))}
+            suspended={suspendedForArm(seatByArm.get(1))}
+            onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
+          />
+        </div>
+
+        <div
+          ref={boardSlotRef}
+          className="relative shrink-0 [container-type:size]"
+          style={{ width: boardSize ?? undefined, height: boardSize ?? undefined }}
+        >
+          <Board
+            game={game}
+            isMyTurn={isMyTurn}
+            currentSeatId={currentSeat?.id ?? null}
+            validMoves={validMoves}
+            onTokenTap={handleTokenTap}
+          />
+          <AnimatePresence>
+            {activeReaction && (
+              <motion.div
+                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.4 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
+                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                className="pointer-events-none absolute inset-0 flex items-center justify-center"
+              >
+                {activeReaction.kind === "emoji" ? (
+                  <span className="text-[60cqmin] leading-none drop-shadow-lg">{activeReaction.value}</span>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={activeReaction.src}
+                    alt={activeReaction.alt}
+                    className="h-[60cqmin] w-[60cqmin] object-contain drop-shadow-lg"
+                  />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Konva draws to a <canvas>, which carries no semantics of its own,
+            so screen readers need this separate text description of which
+            tokens (if any) can currently be tapped. */}
+        <p className="sr-only" aria-live="polite">
+          {isMyTurn && validMoves.length > 0
+            ? `Your turn: ${validMoves.length} token${validMoves.length === 1 ? "" : "s"} can move now.`
+            : isMyTurn
+              ? "Your turn: roll the dice."
+              : ""}
+        </p>
+
+        <div ref={bottomRowRef} className="flex w-full shrink-0 items-center justify-between px-4 pt-2">
+          <PlayerCorner
+            seat={seatByArm.get(3) ?? null}
+            avatarFirst
+            isTurn={seatByArm.get(3)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(3))}
+            suspended={suspendedForArm(seatByArm.get(3))}
+            onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
+          />
+          <PlayerCorner
+            seat={seatByArm.get(2) ?? null}
+            avatarFirst={false}
+            isTurn={seatByArm.get(2)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(2))}
+            suspended={suspendedForArm(seatByArm.get(2))}
+            onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
+          />
+        </div>
       </div>
 
-      {/* Konva draws to a <canvas>, which carries no semantics of its own,
-          so screen readers need this separate text description of which
-          tokens (if any) can currently be tapped. */}
-      <p className="sr-only" aria-live="polite">
-        {isMyTurn && validMoves.length > 0
-          ? `Your turn: ${validMoves.length} token${validMoves.length === 1 ? "" : "s"} can move now.`
-          : isMyTurn
-            ? "Your turn: roll the dice."
-            : ""}
-      </p>
-
-      <div className="relative flex min-h-16 shrink-0 items-center justify-between px-4">
-        <PlayerCorner
-          seat={seatByArm.get(3) ?? null}
-          avatarFirst
-          isTurn={seatByArm.get(3)?.id === currentSeat?.id}
-          placement={placementForArm(seatByArm.get(3))}
-          suspended={suspendedForArm(seatByArm.get(3))}
-          onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
-        />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div ref={diceWrapRef} className="pointer-events-auto">
-            <Dice
-              lastRoll={game.lastRoll}
-              rollSeq={game.rollSeq}
-              canRoll={canRoll}
-              onRoll={handleRoll}
-              canMove={canMove}
-              color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
-              restPoint={diceGeometry?.restPoint ?? null}
-              safeRegion={diceGeometry?.safeRegion ?? null}
-              diceValue={game.diceValue}
-              throwStyle={lastThrowStyle}
-            />
-          </div>
+      <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-center border-t border-line bg-bg px-4 py-2">
+        <div ref={diceWrapRef}>
+          <Dice
+            lastRoll={game.lastRoll}
+            rollSeq={game.rollSeq}
+            canRoll={canRoll}
+            onRoll={handleRoll}
+            canMove={canMove}
+            color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+            restPoint={diceGeometry?.restPoint ?? null}
+            safeRegion={diceGeometry?.safeRegion ?? null}
+            diceValue={game.diceValue}
+            throwStyle={lastThrowStyle}
+          />
         </div>
-        <PlayerCorner
-          seat={seatByArm.get(2) ?? null}
-          avatarFirst={false}
-          isTurn={seatByArm.get(2)?.id === currentSeat?.id}
-          placement={placementForArm(seatByArm.get(2))}
-          suspended={suspendedForArm(seatByArm.get(2))}
-          onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
-        />
       </div>
     </div>
   );
