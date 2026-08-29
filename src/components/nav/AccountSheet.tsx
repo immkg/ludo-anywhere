@@ -6,6 +6,8 @@ import { signOut } from "next-auth/react";
 import CreditBalance from "@/components/nav/CreditBalance";
 import NavigationItem from "@/components/nav/NavigationItem";
 import { NAV_ITEMS, IconExit } from "@/components/nav/navItems";
+import { IconAppearance } from "@/components/nav/icons";
+import ThemeToggle from "@/components/ThemeToggle";
 
 type AccountSheetProps = {
   open: boolean;
@@ -99,7 +101,17 @@ export default function AccountSheet({ open, onClose, displayName, email, userIm
               ))}
             </nav>
 
-            <div className="border-t border-line pt-3">
+            <div className="flex flex-col gap-1 border-t border-line pt-3">
+              <div className="flex min-h-11 items-center justify-between gap-3 px-3 py-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-2 text-ink-muted">
+                    <IconAppearance className="h-4 w-4" />
+                  </span>
+                  <span className="text-sm font-semibold text-ink">Appearance</span>
+                </div>
+                <ThemeToggle />
+              </div>
+
               <button
                 onClick={() => signOut()}
                 className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-ink transition hover:bg-[#E8262C]/10"

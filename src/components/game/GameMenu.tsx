@@ -5,6 +5,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { endGame as emitEndGame, trackShare } from "@/lib/socketActions";
 import { shareOnWhatsApp, roomJoinUrl } from "@/lib/share";
 import Button from "@/components/ui/Button";
+import ThemeToggle from "@/components/ThemeToggle";
 
 // Room-wide controls, opened from the "more" button in ReactionBar —
 // distinct from a per-seat player menu (there isn't one on this screen).
@@ -63,6 +64,11 @@ export default function GameMenu({
             <button onClick={onClose} className="text-sm font-semibold text-ink-muted underline">
               Close
             </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-ink-muted">Theme</p>
+            <ThemeToggle />
           </div>
 
           {confirmingEnd ? (

@@ -3,6 +3,13 @@ import Script from "next/script";
 import "./globals.css";
 import SocketProvider from "@/components/SocketProvider";
 import AuthProvider from "@/components/AuthProvider";
+import ThemeProvider from "@/components/ThemeProvider";
+
+// Runs before hydration so the `.dark` class (and thus every --color-* var)
+// is correct on first paint — an effect in ThemeProvider would flash light
+// then repaint dark. Defaults to light, matching ThemeProvider's default,
+// only following the OS when the user has explicitly chosen "auto".
+const NO_FLASH_THEME_SCRIPT = `(function(){try{var s=localStorage.getItem("ludo:theme");var m=s==="light"||s==="dark"||s==="auto"?s:"light";var d=m==="dark"||(m==="auto"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;if(d)r.classList.add("dark");r.style.colorScheme=d?"dark":"light";}catch(e){}})();`;
 
 // Traffic-source analytics (Umami Cloud, myludo.life site). The website id
 // isn't a secret — it's already visible in every page's HTML — so it's
@@ -66,7 +73,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME_SCRIPT }} />
+      </head>
       <body className="min-h-dvh" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         {process.env.NODE_ENV === "production" && (
           <Script
@@ -75,9 +85,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             strategy="afterInteractive"
           />
         )}
-        <AuthProvider>
-          <SocketProvider>{children}</SocketProvider>
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <SocketProvider>{children}</SocketProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

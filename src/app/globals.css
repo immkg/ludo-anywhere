@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-accent: #ff6b3d;
   --color-accent-2: #ffb238;
@@ -13,17 +15,19 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  @theme {
-    --color-accent: #ff8156;
-    --color-accent-2: #ffc257;
-    --color-bg: #16130f;
-    --color-surface: #201b15;
-    --color-surface-2: #2a2319;
-    --color-ink: #f6efe4;
-    --color-ink-muted: #a99d8b;
-    --color-line: #3a3123;
-  }
+/* Dark palette is applied via the `.dark` class on <html>, toggled by
+   ThemeProvider — not by prefers-color-scheme directly — so a user's
+   explicit light/dark choice can override the OS setting. "Auto" mode
+   resolves to this class in JS instead. */
+.dark {
+  --color-accent: #ff8156;
+  --color-accent-2: #ffc257;
+  --color-bg: #16130f;
+  --color-surface: #201b15;
+  --color-surface-2: #2a2319;
+  --color-ink: #f6efe4;
+  --color-ink-muted: #a99d8b;
+  --color-line: #3a3123;
 }
 
 * {
