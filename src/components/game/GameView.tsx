@@ -313,18 +313,18 @@ export default function GameView({ room }: { room: Room }) {
           edges (root scrolls instead of clipping, so sticky has a scroll
           context to stick within on short viewports); the player rows sit
           as ordinary flex siblings immediately against the board instead. */}
-      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-4 py-2">
+      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 py-2 sm:px-4">
         <ReactionBar onReact={handleReact} onMore={() => setGameMenuOpen(true)} />
       </div>
 
       {isHost && (
-        <div className="shrink-0 px-4 pt-2">
+        <div className="shrink-0 px-2 pt-2 sm:px-4">
           <IncomingJoinRequests roomCode={room.code} />
         </div>
       )}
 
       <div ref={boardAreaRef} className="flex min-h-0 flex-1 flex-col items-center justify-center">
-        <div ref={topRowRef} className="flex w-full shrink-0 items-center justify-between px-4 pb-2">
+        <div ref={topRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pb-2 sm:px-4">
           <PlayerCorner
             seat={seatByArm.get(0) ?? null}
             avatarFirst
@@ -390,7 +390,7 @@ export default function GameView({ room }: { room: Room }) {
               : ""}
         </p>
 
-        <div ref={bottomRowRef} className="flex w-full shrink-0 items-center justify-between px-4 pt-2">
+        <div ref={bottomRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pt-2 sm:px-4">
           <PlayerCorner
             seat={seatByArm.get(3) ?? null}
             avatarFirst
@@ -410,7 +410,7 @@ export default function GameView({ room }: { room: Room }) {
         </div>
       </div>
 
-      <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-center border-t border-line bg-bg px-4 py-2">
+      <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-center border-t border-line bg-bg px-2 py-2 sm:px-4">
         <div ref={diceWrapRef}>
           <Dice
             lastRoll={game.lastRoll}
