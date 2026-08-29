@@ -129,6 +129,46 @@ export function addSeats(room, requests, { socketId, deviceId, userId }) {
   return { room, seats: newSeats };
 }
 
+// Host-only, lobby-only: fills every remaining open seat with a bot,
+// numbered after whatever bots (if any) are already seated so a second fill
+// (e.g. after removing one) doesn't repeat a name. A bot seat has no
+// deviceId/profileId/userId/socketId behind it — it's never reconnected to,
+// never charged (see checkGameStart, which only charges seats with a
+// userId), and plays itself server-side once it's its turn (see
+// scheduleBotTurn in server.js).
+export function fillWithBots(room) {
+  if (!room) return { error: "Room not found" };
+  if (room.status !== "lobby") return { error: "Game already started" };
+
+  const openSlots = room.maxPlayers - room.seats.length;
+  if (openSlots <= 0) return { error: "Room is full" };
+
+  const existingBotNumbers = room.seats
+    .filter((s) => s.bot)
+    .map((s) => Number(s.name.replace("Bot ", "")))
+    .filter((n) => Number.isFinite(n));
+  let nextBotNumber = existingBotNumbers.length > 0 ? Math.max(...existingBotNumbers) + 1 : 1;
+
+  const startIndex = room.seats.length;
+  const newSeats = Array.from({ length: openSlots }, (_, i) => ({
+    id: randomToken(),
+    token: randomToken(),
+    name: `Bot ${nextBotNumber + i}`,
+    armIndex: armForSeatIndex(startIndex + i, room.maxPlayers),
+    deviceId: null,
+    profileId: null,
+    userId: null,
+    socketId: null,
+    connected: true,
+    bot: true,
+  }));
+
+  room.seats.push(...newSeats);
+  if (!room.hostSeatId) room.hostSeatId = newSeats[0].id;
+
+  return { room, seats: newSeats };
+}
+
 // Lobby-only: drops one seat to free up the slot. Who's allowed to remove
 // which seat is enforced by the caller (room:removeSeat in server.js) —
 // the host can remove anyone but themselves, and can go all the way down
@@ -364,6 +404,7 @@ export function serializeRoom(room) {
       deviceId: s.deviceId,
       connected: s.connected,
       profileId: s.profileId ?? null,
+      bot: !!s.bot,
     })),
   };
 }

@@ -7,6 +7,10 @@ export type Seat = {
   deviceId: string;
   connected: boolean;
   profileId: string | null;
+  // Host-added filler seat (see room:fillBots) — never has a real
+  // deviceId/profileId/userId behind it, and plays itself server-side
+  // (see scheduleBotTurn in server.js).
+  bot?: boolean;
 };
 
 export type Room = {

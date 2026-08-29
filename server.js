@@ -22,8 +22,9 @@ import {
   claimSeat,
   deleteRoom,
   rematchEligibleSeats,
+  fillWithBots,
 } from "./src/server/rooms.js";
-import { rollDice, moveToken } from "./src/game/engine.js";
+import { rollDice, moveToken, pickAutoMoveToken } from "./src/game/engine.js";
 import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
 import { resolveSeatProfiles } from "./src/server/profiles.js";
@@ -55,6 +56,53 @@ app.prepare().then(() => {
 
   function broadcastGame(room) {
     io.to(room.code).emit("game:update", serializeGame(room));
+  }
+
+  const BOT_ROLL_DELAY_MS = 1800;
+  const BOT_MOVE_DELAY_MS = 1400;
+
+  // Whichever seat currently owed a turn, if that seat is a bot — null once
+  // the round isn't playing, or the current seat isn't one.
+  function currentBotSeat(room) {
+    if (!room?.game || room.status !== "playing") return null;
+    const gameSeat = room.game.seats[room.game.currentSeatIndex];
+    if (!gameSeat) return null;
+    const seat = room.seats.find((s) => s.id === gameSeat.id);
+    return seat?.bot ? seat : null;
+  }
+
+  // Bots never wait on a human tap: once it's a bot seat's turn, this rolls
+  // for it after a short "thinking" pause, then — if the roll leaves a
+  // choice — moves for it after another pause, reusing the same auto-move
+  // heuristic already used for an idle human (pickAutoMoveToken in
+  // src/game/engine.js). Each step re-validates it's still that bot's turn
+  // right before acting, since the seat could've been paused/removed, or the
+  // round could've ended, while it was waiting — and always reschedules
+  // itself afterward, in case the next turn (or a bonus turn for the same
+  // seat) is a bot's too. `room.botTimer` guards against ever having two of
+  // these chains running for the same room at once.
+  function scheduleBotTurn(room) {
+    if (room.botTimer) return;
+    const botSeat = currentBotSeat(room);
+    if (!botSeat) return;
+
+    const rolling = room.game.diceValue == null;
+    room.botTimer = setTimeout(() => {
+      room.botTimer = null;
+      if (getRoom(room.code) !== room) return;
+      const stillBotSeat = currentBotSeat(room);
+      if (!stillBotSeat || stillBotSeat.id !== botSeat.id) return scheduleBotTurn(room);
+
+      if (rolling) {
+        room.game = rollDice(room.game);
+      } else {
+        const tokenIndex = pickAutoMoveToken(room.game, botSeat.id);
+        if (tokenIndex != null) room.game = moveToken(room.game, botSeat.id, tokenIndex);
+      }
+      broadcastGame(room);
+      finishRoomIfNeeded(room);
+      scheduleBotTurn(room);
+    }, rolling ? BOT_ROLL_DELAY_MS : BOT_MOVE_DELAY_MS);
   }
 
   // Called after anything that might have just ended a round (a move that
@@ -488,6 +536,7 @@ app.prepare().then(() => {
 
       broadcastRoom(room);
       broadcastGame(room);
+      scheduleBotTurn(room);
       const startProps = {
         roomCode: room.code,
         playerCount: room.seats.length,
@@ -521,6 +570,8 @@ app.prepare().then(() => {
       socket.to(roomCode).emit("game:diceThrow", { style: style === "flick" ? "flick" : "tap" });
       room.game = rollDice(room.game);
       broadcastGame(room);
+      finishRoomIfNeeded(room);
+      scheduleBotTurn(room);
     });
 
     socket.on("game:moveToken", ({ roomCode, seatId, tokenIndex }) => {
@@ -533,6 +584,7 @@ app.prepare().then(() => {
       room.game = moveToken(room.game, seatId, tokenIndex);
       broadcastGame(room);
       finishRoomIfNeeded(room);
+      scheduleBotTurn(room);
     });
 
     // Ephemeral emoji/sticker reaction — fire-and-forget, no game-state
@@ -555,6 +607,24 @@ app.prepare().then(() => {
         });
       }
     });
+
+    socket.on(
+      "room:fillBots",
+      withAck(async ({ roomCode }, ack) => {
+        const callerUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!callerUserId || hostUserId(room) !== callerUserId) {
+          return ack?.({ error: "Only the host can add bots" });
+        }
+
+        const { error } = fillWithBots(room);
+        if (error) return ack?.({ error });
+
+        broadcastRoom(room);
+        ack?.({});
+      })
+    );
 
     socket.on(
       "room:removeSeat",
@@ -624,6 +694,7 @@ app.prepare().then(() => {
         broadcastRoom(room);
         broadcastGame(room);
         finishRoomIfNeeded(room);
+        scheduleBotTurn(room);
         ack?.({});
       })
     );
@@ -642,6 +713,7 @@ app.prepare().then(() => {
         if (error) return ack?.({ error });
 
         broadcastGame(room);
+        scheduleBotTurn(room);
         ack?.({});
       })
     );
@@ -797,6 +869,7 @@ app.prepare().then(() => {
           deleteRoom(newRoom.code);
           return ack?.({ error: startError });
         }
+        scheduleBotTurn(newRoom);
 
         const rematchProps = {
           roomCode: newRoom.code,

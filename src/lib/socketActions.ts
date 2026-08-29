@@ -63,6 +63,13 @@ export function removeSeat(roomCode: string, seatId: string) {
   return emitWithAck("room:removeSeat", { roomCode, seatId });
 }
 
+// Host-only, lobby-only: fills every remaining open seat with a bot (see
+// room:fillBots in server.js) — no seats to hand back, room:update carries
+// the new roster same as any other join.
+export function fillBotSeats(roomCode: string) {
+  return emitWithAck("room:fillBots", { roomCode });
+}
+
 export function suspendSeat(roomCode: string, seatId: string) {
   return emitWithAck("room:suspendSeat", { roomCode, seatId });
 }

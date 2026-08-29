@@ -1,5 +1,5 @@
 import { colorForArm } from "@/game/board";
-import { IconCrown, IconPlus, IconX } from "@/components/lobby/icons";
+import { IconCrown, IconPlus, IconRobot, IconX } from "@/components/lobby/icons";
 import type { Seat } from "@/types/room";
 
 function initial(name: string) {
@@ -47,7 +47,7 @@ export function OccupiedSeatCard({
         style={{ backgroundColor: color.hex }}
         aria-hidden
       >
-        {initial(seat.name)}
+        {seat.bot ? <IconRobot className="h-6 w-6 sm:h-7 sm:w-7" /> : initial(seat.name)}
       </span>
       <p className="w-full truncate text-sm font-bold text-ink sm:text-base" title={seat.name}>
         {seat.name}
@@ -56,6 +56,10 @@ export function OccupiedSeatCard({
         {isHostSeat ? (
           <>
             <IconCrown className="h-3 w-3" /> Host
+          </>
+        ) : seat.bot ? (
+          <>
+            <IconRobot className="h-3 w-3" /> Bot
           </>
         ) : (
           "Joined"

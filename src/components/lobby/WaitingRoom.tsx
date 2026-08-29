@@ -5,7 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { armForSeatIndex, colorForArm } from "@/game/board";
-import { startGame, inviteFriendToRoom, removeSeat, joinRoom, trackShare, leaveRoom } from "@/lib/socketActions";
+import {
+  startGame,
+  inviteFriendToRoom,
+  removeSeat,
+  joinRoom,
+  trackShare,
+  leaveRoom,
+  fillBotSeats,
+} from "@/lib/socketActions";
 import { shareOnWhatsApp, roomJoinUrl } from "@/lib/share";
 import { saveOwnedSeats, clearOwnedSeats } from "@/lib/identity";
 import { generateDummyEmail, randomEmailSuffix } from "@/lib/dummyEmail";
@@ -32,6 +40,7 @@ import {
   IconGrid,
   IconLink,
   IconPlay,
+  IconRobot,
   IconTrophy,
   IconUsers,
 } from "@/components/lobby/icons";
@@ -53,6 +62,7 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
   const [copied, setCopied] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [addPlayerOpen, setAddPlayerOpen] = useState(false);
+  const [fillingBots, setFillingBots] = useState(false);
   const error = useRoomStore((s) => s.error);
   const setError = useRoomStore((s) => s.setError);
   const resetRoomStore = useRoomStore((s) => s.reset);
@@ -60,6 +70,17 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
   const canStart = isHost && room.seats.length >= 2;
   const openSlots = Math.max(0, room.maxPlayers - room.seats.length);
   const hostName = room.seats.find((s) => s.id === room.hostSeatId)?.name;
+
+  const handleFillBots = async () => {
+    setFillingBots(true);
+    try {
+      await fillBotSeats(room.code);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add bots");
+    } finally {
+      setFillingBots(false);
+    }
+  };
 
   const handleCopy = async () => {
     try {
@@ -232,9 +253,14 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
             {isHost && <IncomingJoinRequests roomCode={room.code} />}
 
             <div className="flex flex-col gap-3">
-              <h2 className="text-sm font-bold text-ink-muted">
-                Players ({room.seats.length}/{room.maxPlayers})
-              </h2>
+              {isHost && openSlots > 0 && (
+                <Button variant="secondary" onClick={handleFillBots} disabled={fillingBots}>
+                  <span className="flex items-center justify-center gap-2">
+                    <IconRobot className="h-4 w-4" />
+                    {fillingBots ? "Adding bots…" : `Fill ${openSlots} open seat${openSlots === 1 ? "" : "s"} with Bot`}
+                  </span>
+                </Button>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 {room.seats.map((seat) => {
                   const mine = mySeats.some((s) => s.id === seat.id);

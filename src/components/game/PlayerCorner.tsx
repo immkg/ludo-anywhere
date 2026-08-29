@@ -1,5 +1,6 @@
 import { colorForArm } from "@/game/board";
 import { animalForSeat } from "@/lib/avatar";
+import { IconRobot } from "@/components/lobby/icons";
 import { cn } from "@/lib/utils";
 import type { Seat } from "@/types/room";
 
@@ -58,7 +59,13 @@ export default function PlayerCorner({ seat, avatarFirst, isTurn, placement, sus
         className="flex h-9 w-9 items-center justify-center rounded-full border-2 text-lg leading-none shadow-sm"
         style={{ borderColor: color.hex, backgroundColor: `${color.hex}2E` }}
       >
-        {animalForSeat(seat.id)}
+        {seat.bot ? (
+          <span style={{ color: color.hex }}>
+            <IconRobot className="h-5 w-5" />
+          </span>
+        ) : (
+          animalForSeat(seat.id)
+        )}
       </span>
       {placement && placement <= 3 && <PlacementCrown placement={placement} />}
     </span>
