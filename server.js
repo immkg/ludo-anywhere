@@ -506,13 +506,19 @@ app.prepare().then(() => {
       });
     });
 
-    socket.on("game:rollDice", ({ roomCode, seatId }) => {
+    socket.on("game:rollDice", ({ roomCode, seatId, style }) => {
       const room = getRoom(roomCode);
       if (!room?.game) return;
       const current = room.game.seats[room.game.currentSeatIndex];
       if (current?.id !== seatId) {
         return socket.emit("error", { message: "Not your turn" });
       }
+      // Purely a presentation flourish (see Dice.tsx) — relayed to everyone
+      // else in the room, always (not just for "flick"), so a later plain
+      // tap can't be misread as still using a stale "flick" from an earlier
+      // roll. Sent ahead of the game:update below so it's more likely to
+      // land before the matching rollSeq bump. Never affects the actual roll.
+      socket.to(roomCode).emit("game:diceThrow", { style: style === "flick" ? "flick" : "tap" });
       room.game = rollDice(room.game);
       broadcastGame(room);
     });

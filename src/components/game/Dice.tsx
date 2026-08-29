@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { motion, useAnimationControls, useMotionValue, animate as animateValue } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { playDiceRoll } from "@/lib/sound";
 
@@ -13,6 +13,23 @@ const CUBE_SIZE = 64; // px — matches h-16 w-16
 const HALF = CUBE_SIZE / 2;
 const AUTO_ROLL_MS = 5000;
 const AUTO_MOVE_MS = 15000;
+// Pointer down->up shorter than this is a plain tap (today's simple
+// in-place roll); at or past it counts as a deliberate hold-and-release,
+// which throws the die onto the board instead — see startRoll below.
+const HOLD_THRESHOLD_MS = 350;
+// A second press-down within this long after the first release is a
+// double-tap — also a flick. Every plain tap now waits this long before
+// committing, to leave room for that second tap to arrive.
+const DOUBLE_TAP_WINDOW_MS = 280;
+const THROW_MS_RANGE: [number, number] = [700, 1050];
+const RETURN_MS_RANGE: [number, number] = [350, 600];
+// Touching the die pauses the auto-roll countdown; letting go without
+// actually completing a roll (moving off, or a cancelled gesture) costs
+// this much off whatever time was left when it resumes.
+const ABANDON_PENALTY_MS = 2000;
+// How see-through the die gets while it's sitting out on the board —
+// enough that it doesn't fully block the tokens/cells underneath it.
+const ON_BOARD_OPACITY = 0.7;
 
 const PIP_LAYOUTS: Record<number, [number, number][]> = {
   1: [[1, 1]],
@@ -104,11 +121,18 @@ function Face({
   );
 }
 
+export type ThrowStyle = "tap" | "flick";
+type Point = { x: number; y: number };
+type SafeRegion = { left: number; top: number; size: number };
+
 type DiceProps = {
   lastRoll: number | null;
   rollSeq: number;
   canRoll: boolean;
-  onRoll: () => void;
+  // `style` reflects how this roll was triggered — a plain tap/keyboard
+  // press rolls in place exactly as before; a deliberate hold-and-release
+  // throws the die onto the board (see handleClick below).
+  onRoll: (style: ThrowStyle) => void;
   // True while it's this device's turn and a token move is pending — drives
   // the same countdown ring as canRoll, just on the longer auto-move clock,
   // so a stalled move is just as visible as a stalled roll.
@@ -122,9 +146,40 @@ type DiceProps = {
   // up in the player-name row (see DiceLabel), separate from this cube, but
   // still needs to hide for the same window the spin animation is playing.
   onRollingChange?: (isRolling: boolean) => void;
+  // The board's on-screen bounds and this dice's own resting spot, both in
+  // pixels relative to the same positioned ancestor (see GameView.tsx) —
+  // only meaningful for a "flick" throw. Omitted (e.g. the dev test
+  // harness) just makes every roll behave like a plain tap.
+  restPoint?: Point | null;
+  safeRegion?: SafeRegion | null;
+  // The current pending roll's value — null once its move has fully
+  // resolved, which is this dice's cue to return home if it's out on the
+  // board (see the diceValue effect below).
+  diceValue?: number | null;
+  // Which style the *current* rollSeq should animate as — set locally the
+  // instant this device triggers a roll, and relayed from whoever else
+  // triggered it (see game:diceThrow in GameView.tsx) so every viewer sees
+  // the same flourish, not just the roller.
+  throwStyle?: ThrowStyle;
 };
 
-export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, color, onRollingChange }: DiceProps) {
+function randomBetween(min: number, max: number) {
+  return min + Math.random() * (max - min);
+}
+
+export default function Dice({
+  lastRoll,
+  rollSeq,
+  canRoll,
+  onRoll,
+  canMove,
+  color,
+  onRollingChange,
+  restPoint,
+  safeRegion,
+  diceValue,
+  throwStyle,
+}: DiceProps) {
   const [isRolling, setIsRolling] = useState(false);
   const [orientation, setOrientation] = useState(() => LANDING_ORIENTATION[lastRoll ?? 1]);
   const prevRollSeqRef = useRef(rollSeq);
@@ -144,8 +199,91 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
   // already be the next player's.
   const prevColorRef = useRef(color);
 
+  // Position/phase machinery for the "flick" throw — untouched by a plain
+  // tap, which never moves this at all (stays at {x:0, y:0}, i.e. its
+  // ordinary laid-out spot).
+  const posControls = useAnimationControls();
+  const [onBoard, setOnBoard] = useState(false);
+  const pointerDownAtRef = useRef<number | null>(null);
+  const prevDiceValueRef = useRef(diceValue ?? null);
+  // Gesture state: a sustained hold throws on its own (no need to release),
+  // a quick release waits briefly for a possible second tap (double-tap),
+  // and rolledThisPressRef stops whichever trigger fires first from also
+  // firing a second time for the same press.
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rolledThisPressRef = useRef(false);
+
+  // The auto-roll countdown (ring progress 0..1, driving both the visual
+  // arc and the actual auto-roll trigger via its onComplete) — a plain
+  // motion value + imperative animation rather than a declarative one, so
+  // touching the die can pause it mid-flight and resume it later at a
+  // penalized remaining duration. See startAutoRollCountdown below.
+  const rollProgressMV = useMotionValue(0);
+  const rollAnimRef = useRef<ReturnType<typeof animateValue> | null>(null);
+
   function spinFrom(prev: { x: number; y: number }) {
-    return { x: prev.x + 360 * 3, y: prev.y + 360 * 4 };
+    const turnsX = Math.round(randomBetween(2, 4)) * (Math.random() < 0.5 ? -1 : 1);
+    const turnsY = Math.round(randomBetween(3, 5)) * (Math.random() < 0.5 ? -1 : 1);
+    return { x: prev.x + 360 * turnsX, y: prev.y + 360 * turnsY };
+  }
+
+  // Throws the die from its resting spot to a random point within the
+  // board's safe-landing region (a centered square, 80% of the board's
+  // side, so it never lands flush against an edge), along a curved path,
+  // then gives it a couple of small settle bounces before holding there.
+  async function throwOntoBoard(durationMs: number) {
+    if (!restPoint || !safeRegion) return;
+    setOnBoard(true);
+
+    const target: Point = {
+      x: safeRegion.left + Math.random() * safeRegion.size,
+      y: safeRegion.top + Math.random() * safeRegion.size,
+    };
+    const dx = target.x - restPoint.x;
+    const dy = target.y - restPoint.y;
+    const dist = Math.hypot(dx, dy);
+    // A curved (not straight-line) path: an intermediate point offset both
+    // upward (a throwing arc) and sideways (so it doesn't look like a
+    // perfectly straight ramp), varied per throw.
+    const arcLift = dist * randomBetween(0.25, 0.45);
+    const sideDrift = (Math.random() < 0.5 ? -1 : 1) * dist * randomBetween(0.05, 0.2);
+    const midX = dx / 2 + sideDrift;
+    const midY = dy / 2 - arcLift;
+
+    await posControls.start({
+      x: [0, midX, dx],
+      y: [0, midY, dy],
+      // Fades in over the flight, landing at ON_BOARD_OPACITY — so it
+      // doesn't fully hide whatever's underneath once it's sitting there.
+      opacity: [1, 1, ON_BOARD_OPACITY],
+      transition: { duration: durationMs / 1000, times: [0, 0.55, 1], ease: ["easeOut", "easeIn"] },
+    });
+
+    // A couple of small squash-and-settle bounces on impact — count and
+    // intensity both vary per throw.
+    const bounces = Math.round(randomBetween(1, 3));
+    for (let i = 0; i < bounces; i++) {
+      const intensity = 0.16 * (1 - i / bounces) + 0.04;
+      await posControls.start({
+        scaleY: [1, 1 - intensity, 1 + intensity * 0.4, 1],
+        scaleX: [1, 1 + intensity * 0.5, 1 - intensity * 0.2, 1],
+        transition: { duration: 0.22, ease: "easeOut" },
+      });
+    }
+  }
+
+  async function returnHome() {
+    setOnBoard(false);
+    const durationMs = randomBetween(...RETURN_MS_RANGE);
+    await posControls.start({
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      opacity: 1,
+      transition: { duration: durationMs / 1000, ease: LAND_EASE },
+    });
   }
 
   // Fires for every viewer (the roller and anyone spectating) whenever the
@@ -156,17 +294,20 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
     if (rollSeq === prevRollSeqRef.current) return;
     prevRollSeqRef.current = rollSeq;
     const rollerColor = prevColorRef.current;
+    const style = throwStyle ?? "tap";
+    const durationMs = style === "flick" ? randomBetween(...THROW_MS_RANGE) : MIN_SPIN_MS;
 
-    const alreadySpinning = isRolling && Date.now() - spinStartRef.current < MIN_SPIN_MS;
+    const alreadySpinning = isRolling && Date.now() - spinStartRef.current < durationMs;
     if (!alreadySpinning) {
       spinStartRef.current = Date.now();
       setIsRolling(true);
       setOrientation(spinFrom);
       playDiceRoll();
+      if (style === "flick") throwOntoBoard(durationMs);
     }
 
     const target = LANDING_ORIENTATION[lastRoll ?? 1];
-    const remaining = Math.max(0, MIN_SPIN_MS - (Date.now() - spinStartRef.current));
+    const remaining = Math.max(0, durationMs - (Date.now() - spinStartRef.current));
     if (landTimeoutRef.current) clearTimeout(landTimeoutRef.current);
     landTimeoutRef.current = setTimeout(() => {
       setOrientation({ x: target.x + 360 * 2, y: target.y + 360 * 2 });
@@ -175,6 +316,18 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
     }, remaining);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rollSeq, lastRoll]);
+
+  // Once this roll's move has fully resolved (diceValue back to null),
+  // bring a die that's out on the board back home. Skipped on mount and
+  // for a plain tap, which never left home in the first place.
+  useEffect(() => {
+    const prev = prevDiceValueRef.current;
+    prevDiceValueRef.current = diceValue ?? null;
+    if (prev != null && diceValue == null && onBoard) {
+      returnHome();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diceValue]);
 
   // Runs after the roll-landing effect above on any render where both
   // change together, so that effect still sees the pre-update color.
@@ -185,6 +338,9 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
   useEffect(() => {
     return () => {
       if (landTimeoutRef.current) clearTimeout(landTimeoutRef.current);
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+      if (pendingTapTimerRef.current) clearTimeout(pendingTapTimerRef.current);
+      rollAnimRef.current?.stop();
     };
   }, []);
 
@@ -199,83 +355,212 @@ export default function Dice({ lastRoll, rollSeq, canRoll, onRoll, canMove, colo
     onRollRef.current = onRoll;
   }, [onRoll]);
 
+  // Drives both the visual countdown ring and the actual auto-roll
+  // trigger from one pausable animation, instead of a plain setTimeout —
+  // see handlePointerDown/handlePointerLeave below, which pause this while
+  // the die is being touched and penalize it on an abandoned gesture.
+  function startAutoRollCountdown(durationMs: number) {
+    rollAnimRef.current?.stop();
+    rollAnimRef.current = animateValue(rollProgressMV, 1, {
+      duration: durationMs / 1000,
+      ease: "linear",
+      // An unattended auto-roll is never a deliberate flick — keep it quiet.
+      onComplete: () => onRollRef.current("tap"),
+    });
+  }
+
   useEffect(() => {
-    if (!canRoll || isRolling) return;
-    const timer = setTimeout(() => onRollRef.current(), AUTO_ROLL_MS);
-    return () => clearTimeout(timer);
+    if (!canRoll || isRolling) {
+      rollAnimRef.current?.stop();
+      rollProgressMV.set(0);
+      return;
+    }
+    startAutoRollCountdown(AUTO_ROLL_MS);
+    return () => {
+      rollAnimRef.current?.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canRoll, isRolling]);
 
-  function handleClick() {
+  // The roll actually triggers here, via pointerdown/up (covers mouse and
+  // touch directly) — the click handler below only exists to catch
+  // keyboard activation (Enter/Space), which fires a click with no pointer
+  // events at all. Three ways to get a flick: hold past the threshold
+  // without releasing, release-then-press-again within the double-tap
+  // window, or a plain hold-and-release past the threshold.
+  const suppressNextClickRef = useRef(false);
+
+  function triggerRoll(style: ThrowStyle) {
+    if (rolledThisPressRef.current) return;
+    rolledThisPressRef.current = true;
+    rollAnimRef.current?.stop(); // a real roll is happening now — the countdown is moot
+    onRoll(style);
+  }
+
+  // Cancels whatever gesture was in progress (moved off, or the browser
+  // cancelled it) without rolling, and resumes the auto-roll countdown at
+  // a penalty rather than where it was paused — see ABANDON_PENALTY_MS.
+  function abandonPress() {
+    pointerDownAtRef.current = null;
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    if (!canRoll || isRolling || rolledThisPressRef.current) return;
+    const naturalRemainingMs = (1 - rollProgressMV.get()) * AUTO_ROLL_MS;
+    const penalizedMs = naturalRemainingMs - ABANDON_PENALTY_MS;
+    if (penalizedMs <= 0) {
+      rollProgressMV.set(1);
+      onRollRef.current("tap");
+    } else {
+      startAutoRollCountdown(penalizedMs);
+    }
+  }
+
+  function handlePointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
+    if (onBoard) return; // tapping while it's out on the board just brings it home — see handleClick
     if (!canRoll || isRolling) return;
-    spinStartRef.current = Date.now();
-    setIsRolling(true);
-    setOrientation(spinFrom);
-    playDiceRoll();
-    onRoll();
+    pointerDownAtRef.current = Date.now();
+    rolledThisPressRef.current = false;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    rollAnimRef.current?.pause();
+
+    // A second press-down while the previous tap's roll is still waiting
+    // to see if a double-tap follows — this is that double-tap, so throw
+    // immediately instead of letting the pending single tap fire.
+    if (pendingTapTimerRef.current) {
+      clearTimeout(pendingTapTimerRef.current);
+      pendingTapTimerRef.current = null;
+      triggerRoll("flick");
+      return;
+    }
+
+    // A sustained hold throws on its own — no need to wait for release.
+    holdTimerRef.current = setTimeout(() => {
+      holdTimerRef.current = null;
+      triggerRoll("flick");
+    }, HOLD_THRESHOLD_MS);
+  }
+
+  function handlePointerUp() {
+    if (onBoard) return;
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    if (pointerDownAtRef.current == null) return;
+    pointerDownAtRef.current = null;
+    suppressNextClickRef.current = true;
+    if (rolledThisPressRef.current) return; // already thrown via a sustained hold
+    // A quick release — wait briefly in case a second tap follows (that's
+    // a double-tap, handled above); otherwise this settles as a plain tap.
+    pendingTapTimerRef.current = setTimeout(() => {
+      pendingTapTimerRef.current = null;
+      triggerRoll("tap");
+    }, DOUBLE_TAP_WINDOW_MS);
+  }
+
+  function handleClick() {
+    if (onBoard) {
+      returnHome();
+      return;
+    }
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    if (!canRoll || isRolling) return;
+    // Keyboard activation only — mouse/touch are fully handled above.
+    triggerRoll("tap");
   }
 
   return (
-    <button
-      onClick={handleClick}
-      disabled={!canRoll || isRolling}
-      className={cn(
-        "relative h-16 w-16 rounded-2xl transition disabled:opacity-40",
-        canRoll && !isRolling ? "ring-2 ring-offset-2 ring-offset-bg active:scale-95" : ""
-      )}
-      style={{ perspective: 300, ...(canRoll && !isRolling ? ({ "--tw-ring-color": color } as CSSProperties) : {}) }}
+    <motion.div
+      animate={posControls}
+      initial={{ x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 1 }}
+      className={cn("relative", onBoard && "z-10")}
     >
-      {(canRoll || canMove) && !isRolling && (
-        <svg
-          // Keyed by phase so switching straight from "waiting to move" to
-          // "waiting to roll" (a bonus turn after a six/capture, with no
-          // isRolling window in between to naturally unmount this) forces a
-          // fresh mount instead of the bar jumping mid-animation onto the
-          // other phase's duration.
-          key={canRoll ? "roll" : "move"}
-          className="pointer-events-none absolute -inset-1.5 h-[calc(100%+12px)] w-[calc(100%+12px)] -rotate-90"
-          viewBox="0 0 100 100"
-        >
-          <motion.rect
-            x="2"
-            y="2"
-            width="96"
-            height="96"
-            rx="22"
-            fill="none"
-            stroke={color}
-            strokeWidth="4"
-            strokeLinecap="round"
-            initial={{ pathLength: 0 }}
-            animate={{ pathLength: 1 }}
-            transition={{ duration: (canRoll ? AUTO_ROLL_MS : AUTO_MOVE_MS) / 1000, ease: "linear" }}
-          />
-        </svg>
-      )}
+      <button
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={abandonPress}
+        onPointerCancel={abandonPress}
+        disabled={(!canRoll && !onBoard) || isRolling}
+        aria-label={onBoard ? "Bring the die back" : undefined}
+        className={cn(
+          "relative h-16 w-16 rounded-2xl transition disabled:opacity-40",
+          canRoll && !isRolling ? "ring-2 ring-offset-2 ring-offset-bg active:scale-95" : ""
+        )}
+        style={{ perspective: 300, ...(canRoll && !isRolling ? ({ "--tw-ring-color": color } as CSSProperties) : {}) }}
+      >
+        {canRoll && !isRolling && (
+          <svg
+            className="pointer-events-none absolute -inset-1.5 h-[calc(100%+12px)] w-[calc(100%+12px)] -rotate-90"
+            viewBox="0 0 100 100"
+          >
+            <motion.rect
+              x="2"
+              y="2"
+              width="96"
+              height="96"
+              rx="22"
+              fill="none"
+              stroke={color}
+              strokeWidth="4"
+              strokeLinecap="round"
+              style={{ pathLength: rollProgressMV }}
+            />
+          </svg>
+        )}
+        {canMove && !isRolling && (
+          <svg
+            key="move"
+            className="pointer-events-none absolute -inset-1.5 h-[calc(100%+12px)] w-[calc(100%+12px)] -rotate-90"
+            viewBox="0 0 100 100"
+          >
+            <motion.rect
+              x="2"
+              y="2"
+              width="96"
+              height="96"
+              rx="22"
+              fill="none"
+              stroke={color}
+              strokeWidth="4"
+              strokeLinecap="round"
+              initial={{ pathLength: 0 }}
+              animate={{ pathLength: 1 }}
+              transition={{ duration: AUTO_MOVE_MS / 1000, ease: "linear" }}
+            />
+          </svg>
+        )}
 
-      <div className="relative h-full w-full" style={{ transformStyle: "preserve-3d" }}>
-        <motion.div
-          className="relative h-full w-full"
-          style={{ transformStyle: "preserve-3d" }}
-          animate={{
-            rotateX: orientation.x,
-            rotateY: orientation.y,
-            scale: isRolling ? [1, 1.25, 1.05] : 1,
-          }}
-          transition={{
-            rotateX: isRolling
-              ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
-              : { duration: LAND_SECONDS, ease: LAND_EASE },
-            rotateY: isRolling
-              ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
-              : { duration: LAND_SECONDS, ease: LAND_EASE },
-            scale: isRolling ? { duration: 0.35, ease: "easeOut" } : { duration: LAND_SECONDS, ease: LAND_EASE },
-          }}
-        >
-          {[1, 2, 3, 4, 5, 6].map((value) => (
-            <Face key={value} value={value} numberColor={cubeColor} frameColor={color} />
-          ))}
-        </motion.div>
-      </div>
-    </button>
+        <div className="relative h-full w-full" style={{ transformStyle: "preserve-3d" }}>
+          <motion.div
+            className="relative h-full w-full"
+            style={{ transformStyle: "preserve-3d" }}
+            animate={{
+              rotateX: orientation.x,
+              rotateY: orientation.y,
+              scale: isRolling ? [1, 1.25, 1.05] : 1,
+            }}
+            transition={{
+              rotateX: isRolling
+                ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
+                : { duration: LAND_SECONDS, ease: LAND_EASE },
+              rotateY: isRolling
+                ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
+                : { duration: LAND_SECONDS, ease: LAND_EASE },
+              scale: isRolling ? { duration: 0.35, ease: "easeOut" } : { duration: LAND_SECONDS, ease: LAND_EASE },
+            }}
+          >
+            {[1, 2, 3, 4, 5, 6].map((value) => (
+              <Face key={value} value={value} numberColor={cubeColor} frameColor={color} />
+            ))}
+          </motion.div>
+        </div>
+      </button>
+    </motion.div>
   );
 }

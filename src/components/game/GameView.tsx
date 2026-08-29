@@ -21,7 +21,7 @@ import {
 import { getSocket } from "@/lib/socket";
 import { colorForArm } from "@/game/board";
 import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor } from "@/game/engine";
-import Dice from "@/components/game/Dice";
+import Dice, { type ThrowStyle } from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import ReactionBar from "@/components/game/ReactionBar";
 import GameMenu from "@/components/game/GameMenu";
@@ -54,6 +54,62 @@ export default function GameView({ room }: { room: Room }) {
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reduceMotion = useReducedMotion();
 
+  // Geometry for the dice's "flick" throw (see Dice.tsx) — the board's
+  // on-screen bounds and the dice's own resting spot, both measured live
+  // since either can change (viewport resize, the host-only join-requests
+  // banner appearing/disappearing above). Expressed in viewport pixels, so
+  // no shared coordinate ancestor is needed — Dice only ever uses the
+  // difference between the two.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const boardSlotRef = useRef<HTMLDivElement>(null);
+  const diceWrapRef = useRef<HTMLDivElement>(null);
+  const [diceGeometry, setDiceGeometry] = useState<{
+    restPoint: { x: number; y: number };
+    safeRegion: { left: number; top: number; size: number };
+  } | null>(null);
+  const [lastThrowStyle, setLastThrowStyle] = useState<ThrowStyle>("tap");
+  const hasGame = Boolean(game);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const recompute = () => {
+      const boardEl = boardSlotRef.current;
+      const diceEl = diceWrapRef.current;
+      if (!boardEl || !diceEl) return;
+      const boardRect = boardEl.getBoundingClientRect();
+      const diceRect = diceEl.getBoundingClientRect();
+      if (boardRect.width === 0 || boardRect.height === 0) return;
+      // Mirrors Board.tsx's own `size = min(width, height)` centering so
+      // this lines up with the board it actually renders, without needing
+      // Board.tsx to expose that value itself.
+      const boardSize = Math.min(boardRect.width, boardRect.height);
+      const boardLeft = boardRect.left + (boardRect.width - boardSize) / 2;
+      const boardTop = boardRect.top + (boardRect.height - boardSize) / 2;
+      // An 80%-of-the-board square, centered, so a throw never lands flush
+      // against the edge.
+      const safeSize = boardSize * 0.8;
+      setDiceGeometry({
+        restPoint: { x: diceRect.left + diceRect.width / 2, y: diceRect.top + diceRect.height / 2 },
+        safeRegion: {
+          left: boardLeft + (boardSize - safeSize) / 2,
+          top: boardTop + (boardSize - safeSize) / 2,
+          size: safeSize,
+        },
+      });
+    };
+    const observer = new ResizeObserver(recompute);
+    observer.observe(root);
+    recompute();
+    return () => observer.disconnect();
+    // Re-attempts once `game` first becomes available: on initial load
+    // `game` starts null (see the "Loading game…" branch below, which
+    // renders without these refs at all), so the very first run of this
+    // effect finds `rootRef.current` unmounted and bails out; without this
+    // dependency it would never run again once the real board/dice DOM
+    // exists, leaving restPoint/safeRegion permanently null.
+  }, [hasGame]);
+
   const showReaction = (reaction: Reaction) => {
     setActiveReaction(reaction);
     if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
@@ -81,6 +137,19 @@ export default function GameView({ room }: { room: Room }) {
     socket.on("game:reaction", onIncoming);
     return () => {
       socket.off("game:reaction", onIncoming);
+    };
+  }, []);
+
+  // How the *next* rollSeq bump should animate (see Dice.tsx) — set
+  // synchronously the instant this device triggers a roll (handleRoll
+  // below), or relayed from whoever else triggered it (server.js's
+  // game:diceThrow) so every viewer sees the same flourish.
+  useEffect(() => {
+    const socket = getSocket();
+    const onThrowStyle = ({ style }: { style: ThrowStyle }) => setLastThrowStyle(style);
+    socket.on("game:diceThrow", onThrowStyle);
+    return () => {
+      socket.off("game:diceThrow", onThrowStyle);
     };
   }, []);
 
@@ -186,9 +255,10 @@ export default function GameView({ room }: { room: Room }) {
   const canRoll = isMyTurn && game.diceValue == null;
   const canMove = isMyTurn && game.diceValue != null && validMoves.length > 0;
 
-  const handleRoll = () => {
+  const handleRoll = (style: ThrowStyle) => {
     if (!currentSeat || !canRoll) return;
-    emitRollDice(room.code, currentSeat.id);
+    setLastThrowStyle(style);
+    emitRollDice(room.code, currentSeat.id, style);
   };
 
   // Apply the move locally right away — engine.moveToken is the same pure,
@@ -203,7 +273,7 @@ export default function GameView({ room }: { room: Room }) {
   };
 
   return (
-    <div className="mx-auto flex h-dvh w-full flex-col gap-2 overflow-hidden py-2">
+    <div ref={rootRef} className="mx-auto flex h-dvh w-full flex-col gap-2 overflow-hidden py-2">
       {isHost && (
         <div className="shrink-0 px-4">
           <IncomingJoinRequests roomCode={room.code} />
@@ -243,7 +313,7 @@ export default function GameView({ room }: { room: Room }) {
         />
       </div>
 
-      <div className="relative min-h-0 flex-1 [container-type:size]">
+      <div ref={boardSlotRef} className="relative min-h-0 flex-1 [container-type:size]">
         <Board
           game={game}
           isMyTurn={isMyTurn}
@@ -296,7 +366,7 @@ export default function GameView({ room }: { room: Room }) {
           onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
         />
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="pointer-events-auto">
+          <div ref={diceWrapRef} className="pointer-events-auto">
             <Dice
               lastRoll={game.lastRoll}
               rollSeq={game.rollSeq}
@@ -304,6 +374,10 @@ export default function GameView({ room }: { room: Room }) {
               onRoll={handleRoll}
               canMove={canMove}
               color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+              restPoint={diceGeometry?.restPoint ?? null}
+              safeRegion={diceGeometry?.safeRegion ?? null}
+              diceValue={game.diceValue}
+              throwStyle={lastThrowStyle}
             />
           </div>
         </div>

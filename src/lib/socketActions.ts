@@ -44,8 +44,11 @@ export function startGame(roomCode: string, seatId: string) {
   getSocket().emit("game:start", { roomCode, seatId });
 }
 
-export function rollDice(roomCode: string, seatId: string) {
-  getSocket().emit("game:rollDice", { roomCode, seatId });
+// `style` is purely a presentation hint (see Dice.tsx's "flick" throw) —
+// the server relays it to everyone else in the room (game:diceThrow) so
+// the flourish is consistent, but never lets it affect the actual roll.
+export function rollDice(roomCode: string, seatId: string, style: "tap" | "flick" = "tap") {
+  getSocket().emit("game:rollDice", { roomCode, seatId, style });
 }
 
 export function moveToken(roomCode: string, seatId: string, tokenIndex: number) {
