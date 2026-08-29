@@ -6,7 +6,7 @@ import { Arc, Circle, Ellipse, Group, Line } from "react-konva";
 import { useFade, useRotation } from "@/hooks/useAnimatedPoint";
 import { useSteppedToken } from "@/hooks/useSteppedToken";
 
-const WHITE = "#FFFFFF";
+const WHITE = "#DFDACD"; // a warm off-white (not pure white) — softer against the now-darker disc colors, still reads as "white border".
 const SHADOW = "#463B2E"; // soft warm gray, not flat black — a physical piece's shadow on a board, not a graphic drop-shadow.
 
 // Blends `hex` toward white (amount > 0) or black (amount < 0) — used only
@@ -20,7 +20,70 @@ function shade(hex: string, amount: number) {
   const target = amount >= 0 ? 255 : 0;
   const t = Math.abs(amount);
   const mix = (c: number) => Math.round(c * (1 - t) + target * t);
-  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+  // Hex (not rgb()) so a shaded result can itself be fed back into shade()
+  // — see discColor below, which darkens the base color once and is then
+  // shaded again (lighter/darker) for the gradient's own stops.
+  const toHex = (c: number) => c.toString(16).padStart(2, "0");
+  return `#${toHex(mix(r))}${toHex(mix(g))}${toHex(mix(b))}`;
+}
+
+// Darkens `hex` for contrast by reducing HSL lightness (not blending
+// toward black in RGB) — RGB blending drags a bright, low-saturation hue
+// like yellow through olive/brown well before it reads as "a darker
+// yellow." Cutting lightness by a fixed amount keeps the hue and
+// saturation intact, so it stays recognizably the same color, just deeper.
+function darkenForContrast(hex: string, lightnessDrop: number) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      default:
+        h = (r - g) / d + 4;
+    }
+    h /= 6;
+  }
+  const l2 = Math.max(0, l - lightnessDrop);
+
+  const hue2rgb = (p: number, q: number, t: number) => {
+    let tt = t;
+    if (tt < 0) tt += 1;
+    if (tt > 1) tt -= 1;
+    if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+    if (tt < 1 / 2) return q;
+    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+    return p;
+  };
+  let r2: number;
+  let g2: number;
+  let b2: number;
+  if (s === 0) {
+    r2 = g2 = b2 = l2;
+  } else {
+    const q = l2 < 0.5 ? l2 * (1 + s) : l2 + s - l2 * s;
+    const p = 2 * l2 - q;
+    r2 = hue2rgb(p, q, h + 1 / 3);
+    g2 = hue2rgb(p, q, h);
+    b2 = hue2rgb(p, q, h - 1 / 3);
+  }
+  const toHex = (c: number) =>
+    Math.round(c * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(r2)}${toHex(g2)}${toHex(b2)}`;
 }
 
 // The legal-move ring's color: a darker, more saturated "neon" take on
@@ -29,10 +92,10 @@ function shade(hex: string, amount: number) {
 // lighten/darken of the base swatch. Falls back to the base color itself
 // for any hex not in this fixed set (there are only ever four).
 const NEON_BY_COLOR: Record<string, string> = {
-  "#E8262C": "#FF1744", // red -> crimson neon
-  "#1F9E4C": "#00E676", // green -> electric green neon
-  "#FFCC00": "#FFC400", // yellow -> amber neon
-  "#1565E8": "#2979FF", // blue -> electric blue neon
+  "#E8262C": "#D40029", // red -> crimson neon
+  "#1F9E4C": "#00A454", // green -> electric green neon
+  "#FFCC00": "#BD9100", // yellow -> amber neon
+  "#1565E8": "#0056E6", // blue -> electric blue neon
 };
 function neonFor(color: string) {
   return NEON_BY_COLOR[color] ?? color;
@@ -131,6 +194,11 @@ export default function Token({
   const ringInner = radius + 5 * k;
   const ringOuter = ringInner + 6 * k;
   const hoverBoost = hovered ? 1.15 : 1;
+  // The disc itself renders a darker shade of the arm's color rather than
+  // the exact hex behind it on the board — same hue, but enough contrast
+  // to stay clearly readable against its own quadrant instead of blending
+  // into it. `color` (the true arm color) still drives the neon ring.
+  const discColor = darkenForContrast(color, 0.14);
 
   return (
     <Group
@@ -195,7 +263,7 @@ export default function Token({
         fillRadialGradientStartRadius={0}
         fillRadialGradientEndPoint={{ x: 0, y: 0 }}
         fillRadialGradientEndRadius={discRadius * 1.05}
-        fillRadialGradientColorStops={[0, shade(color, 0.16), 0.6, color, 1, shade(color, -0.14)]}
+        fillRadialGradientColorStops={[0, shade(discColor, 0.16), 0.6, discColor, 1, shade(discColor, -0.08)]}
         stroke={WHITE}
         strokeWidth={borderWidth}
         shadowColor={SHADOW}

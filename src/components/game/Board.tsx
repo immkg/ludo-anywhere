@@ -9,7 +9,7 @@ import { STEP_MS } from "@/hooks/useSteppedToken";
 import { voronoiTerritory } from "@/lib/hitTerritory";
 import type { GameState } from "@/types/game";
 
-const INK = "#2B2016";
+const INK = "#000000";
 const CREAM = "#FFFDF6";
 const GOLD = "#FFD400";
 const GOLD_DARK = "#C99A00";
