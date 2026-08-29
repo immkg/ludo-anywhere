@@ -27,9 +27,20 @@ const RETURN_MS_RANGE: [number, number] = [350, 600];
 // actually completing a roll (moving off, or a cancelled gesture) costs
 // this much off whatever time was left when it resumes.
 const ABANDON_PENALTY_MS = 2000;
-// How see-through the die gets while it's sitting out on the board —
-// enough that it doesn't fully block the tokens/cells underneath it.
-const ON_BOARD_OPACITY = 0.7;
+// How see-through the die gets while it's sitting out on the board — still
+// a little, so it doesn't fully block the tokens/cells underneath it, but
+// mostly opaque so the die itself reads clearly.
+const ON_BOARD_OPACITY = 0.88;
+
+// A warm off-white (not the theme's bg-surface, which flips dark in dark
+// mode) — a physical die's plastic is always this color regardless of the
+// app's theme, same reasoning as Token.tsx's fixed WHITE border. The
+// gradient (lighter top-left, deeper bottom-right) plus the highlight blob
+// in Face below are what actually sell "glossy and domed", the same trick
+// used for the token discs.
+const DICE_FACE_BG = "linear-gradient(135deg, #fffdf6 0%, #f5eeda 45%, #e6dcbe 100%)";
+const DICE_FACE_SHADOW =
+  "inset 0 2px 3px rgba(255,255,255,0.8), inset 0 -3px 5px rgba(0,0,0,0.14), inset 2px 0 3px rgba(255,255,255,0.35)";
 
 const PIP_LAYOUTS: Record<number, [number, number][]> = {
   1: [[1, 1]],
@@ -102,9 +113,21 @@ function Face({
   const pips = PIP_LAYOUTS[value] ?? [];
   return (
     <div
-      className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl border-2 bg-surface p-1.5 [backface-visibility:hidden]"
-      style={{ transform: FACE_PLACEMENT[value], borderColor: frameColor }}
+      className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl border-2 p-1.5 [backface-visibility:hidden]"
+      style={{
+        transform: FACE_PLACEMENT[value],
+        borderColor: frameColor,
+        background: DICE_FACE_BG,
+        boxShadow: DICE_FACE_SHADOW,
+      }}
     >
+      {/* A soft, offset highlight — the same "catching the light" gloss the
+          token discs get (Token.tsx's own highlight Ellipse), not a full
+          glassy shine. */}
+      <div
+        className="pointer-events-none absolute inset-0 rounded-[inherit]"
+        style={{ background: "radial-gradient(circle at 30% 22%, rgba(255,255,255,0.85), transparent 55%)" }}
+      />
       {Array.from({ length: 9 }, (_, i) => {
         const row = Math.floor(i / 3);
         const col = i % 3;
@@ -112,8 +135,12 @@ function Face({
         return (
           <span
             key={i}
-            className="m-auto h-2 w-2 rounded-full bg-transparent"
-            style={active ? { backgroundColor: numberColor } : undefined}
+            className="relative m-auto h-2 w-2 rounded-full bg-transparent"
+            style={
+              active
+                ? { backgroundColor: numberColor, boxShadow: "inset 0 1px 1.5px rgba(0,0,0,0.3)" }
+                : undefined
+            }
           />
         );
       })}
