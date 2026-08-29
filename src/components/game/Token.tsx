@@ -1,28 +1,18 @@
 "use client";
 
+import { useState } from "react";
 import type Konva from "konva";
-import { Circle, Ellipse, Group, Line } from "react-konva";
-import { usePulse } from "@/hooks/useAnimatedPoint";
+import { Arc, Circle, Ellipse, Group, Line } from "react-konva";
+import { useFade, useRotation } from "@/hooks/useAnimatedPoint";
 import { useSteppedToken } from "@/hooks/useSteppedToken";
 
-const INK = "#1A1410";
+const WHITE = "#FFFFFF";
+const SHADOW = "#463B2E"; // soft warm gray, not flat black — a physical piece's shadow on a board, not a graphic drop-shadow.
 
-// A shared gold/ivory bezel across every arm color (rather than a flat
-// tint of the piece's own color) — reads as a set of gemstones in a
-// common setting, the way a premium physical piece would, instead of
-// each color getting its own plain plastic disc.
-const RIM_LIGHT = "#FFF6E0";
-const RIM_MID = "#E9D19C";
-const RIM_DARK = "#B4914F";
-// A legal-move token's tell, since the bezel itself no longer changes
-// color for that state (see the glow ring below) — a saturated, distinct
-// hue the gold bezel and every gem color both contrast against.
-const SELECT_GLOW = "#4FE0C8";
-
-// Blends `hex` toward white (amount > 0) or black (amount < 0) — used to
-// derive every highlight/shadow tone in the gem below from the arm's one
-// base color, so the whole piece reads as one lit material rather than
-// flat cutout shapes.
+// Blends `hex` toward white (amount > 0) or black (amount < 0) — used only
+// for a gentle radial gradient across the disc's own fill (still one flat
+// color at a glance, just enough falloff to read as subtly domed/lit from
+// above rather than a flat cutout) and a soft highlight, not a glossy gem.
 function shade(hex: string, amount: number) {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -33,10 +23,38 @@ function shade(hex: string, amount: number) {
   return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
 }
 
+// The legal-move ring's color: a darker, more saturated "neon" take on
+// each player's actual board color (see colorForArm in src/game/board.js),
+// hand-picked rather than derived — an electric variant isn't just a
+// lighten/darken of the base swatch. Falls back to the base color itself
+// for any hex not in this fixed set (there are only ever four).
+const NEON_BY_COLOR: Record<string, string> = {
+  "#E8262C": "#FF1744", // red -> crimson neon
+  "#1F9E4C": "#00E676", // green -> electric green neon
+  "#FFCC00": "#FFC400", // yellow -> amber neon
+  "#1565E8": "#2979FF", // blue -> electric blue neon
+};
+function neonFor(color: string) {
+  return NEON_BY_COLOR[color] ?? color;
+}
+
+// The ring is a few separate arcs (not one solid circle) with different
+// opacities, so its continuous rotation actually reads as motion instead
+// of a static glowing outline.
+const RING_SEGMENTS = [
+  { start: 0, angle: 110, opacity: 1 },
+  { start: 135, angle: 65, opacity: 0.55 },
+  { start: 230, angle: 85, opacity: 0.28 },
+];
+const RING_ROTATE_MS = 2800;
+const RING_FADE_MS = 200;
+
 // Every measurement is a fraction of this baseline (the design's original
 // fixed 18px collar radius) — Board.tsx passes the actual `radius` a token
-// should render at (its outer, collar edge, sized to match the board's
-// cell), and everything scales off that via `k`.
+// should render at (its outer edge, sized to match the board's cell), and
+// everything scales off that via `k`. The token's own outer edge (fill +
+// white border) always lands exactly at `radius`, legal-move ring or not —
+// only the ring itself extends beyond it.
 const BASE_COLLAR_RADIUS = 18;
 
 function setCursor(e: Konva.KonvaEventObject<Event>, cursor: string) {
@@ -54,7 +72,8 @@ type TokenProps = {
   selectable: boolean;
   // Outer (collar) radius this token should render at — see Board.tsx,
   // which sizes it to the board's own cell so a token's diameter matches
-  // a cell's.
+  // a cell's. This never changes for the legal-move state; only the ring
+  // drawn outside it does.
   radius: number;
   // Flattened [x0, y0, x1, y1, ...] polygon points, in this token's own
   // local space, for its Voronoi territory (see Board.tsx). Only meaningful
@@ -91,36 +110,44 @@ export default function Token({
   const { x: rawX, y: rawY } = useSteppedToken(armIndex, pos, tokenIndex, captureDelayMs, finishSound);
   const px = rawX + offsetX;
   const py = rawY + offsetY;
-  // A same-color ring around a same-size token was easy to miss (the ring
-  // reads as another decoration, and gold-on-cream board cells barely
-  // contrast). Growing and shrinking the whole piece is much harder to miss
-  // at a glance, and doesn't depend on hue contrast at all.
-  const pulseScale = usePulse(selectable, 1, 1.22, 700);
+  const [hovered, setHovered] = useState(false);
+
+  // A stable per-token phase offset so multiple legal tokens' rings don't
+  // all rotate in perfect lockstep — deterministic (not Math.random()) so
+  // it doesn't jump around on re-render.
+  const phaseDeg = ((armIndex * 4 + tokenIndex) * 53) % 360;
+  const spin = useRotation(selectable, RING_ROTATE_MS);
+  const ringOpacity = useFade(selectable ? 1 : 0, RING_FADE_MS);
 
   const k = radius / BASE_COLLAR_RADIUS;
-  const collarRadius = radius;
-  const bezelRadius = collarRadius - 3.5 * k;
-  const gemRadius = collarRadius - 6 * k;
+  const borderWidth = 4.5 * k;
+  // Konva strokes are centered on the path, so shrinking the fill radius
+  // by half the border width keeps the *outer* edge (fill + border) at
+  // exactly `radius` — the token's true, unchanging footprint.
+  const discRadius = radius - borderWidth / 2;
   const defaultHitRadius = 27 * k;
 
-  // Lit from the upper-left, like every other light source on this board
-  // (see Token's collar shadow, the board's own drop shadow) — a single
-  // consistent light direction is what makes a set of separately-drawn
-  // pieces read as sitting under one real light instead of each being its
-  // own flat sticker.
-  const lightX = -gemRadius * 0.38;
-  const lightY = -gemRadius * 0.45;
+  const neon = neonFor(color);
+  const ringInner = radius + 5 * k;
+  const ringOuter = ringInner + 6 * k;
+  const hoverBoost = hovered ? 1.15 : 1;
 
   return (
     <Group
       x={px}
       y={py}
-      scaleX={pulseScale}
-      scaleY={pulseScale}
       onClick={onTap}
       onTap={onTap}
-      onMouseEnter={(e) => selectable && setCursor(e, "pointer")}
-      onMouseLeave={(e) => selectable && setCursor(e, "default")}
+      onMouseEnter={(e) => {
+        if (!selectable) return;
+        setCursor(e, "pointer");
+        setHovered(true);
+      }}
+      onMouseLeave={(e) => {
+        if (!selectable) return;
+        setCursor(e, "default");
+        setHovered(false);
+      }}
       listening={selectable}
     >
       {/* Bigger-than-the-token, invisible hit area — Konva still hit-tests
@@ -135,96 +162,60 @@ export default function Token({
         <Circle radius={defaultHitRadius} fill={color} opacity={0} />
       )}
 
-      {/* Contact shadow, grounding the piece on the board. */}
-      <Ellipse radiusX={11 * k} radiusY={4 * k} y={9 * k} fill={INK} opacity={0.28} />
-
-      {/* The bezel is gold-toned regardless of state, so a legal-move
-          token needs its own distinct tell beyond that — a bright glow
-          just outside the piece, on top of the existing scale-pulse
-          (which alone doesn't depend on hue contrast, but this reads at
-          a glance even before the pulse animates). */}
-      {selectable && (
-        <Circle
-          radius={collarRadius + 2 * k}
-          stroke={SELECT_GLOW}
-          strokeWidth={2.5 * k}
-          shadowColor={SELECT_GLOW}
-          shadowBlur={7 * k}
-          shadowOpacity={0.95}
-        />
+      {/* Legal-move affordance: a rotating, segmented neon ring entirely
+          outside the token's own border — never resizes or recolors the
+          token itself. The token doesn't rotate; only this ring does. */}
+      {ringOpacity > 0.01 && (
+        <Group rotation={spin + phaseDeg} listening={false}>
+          {RING_SEGMENTS.map((seg, i) => (
+            <Arc
+              key={i}
+              innerRadius={ringInner}
+              outerRadius={ringOuter}
+              angle={seg.angle}
+              rotation={seg.start}
+              fill={neon}
+              opacity={Math.min(1, seg.opacity * hoverBoost) * ringOpacity}
+              shadowColor={neon}
+              shadowBlur={7 * k * hoverBoost}
+              shadowOpacity={0.85 * ringOpacity}
+            />
+          ))}
+        </Group>
       )}
 
-      {/* Gold/ivory bezel — every color shares this, like gemstones in a
-          common setting rather than each getting its own plastic disc. */}
+      {/* The disc itself: still top-down and one player color at a glance,
+          but a gentle radial gradient (lit from the upper-left, like every
+          other light source on this board) gives it a subtly domed,
+          slightly-raised feel instead of a flat cutout. Konva's own shadow
+          (not a separate shape) adds the lift underneath. */}
       <Circle
-        radius={collarRadius}
-        fillRadialGradientStartPoint={{ x: lightX, y: lightY }}
+        radius={discRadius}
+        fillRadialGradientStartPoint={{ x: -discRadius * 0.35, y: -discRadius * 0.4 }}
         fillRadialGradientStartRadius={0}
         fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-        fillRadialGradientEndRadius={collarRadius * 1.15}
-        fillRadialGradientColorStops={[0, RIM_LIGHT, 0.55, RIM_MID, 1, RIM_DARK]}
-        strokeLinearGradientStartPoint={{ x: lightX, y: lightY }}
-        strokeLinearGradientEndPoint={{ x: -lightX, y: -lightY }}
-        strokeLinearGradientColorStops={[0, RIM_LIGHT, 1, "#7A5C28"]}
-        strokeWidth={1.5 * k}
-        shadowColor="black"
-        shadowBlur={7 * k}
-        shadowOffset={{ x: 0, y: 3.5 * k }}
-        shadowOpacity={0.4}
+        fillRadialGradientEndRadius={discRadius * 1.05}
+        fillRadialGradientColorStops={[0, shade(color, 0.16), 0.6, color, 1, shade(color, -0.14)]}
+        stroke={WHITE}
+        strokeWidth={borderWidth}
+        shadowColor={SHADOW}
+        shadowBlur={4 * k}
+        shadowOffset={{ x: 0, y: 1.5 * k }}
+        shadowOpacity={hovered ? 0.4 : 0.32}
       />
 
-      {/* Thin inner bezel ring separating the gold setting from the gem. */}
-      <Circle radius={bezelRadius} stroke={RIM_DARK} strokeWidth={1 * k} opacity={0.8} />
-
-      {/* The gem itself: a strong 5-stop radial gradient (near-white hot
-          spot fading through the true color to a near-black edge) reads
-          as a glossy, lit sphere rather than a flat tinted circle — plus
-          a matching gradient rim so the edge itself looks beveled, not
-          outlined. */}
-      <Circle
-        radius={gemRadius}
-        fillRadialGradientStartPoint={{ x: lightX, y: lightY }}
-        fillRadialGradientStartRadius={0}
-        fillRadialGradientEndPoint={{ x: gemRadius * 0.1, y: gemRadius * 0.1 }}
-        fillRadialGradientEndRadius={gemRadius * 1.15}
-        fillRadialGradientColorStops={[
-          0,
-          shade(color, 0.75),
-          0.22,
-          shade(color, 0.3),
-          0.55,
-          color,
-          0.82,
-          shade(color, -0.3),
-          1,
-          shade(color, -0.55),
-        ]}
-        strokeLinearGradientStartPoint={{ x: lightX, y: lightY }}
-        strokeLinearGradientEndPoint={{ x: -lightX, y: -lightY }}
-        strokeLinearGradientColorStops={[0, shade(color, 0.4), 1, shade(color, -0.65)]}
-        strokeWidth={1.5 * k}
-      />
-
-      {/* Broad soft highlight — the "light hitting a curved glossy
-          surface" effect, faded via gradient stops instead of an actual
-          blur filter (cheaper, and Konva's shadowBlur doesn't apply to
-          fills). */}
+      {/* A small, soft highlight — just enough to read as a rounded top
+          surface catching light, not a glossy gem's hot spot. */}
       <Ellipse
-        radiusX={gemRadius * 0.62}
-        radiusY={gemRadius * 0.42}
-        x={lightX * 0.55}
-        y={lightY * 0.75}
+        radiusX={discRadius * 0.42}
+        radiusY={discRadius * 0.28}
+        x={-discRadius * 0.28}
+        y={-discRadius * 0.32}
         rotation={-28}
-        fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-        fillRadialGradientStartRadius={0}
-        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-        fillRadialGradientEndRadius={gemRadius * 0.62}
-        fillRadialGradientColorStops={[0, "rgba(255,255,255,0.65)", 0.55, "rgba(255,255,255,0.2)", 1, "rgba(255,255,255,0)"]}
+        fill="white"
+        opacity={0.16}
+        listening={false}
       />
-
-      {/* Crisp specular glint — the small, near-opaque sparkle a real
-          polished surface catches from a point light source. */}
-      <Ellipse radiusX={3.2 * k} radiusY={2.2 * k} x={lightX * 0.7} y={lightY * 0.85} fill="white" opacity={0.9} />
     </Group>
   );
 }
