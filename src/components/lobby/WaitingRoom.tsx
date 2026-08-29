@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -8,6 +8,7 @@ import { armForSeatIndex, colorForArm } from "@/game/board";
 import { startGame, inviteFriendToRoom, removeSeat, joinRoom, trackShare, leaveRoom } from "@/lib/socketActions";
 import { shareOnWhatsApp, roomJoinUrl } from "@/lib/share";
 import { saveOwnedSeats, clearOwnedSeats } from "@/lib/identity";
+import { generateDummyEmail, randomEmailSuffix } from "@/lib/dummyEmail";
 import { useFriends } from "@/hooks/useFriends";
 import { useProfiles } from "@/hooks/useProfiles";
 import { usePresenceStore } from "@/store/usePresenceStore";
@@ -15,10 +16,11 @@ import { useRoomStore } from "@/store/useRoomStore";
 import { useNotificationsStore } from "@/store/useNotificationsStore";
 import { cn } from "@/lib/utils";
 import Button from "@/components/ui/Button";
+import Input from "@/components/ui/Input";
 import FriendAvatar from "@/components/friends/FriendAvatar";
+import PlayerAvatar from "@/components/lobby/PlayerAvatar";
 import Wordmark from "@/components/brand/Wordmark";
 import AppIconMark from "@/components/brand/AppIconMark";
-import SeatRow, { defaultSeats, type SeatDraft } from "@/components/lobby/SeatRow";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
 import { OccupiedSeatCard, EmptySeatCard } from "@/components/lobby/PlayerSeatCard";
 import {
@@ -33,6 +35,7 @@ import {
   IconTrophy,
   IconUsers,
 } from "@/components/lobby/icons";
+import type { PlayerProfile } from "@/types/profile";
 import type { Room, OwnedSeat } from "@/types/room";
 
 // Links into existing pages so the desktop shell's sidebar isn't a dead
@@ -311,23 +314,56 @@ function AddPlayerModal({
   const addMySeats = useRoomStore((s) => s.addMySeats);
   const { profiles, createProfile } = useProfiles();
   const availableProfiles = profiles.filter((p) => !seatedProfileIds.has(p.id));
-  const [seat, setSeat] = useState<SeatDraft>(defaultSeats(1, [])[0]);
+
+  // Derived, not sticky state: useProfiles() fetches asynchronously, so
+  // availableProfiles is [] on the first render regardless of the real
+  // count — a `useState` seeded from it would freeze on "create" forever.
+  // forceCreate only tracks the user's own "+ Add New Player" click.
+  const [forceCreate, setForceCreate] = useState(false);
+  const mode: "list" | "create" = forceCreate || availableProfiles.length === 0 ? "create" : "list";
+
+  const [search, setSearch] = useState("");
+  const [addingProfileId, setAddingProfileId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [emailSuffix, setEmailSuffix] = useState(() => randomEmailSuffix());
+  const placeholderEmail = generateDummyEmail(name, emailSuffix);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleAdd = async () => {
-    if (!seat.profileId) {
-      setError("Pick a player");
-      return;
+  const filteredProfiles = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return availableProfiles;
+    return availableProfiles.filter(
+      (p) => p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q)
+    );
+  }, [availableProfiles, search]);
+
+  const finishAdd = async (profileId: string) => {
+    const res = await joinRoom(roomCode, [{ profileId }]);
+    if (!res.seats) throw new Error("Could not add player");
+    saveOwnedSeats(roomCode, res.seats);
+    addMySeats(res.seats);
+    onClose();
+  };
+
+  const handlePickProfile = async (profileId: string) => {
+    setAddingProfileId(profileId);
+    setError(null);
+    try {
+      await finishAdd(profileId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add player");
+      setAddingProfileId(null);
     }
+  };
+
+  const handleCreateAndAdd = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await joinRoom(roomCode, [{ profileId: seat.profileId }]);
-      if (!res.seats) throw new Error("Could not add player");
-      saveOwnedSeats(roomCode, res.seats);
-      addMySeats(res.seats);
-      onClose();
+      const profile = await createProfile(name, email.trim() || placeholderEmail);
+      await finishAdd(profile.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add player");
     } finally {
@@ -344,23 +380,100 @@ function AddPlayerModal({
             Cancel
           </button>
         </div>
-        {availableProfiles.length === 0 && (
-          <p className="text-xs text-ink-muted">All your players are already in this room — add a new one below.</p>
+
+        {mode === "list" ? (
+          <>
+            <Input
+              autoFocus
+              placeholder="Search your players"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="min-h-10 w-full text-sm"
+            />
+
+            <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
+              {filteredProfiles.length === 0 ? (
+                <p className="py-4 text-center text-xs text-ink-muted">No players match &ldquo;{search}&rdquo;.</p>
+              ) : (
+                filteredProfiles.map((p: PlayerProfile) => (
+                  <button
+                    key={p.id}
+                    disabled={addingProfileId !== null}
+                    onClick={() => handlePickProfile(p.id)}
+                    className={cn(
+                      "flex items-center gap-3 rounded-2xl border p-2.5 text-left transition disabled:opacity-40",
+                      addingProfileId === p.id ? "border-accent bg-accent/10" : "border-line hover:bg-surface-2"
+                    )}
+                  >
+                    <PlayerAvatar name={p.name} email={p.email} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
+                      <p className="truncate text-xs text-ink-muted">{p.email}</p>
+                    </div>
+                    {addingProfileId === p.id && <IconCheck className="h-4 w-4 shrink-0 text-accent" />}
+                  </button>
+                ))
+              )}
+            </div>
+
+            {error && <p className="text-xs text-accent">{error}</p>}
+            <Button
+              variant="secondary"
+              disabled={addingProfileId !== null}
+              onClick={() => {
+                setForceCreate(true);
+                setError(null);
+                setEmailSuffix(randomEmailSuffix());
+              }}
+            >
+              + Add New Player
+            </Button>
+          </>
+        ) : (
+          <>
+            {availableProfiles.length > 0 && (
+              <button
+                onClick={() => {
+                  setForceCreate(false);
+                  setError(null);
+                }}
+                className="self-start text-xs font-semibold text-ink-muted underline"
+              >
+                ← Back to players
+              </button>
+            )}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-player-name" className="text-xs font-semibold text-ink-muted">
+                Name
+              </label>
+              <Input
+                id="new-player-name"
+                autoFocus
+                placeholder="Name"
+                value={name}
+                maxLength={20}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-player-email" className="text-xs font-semibold text-ink-muted">
+                Email
+              </label>
+              <Input
+                id="new-player-email"
+                placeholder={placeholderEmail}
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <p className="text-xs text-ink-muted">Optional — leave blank to use a generated one.</p>
+            </div>
+            {error && <p className="text-xs text-accent">{error}</p>}
+            <Button onClick={handleCreateAndAdd} disabled={loading || !name.trim()}>
+              {loading ? "Adding…" : "Add player"}
+            </Button>
+          </>
         )}
-        <SeatRow
-          index={0}
-          seat={seat}
-          previewArmIndex={null}
-          profiles={availableProfiles}
-          onChange={setSeat}
-          onCreateProfile={createProfile}
-          showColorSwatch={false}
-          placeholder="Select a player"
-        />
-        {error && <p className="text-xs text-accent">{error}</p>}
-        <Button onClick={handleAdd} disabled={loading}>
-          {loading ? "Adding…" : "Add player"}
-        </Button>
       </div>
     </div>
   );

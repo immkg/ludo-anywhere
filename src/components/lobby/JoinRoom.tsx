@@ -259,7 +259,16 @@ export default function JoinRoom() {
                 <img src="/brand/pawn-red.png" alt="" className="h-10 w-auto min-[390px]:h-14" />
               </div>
 
-              {error && <p className="text-sm text-accent">{error}</p>}
+              {error && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-accent">{error}</p>
+                  <Link href="/create">
+                    <Button variant="secondary" className="w-full">
+                      Create Room Instead?
+                    </Button>
+                  </Link>
+                </div>
+              )}
 
               <Button onClick={handleJoin} disabled={loading || profilesLoading} className="w-full">
                 <span className="flex w-full items-center justify-center gap-2">
