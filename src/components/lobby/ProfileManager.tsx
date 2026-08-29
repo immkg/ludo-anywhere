@@ -10,6 +10,7 @@ import PlayerAvatar from "@/components/lobby/PlayerAvatar";
 import { IconPlus, IconTrophy } from "@/components/lobby/icons";
 import { IconPerson } from "@/components/home/icons";
 import { RED } from "@/components/nav/navItems";
+import { generateDummyEmail, randomEmailSuffix } from "@/lib/dummyEmail";
 
 export default function ProfileManager() {
   const { data: session } = useSession();
@@ -37,6 +38,8 @@ export default function ProfileManager() {
   const [addError, setAddError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [emailSuffix, setEmailSuffix] = useState(() => randomEmailSuffix());
+  const placeholderEmail = generateDummyEmail(name, emailSuffix);
 
   const startEditing = (p: PlayerProfile) => {
     setEditingId(p.id);
@@ -80,6 +83,7 @@ export default function ProfileManager() {
     setShowAddForm(true);
     setAddError(null);
     setNotice(null);
+    setEmailSuffix(randomEmailSuffix());
   };
 
   const closeAddForm = () => {
@@ -94,7 +98,7 @@ export default function ProfileManager() {
     setAddError(null);
     const existingIds = new Set(profiles.map((p) => p.id));
     try {
-      const profile = await createProfile(name, email);
+      const profile = await createProfile(name, email.trim() || placeholderEmail);
       if (existingIds.has(profile.id)) {
         setNotice(
           profile.email === myEmail
@@ -351,16 +355,19 @@ export default function ProfileManager() {
               </label>
               <Input
                 id="add-player-email"
-                placeholder="Email"
+                placeholder={placeholderEmail}
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
-              <p className="text-xs text-ink-muted">Used to recognize this player across devices.</p>
+              <p className="text-xs text-ink-muted">
+                Optional — leave it blank and we&rsquo;ll use a generated one, or enter theirs to recognize this
+                player across devices.
+              </p>
             </div>
             {addError && <p className="text-sm text-accent">{addError}</p>}
             <div className="flex gap-2">
-              <Button variant="primary" onClick={handleAdd} disabled={saving || !name.trim() || !email.trim()}>
+              <Button variant="primary" onClick={handleAdd} disabled={saving || !name.trim()}>
                 {saving ? "Adding…" : "Add player"}
               </Button>
               <Button variant="ghost" onClick={closeAddForm} disabled={saving}>
