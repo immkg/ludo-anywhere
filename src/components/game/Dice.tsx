@@ -1,7 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { motion, useAnimationControls, useMotionValue, animate as animateValue } from "framer-motion";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import {
+  motion,
+  useAnimationControls,
+  useMotionValue,
+  animate as animateValue,
+} from "framer-motion";
 import { cn } from "@/lib/utils";
 import { playDiceRoll } from "@/lib/sound";
 
@@ -38,7 +49,8 @@ const ON_BOARD_OPACITY = 0.88;
 // gradient (lighter top-left, deeper bottom-right) plus the highlight blob
 // in Face below are what actually sell "glossy and domed", the same trick
 // used for the token discs.
-const DICE_FACE_BG = "linear-gradient(135deg, #fffdf6 0%, #f5eeda 45%, #e6dcbe 100%)";
+const DICE_FACE_BG =
+  "linear-gradient(135deg, #fffdf6 0%, #f5eeda 45%, #e6dcbe 100%)";
 const DICE_FACE_SHADOW =
   "inset 0 2px 3px rgba(255,255,255,0.8), inset 0 -3px 5px rgba(0,0,0,0.14), inset 2px 0 3px rgba(255,255,255,0.35)";
 
@@ -98,6 +110,49 @@ const LANDING_ORIENTATION: Record<number, { x: number; y: number }> = {
   6: { x: 0, y: 180 },
 };
 
+// Added on top of every resting LANDING_ORIENTATION so the die reads as
+// sitting up off the ground — tipped back slightly, bottom edge rising
+// toward the viewer — instead of perfectly flush to the viewer, which
+// hides every face but the one facing the camera. Mostly X (positive tips
+// the bottom into view, the "risen" look); barely any Y, which instead
+// reveals a *side* face and reads as viewed from the side rather than from
+// below. Pure rotateX/rotateY only, inside the perspective/preserve-3d
+// scene — that stays a rigid rotation under perspective, however extreme
+// the angle. Each lands with its own small random jitter around these base
+// numbers (see randomRestingTilt) so every roll settles at a similar but
+// not identical angle, instead of the exact same pose every time.
+const RESTING_TILT_BASE = { x: 16, y: 2 };
+const RESTING_TILT_JITTER = { x: 6, y: 3 };
+function withTilt(o: { x: number; y: number }, tilt: { x: number; y: number }) {
+  return { x: o.x + tilt.x, y: o.y + tilt.y };
+}
+function randomRestingTilt() {
+  return {
+    x:
+      RESTING_TILT_BASE.x +
+      randomBetween(-RESTING_TILT_JITTER.x, RESTING_TILT_JITTER.x),
+    y:
+      RESTING_TILT_BASE.y +
+      randomBetween(-RESTING_TILT_JITTER.y, RESTING_TILT_JITTER.y),
+  };
+}
+
+// A jaunty resting angle for the *whole* die, applied as a plain 2D rotate
+// on a wrapper with no perspective/preserve-3d of its own — so it rotates
+// the already-flattened, fully-projected die image in the screen plane,
+// like turning a photo of it. (A Z-axis rotate tried *inside* the 3D scene
+// instead read as the cube's faces twisting/shearing relative to each
+// other — see RESTING_TILT above.) Small and randomized per roll, same as
+// the tilt.
+const SCREEN_ROTATE_BASE = 5;
+const SCREEN_ROTATE_JITTER = 4;
+function randomScreenRotate() {
+  return (
+    SCREEN_ROTATE_BASE +
+    randomBetween(-SCREEN_ROTATE_JITTER, SCREEN_ROTATE_JITTER)
+  );
+}
+
 function Face({
   value,
   numberColor,
@@ -126,7 +181,10 @@ function Face({
           glassy shine. */}
       <div
         className="pointer-events-none absolute inset-0 rounded-[inherit]"
-        style={{ background: "radial-gradient(circle at 30% 22%, rgba(255,255,255,0.85), transparent 55%)" }}
+        style={{
+          background:
+            "radial-gradient(circle at 30% 22%, rgba(255,255,255,0.85), transparent 55%)",
+        }}
       />
       {Array.from({ length: 9 }, (_, i) => {
         const row = Math.floor(i / 3);
@@ -138,7 +196,10 @@ function Face({
             className="relative m-auto h-2 w-2 rounded-full bg-transparent"
             style={
               active
-                ? { backgroundColor: numberColor, boxShadow: "inset 0 1px 1.5px rgba(0,0,0,0.3)" }
+                ? {
+                    backgroundColor: numberColor,
+                    boxShadow: "inset 0 1px 1.5px rgba(0,0,0,0.3)",
+                  }
                 : undefined
             }
           />
@@ -208,7 +269,12 @@ export default function Dice({
   throwStyle,
 }: DiceProps) {
   const [isRolling, setIsRolling] = useState(false);
-  const [orientation, setOrientation] = useState(() => LANDING_ORIENTATION[lastRoll ?? 1]);
+  const [orientation, setOrientation] = useState(() =>
+    withTilt(LANDING_ORIENTATION[lastRoll ?? 1], randomRestingTilt()),
+  );
+  const [screenRotateDeg, setScreenRotateDeg] = useState(() =>
+    randomScreenRotate(),
+  );
   const prevRollSeqRef = useRef(rollSeq);
   const spinStartRef = useRef(0);
   const landTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -250,8 +316,10 @@ export default function Dice({
   const rollAnimRef = useRef<ReturnType<typeof animateValue> | null>(null);
 
   function spinFrom(prev: { x: number; y: number }) {
-    const turnsX = Math.round(randomBetween(2, 4)) * (Math.random() < 0.5 ? -1 : 1);
-    const turnsY = Math.round(randomBetween(3, 5)) * (Math.random() < 0.5 ? -1 : 1);
+    const turnsX =
+      Math.round(randomBetween(2, 4)) * (Math.random() < 0.5 ? -1 : 1);
+    const turnsY =
+      Math.round(randomBetween(3, 5)) * (Math.random() < 0.5 ? -1 : 1);
     return { x: prev.x + 360 * turnsX, y: prev.y + 360 * turnsY };
   }
 
@@ -274,7 +342,8 @@ export default function Dice({
     // upward (a throwing arc) and sideways (so it doesn't look like a
     // perfectly straight ramp), varied per throw.
     const arcLift = dist * randomBetween(0.25, 0.45);
-    const sideDrift = (Math.random() < 0.5 ? -1 : 1) * dist * randomBetween(0.05, 0.2);
+    const sideDrift =
+      (Math.random() < 0.5 ? -1 : 1) * dist * randomBetween(0.05, 0.2);
     const midX = dx / 2 + sideDrift;
     const midY = dy / 2 - arcLift;
 
@@ -284,7 +353,11 @@ export default function Dice({
       // Fades in over the flight, landing at ON_BOARD_OPACITY — so it
       // doesn't fully hide whatever's underneath once it's sitting there.
       opacity: [1, 1, ON_BOARD_OPACITY],
-      transition: { duration: durationMs / 1000, times: [0, 0.55, 1], ease: ["easeOut", "easeIn"] },
+      transition: {
+        duration: durationMs / 1000,
+        times: [0, 0.55, 1],
+        ease: ["easeOut", "easeIn"],
+      },
     });
 
     // A couple of small squash-and-settle bounces on impact — count and
@@ -322,9 +395,11 @@ export default function Dice({
     prevRollSeqRef.current = rollSeq;
     const rollerColor = prevColorRef.current;
     const style = throwStyle ?? "tap";
-    const durationMs = style === "flick" ? randomBetween(...THROW_MS_RANGE) : MIN_SPIN_MS;
+    const durationMs =
+      style === "flick" ? randomBetween(...THROW_MS_RANGE) : MIN_SPIN_MS;
 
-    const alreadySpinning = isRolling && Date.now() - spinStartRef.current < durationMs;
+    const alreadySpinning =
+      isRolling && Date.now() - spinStartRef.current < durationMs;
     if (!alreadySpinning) {
       spinStartRef.current = Date.now();
       setIsRolling(true);
@@ -333,11 +408,18 @@ export default function Dice({
       if (style === "flick") throwOntoBoard(durationMs);
     }
 
-    const target = LANDING_ORIENTATION[lastRoll ?? 1];
-    const remaining = Math.max(0, durationMs - (Date.now() - spinStartRef.current));
+    const target = withTilt(
+      LANDING_ORIENTATION[lastRoll ?? 1],
+      randomRestingTilt(),
+    );
+    const remaining = Math.max(
+      0,
+      durationMs - (Date.now() - spinStartRef.current),
+    );
     if (landTimeoutRef.current) clearTimeout(landTimeoutRef.current);
     landTimeoutRef.current = setTimeout(() => {
       setOrientation({ x: target.x + 360 * 2, y: target.y + 360 * 2 });
+      setScreenRotateDeg(randomScreenRotate());
       setIsRolling(false);
       setCubeColor(rollerColor);
     }, remaining);
@@ -507,87 +589,147 @@ export default function Dice({
       initial={{ x: 0, y: 0, scaleX: 1, scaleY: 1, opacity: 1 }}
       className={cn("relative", onBoard && "z-10")}
     >
-      <button
-        onClick={handleClick}
-        onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={abandonPress}
-        onPointerCancel={abandonPress}
-        disabled={(!canRoll && !onBoard) || isRolling}
-        aria-label={onBoard ? "Bring the die back" : undefined}
-        className={cn(
-          "relative h-16 w-16 rounded-2xl transition disabled:opacity-40",
-          canRoll && !isRolling ? "ring-2 ring-offset-2 ring-offset-bg active:scale-95" : ""
-        )}
-        style={{ perspective: 300, ...(canRoll && !isRolling ? ({ "--tw-ring-color": color } as CSSProperties) : {}) }}
+      {/* No perspective/preserve-3d here — this wrapper renders the button
+          (and its whole 3D scene) as a flat, already-projected image, so
+          rotating it is a plain screen-plane rotation of the entire die,
+          not a transform composed into the 3D scene itself. */}
+      <div
+        className="relative"
+        style={{ transform: `rotate(${screenRotateDeg}deg)` }}
       >
-        {canRoll && !isRolling && (
-          <svg
-            className="pointer-events-none absolute -inset-1.5 h-[calc(100%+12px)] w-[calc(100%+12px)] -rotate-90"
-            viewBox="0 0 100 100"
-          >
-            <motion.rect
-              x="2"
-              y="2"
-              width="96"
-              height="96"
-              rx="22"
-              fill="none"
-              stroke={color}
-              strokeWidth="4"
-              strokeLinecap="round"
-              style={{ pathLength: rollProgressMV }}
-            />
-          </svg>
-        )}
-        {canMove && !isRolling && (
-          <svg
-            key="move"
-            className="pointer-events-none absolute -inset-1.5 h-[calc(100%+12px)] w-[calc(100%+12px)] -rotate-90"
-            viewBox="0 0 100 100"
-          >
-            <motion.rect
-              x="2"
-              y="2"
-              width="96"
-              height="96"
-              rx="22"
-              fill="none"
-              stroke={color}
-              strokeWidth="4"
-              strokeLinecap="round"
-              initial={{ pathLength: 0 }}
-              animate={{ pathLength: 1 }}
-              transition={{ duration: AUTO_MOVE_MS / 1000, ease: "linear" }}
-            />
-          </svg>
-        )}
-
-        <div className="relative h-full w-full" style={{ transformStyle: "preserve-3d" }}>
-          <motion.div
+        <button
+          onClick={handleClick}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={abandonPress}
+          onPointerCancel={abandonPress}
+          disabled={(!canRoll && !onBoard) || isRolling}
+          aria-label={onBoard ? "Bring the die back" : undefined}
+          className={cn(
+            "relative h-16 w-16 rounded-2xl transition disabled:opacity-40",
+            canRoll && !isRolling
+              ? "ring-2 ring-offset-2 ring-offset-bg active:scale-95"
+              : "",
+          )}
+          style={{
+            // Tight enough that the far (bottom-tilted) face visibly
+            // shrinks relative to the near one — real perspective, not an
+            // orthographic-looking flat cube. Safe to keep tight now that
+            // the resting tilt is pure rotateX/rotateY (see RESTING_TILT
+            // above): that's a rigid rotation under any perspective
+            // distance, so tightening this only adds correct depth
+            // foreshortening, not the shearing a Z-axis rotate caused when
+            // it used to live inside this same 3D scene.
+            perspective: 180,
+            ...(canRoll && !isRolling
+              ? ({ "--tw-ring-color": color } as CSSProperties)
+              : {}),
+          }}
+        >
+          <div
             className="relative h-full w-full"
             style={{ transformStyle: "preserve-3d" }}
-            animate={{
-              rotateX: orientation.x,
-              rotateY: orientation.y,
-              scale: isRolling ? [1, 1.25, 1.05] : 1,
-            }}
-            transition={{
-              rotateX: isRolling
-                ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
-                : { duration: LAND_SECONDS, ease: LAND_EASE },
-              rotateY: isRolling
-                ? { duration: SPIN_LOOP_SECONDS, repeat: Infinity, ease: "linear" }
-                : { duration: LAND_SECONDS, ease: LAND_EASE },
-              scale: isRolling ? { duration: 0.35, ease: "easeOut" } : { duration: LAND_SECONDS, ease: LAND_EASE },
-            }}
           >
-            {[1, 2, 3, 4, 5, 6].map((value) => (
-              <Face key={value} value={value} numberColor={cubeColor} frameColor={color} />
-            ))}
-          </motion.div>
-        </div>
-      </button>
+            <motion.div
+              className="relative h-full w-full"
+              style={{ transformStyle: "preserve-3d" }}
+              animate={{
+                rotateX: orientation.x,
+                rotateY: orientation.y,
+                scale: isRolling ? [1, 1.25, 1.05] : 1,
+              }}
+              transition={{
+                rotateX: isRolling
+                  ? {
+                      duration: SPIN_LOOP_SECONDS,
+                      repeat: Infinity,
+                      ease: "linear",
+                    }
+                  : { duration: LAND_SECONDS, ease: LAND_EASE },
+                rotateY: isRolling
+                  ? {
+                      duration: SPIN_LOOP_SECONDS,
+                      repeat: Infinity,
+                      ease: "linear",
+                    }
+                  : { duration: LAND_SECONDS, ease: LAND_EASE },
+                scale: isRolling
+                  ? { duration: 0.35, ease: "easeOut" }
+                  : { duration: LAND_SECONDS, ease: LAND_EASE },
+              }}
+            >
+              {[1, 2, 3, 4, 5, 6].map((value) => (
+                <Face
+                  key={value}
+                  value={value}
+                  numberColor={cubeColor}
+                  frameColor={color}
+                />
+              ))}
+
+              {/* The countdown rings sit in the same 3D plane as the face
+                currently shown (same FACE_PLACEMENT transform, same
+                inset-0 box as the face's own border), so they trace right
+                along that border and tilt/rotate along with the die
+                instead of floating as a flat overlay outside its edge. */}
+              {canRoll && !isRolling && (
+                <div
+                  className="pointer-events-none absolute inset-0 [backface-visibility:hidden]"
+                  style={{ transform: FACE_PLACEMENT[lastRoll ?? 1] }}
+                >
+                  <svg
+                    className="h-full w-full -rotate-90"
+                    viewBox="0 0 100 100"
+                  >
+                    <motion.rect
+                      x="2"
+                      y="2"
+                      width="96"
+                      height="96"
+                      rx="22"
+                      fill="none"
+                      stroke={color}
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                      style={{ pathLength: rollProgressMV }}
+                    />
+                  </svg>
+                </div>
+              )}
+              {canMove && !isRolling && (
+                <div
+                  key="move"
+                  className="pointer-events-none absolute inset-0 [backface-visibility:hidden]"
+                  style={{ transform: FACE_PLACEMENT[lastRoll ?? 1] }}
+                >
+                  <svg
+                    className="h-full w-full -rotate-90"
+                    viewBox="0 0 100 100"
+                  >
+                    <motion.rect
+                      x="2"
+                      y="2"
+                      width="96"
+                      height="96"
+                      rx="22"
+                      fill="none"
+                      stroke={color}
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                      initial={{ pathLength: 0 }}
+                      animate={{ pathLength: 1 }}
+                      transition={{
+                        duration: AUTO_MOVE_MS / 1000,
+                        ease: "linear",
+                      }}
+                    />
+                  </svg>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        </button>
+      </div>
     </motion.div>
   );
 }
