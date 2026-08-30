@@ -332,6 +332,7 @@ export default function GameView({ room }: { room: Room }) {
         diceValue={game.diceValue}
         throwStyle={lastThrowStyle}
         rollProgress={rollProgressMV}
+        glowColor={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
       />
     </div>
   );

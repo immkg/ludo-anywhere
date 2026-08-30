@@ -37,25 +37,21 @@ const RETURN_MS_RANGE: [number, number] = [350, 600];
 // actually completing a roll (moving off, or a cancelled gesture) costs
 // this much off whatever time was left when it resumes.
 const ABANDON_PENALTY_MS = 2000;
-// How see-through the die gets while it's sitting out on the board — still
-// a little, so it doesn't fully block the tokens/cells underneath it, but
-// mostly opaque so the die itself reads clearly.
-const ON_BOARD_OPACITY = 0.88;
 
-// A plain white/black die — not tinted per player, so it reads the same
-// physical object no matter whose turn it is (that's what the player
+// A plain cream-and-black die — not tinted per player, so it reads the
+// same physical object no matter whose turn it is (that's what the player
 // cards' own borders/traces are for now — see PlayerCorner.tsx). Fixed
 // colors rather than theme tokens (which flip dark in dark mode), same
 // reasoning as Token.tsx's fixed WHITE border: a physical die's plastic
 // stays the same color regardless of the app's theme.
-// The gradient (lighter top-left, deeper bottom-right) plus the highlight
-// blob in Face below are what actually sell "glossy and domed", the same
-// trick used for the token discs.
+// A visibly cream (not near-white) gradient, plus the highlight blob and
+// outer drop shadow below, are what keep the die reading as a distinct
+// object against a white surface (bg-surface, a board cell) instead of
+// blending into it — no border needed for that, just this contrast.
 const DICE_FACE_BG =
-  "linear-gradient(135deg, #ffffff 0%, #f3f3f0 45%, #e2e0d8 100%)";
+  "linear-gradient(135deg, #fffaf0 0%, #f7e9c8 45%, #ecdba8 100%)";
 const DICE_FACE_SHADOW =
-  "inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -3px 5px rgba(0,0,0,0.14), inset 2px 0 3px rgba(255,255,255,0.35)";
-const DICE_FRAME_COLOR = "#241c15";
+  "inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -3px 5px rgba(0,0,0,0.14), inset 2px 0 3px rgba(255,255,255,0.35), 0 3px 8px rgba(80,60,25,0.22)";
 const DICE_PIP_COLOR = "#241c15";
 
 const PIP_LAYOUTS: Record<number, [number, number][]> = {
@@ -161,10 +157,9 @@ function Face({ value }: { value: number }) {
   const pips = PIP_LAYOUTS[value] ?? [];
   return (
     <div
-      className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl border-2 p-1.5 [backface-visibility:hidden]"
+      className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl p-1.5 [backface-visibility:hidden]"
       style={{
         transform: FACE_PLACEMENT[value],
-        borderColor: DICE_FRAME_COLOR,
         background: DICE_FACE_BG,
         boxShadow: DICE_FACE_SHADOW,
       }}
@@ -238,6 +233,11 @@ type DiceProps = {
   // else (see PlayerCorner.tsx's card border) can create it and pass it in
   // instead, so both places read the exact same pausable progress.
   rollProgress?: MotionValue<number>;
+  // The color of whichever seat currently needs to roll — only used to
+  // tint the pulsating glow behind the die while it spins (see the return
+  // below); the die itself (face/pips) stays a plain neutral cream/black
+  // regardless of whose turn it is.
+  glowColor: string;
 };
 
 function randomBetween(min: number, max: number) {
@@ -255,6 +255,7 @@ export default function Dice({
   diceValue,
   throwStyle,
   rollProgress,
+  glowColor,
 }: DiceProps) {
   const [isRolling, setIsRolling] = useState(false);
   const [orientation, setOrientation] = useState(() =>
@@ -328,9 +329,6 @@ export default function Dice({
     await posControls.start({
       x: [0, midX, dx],
       y: [0, midY, dy],
-      // Fades in over the flight, landing at ON_BOARD_OPACITY — so it
-      // doesn't fully hide whatever's underneath once it's sitting there.
-      opacity: [1, 1, ON_BOARD_OPACITY],
       transition: {
         duration: durationMs / 1000,
         times: [0, 0.55, 1],
@@ -553,6 +551,8 @@ export default function Dice({
     triggerRoll("tap");
   }
 
+  const waitingToRoll = canRoll && !isRolling;
+
   return (
     <motion.div
       animate={posControls}
@@ -567,18 +567,26 @@ export default function Dice({
         className="relative"
         style={{ transform: `rotate(${screenRotateDeg}deg)` }}
       >
-        {/* A soft white glow behind the die, only while it's actively
-            spinning — see DICE_ROLL_GLOW above. */}
+        {/* A pulsating glow behind the die, tinted to whoever's up next —
+            shown while it's waiting to be rolled, not while it's actually
+            spinning — a growing/shrinking box-shadow rather than a fading
+            overlay, so nothing here ever dims via opacity. Breathes between
+            ~30% and full size/strength (never down to nothing) on a gentle
+            sine-like curve rather than a sharp ease. */}
         <motion.div
-          className="pointer-events-none absolute -inset-3 rounded-[28px] blur-xl"
-          style={{
-            background:
-              "radial-gradient(circle, rgba(255,255,255,0.9), transparent 70%)",
+          className="pointer-events-none absolute inset-0 rounded-2xl"
+          animate={{
+            boxShadow: waitingToRoll
+              ? [
+                  `0 0 8px 2px ${glowColor}66`,
+                  `0 0 28px 12px ${glowColor}E6`,
+                  `0 0 8px 2px ${glowColor}66`,
+                ]
+              : `0 0 0px 0px ${glowColor}00`,
           }}
-          animate={{ opacity: isRolling ? [0.25, 0.8, 0.25] : 0 }}
           transition={
-            isRolling
-              ? { duration: 0.6, repeat: Infinity, ease: "easeInOut" }
+            waitingToRoll
+              ? { duration: 1.1, repeat: Infinity, ease: [0.45, 0.05, 0.55, 0.95] }
               : { duration: 0.25 }
           }
         />
@@ -591,10 +599,8 @@ export default function Dice({
           disabled={(!canRoll && !onBoard) || isRolling}
           aria-label={onBoard ? "Bring the die back" : undefined}
           className={cn(
-            "relative h-[58px] w-[58px] rounded-2xl transition disabled:opacity-40",
-            canRoll && !isRolling
-              ? "ring-2 ring-[#FFD400]/70 ring-offset-2 ring-offset-bg active:scale-95"
-              : "",
+            "relative h-[58px] w-[58px] rounded-2xl transition",
+            waitingToRoll ? "ring-2 ring-[#FFD400]/70 ring-offset-2 ring-offset-bg active:scale-95" : "",
           )}
           style={{
             // Tight enough that the far (bottom-tilted) face visibly

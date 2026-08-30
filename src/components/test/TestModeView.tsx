@@ -81,6 +81,7 @@ export default function TestModeView() {
       onRoll={handleRoll}
       diceValue={game.diceValue}
       rollProgress={rollProgressMV}
+      glowColor={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
     />
   );
 
