@@ -2,17 +2,18 @@
 
 import { SessionProvider, useSession } from "next-auth/react";
 import { useEffect } from "react";
+import posthog from "posthog-js";
 
-// Ties this browser's Umami session to the same id server-side events use
-// (src/server/umami.js) — see docs.umami.is/docs/guides/identify-logged-in-users.
+// Ties this browser's PostHog session to the same id server-side events use
+// (src/server/posthog.js) — see posthog.com/docs/product-analytics/identify.
 // Runs once per login (the effect only re-fires if the id itself changes),
 // not on every page — that's the documented calling convention.
-function UmamiIdentify() {
+function PosthogIdentify() {
   const { data: session } = useSession();
   const userId = session?.user?.id;
 
   useEffect(() => {
-    if (userId) window.umami?.identify({ id: userId });
+    if (userId) posthog.identify(userId);
   }, [userId]);
 
   return null;
@@ -21,7 +22,7 @@ function UmamiIdentify() {
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
-      <UmamiIdentify />
+      <PosthogIdentify />
       {children}
     </SessionProvider>
   );

@@ -29,7 +29,7 @@ import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
 import { resolveSeatProfiles } from "./src/server/profiles.js";
 import { resolveCharge, checkGameStart, logEvent } from "./src/server/entitlements.js";
-import { trackUmami } from "./src/server/umami.js";
+import { trackPosthog } from "./src/server/posthog.js";
 import {
   markOnline,
   markOffline,
@@ -117,7 +117,7 @@ app.prepare().then(() => {
     });
     const props = { roomCode: room.code, playerCount: room.seats.length, sponsored: room.sponsored };
     logEvent("game_completed", hostUserId(room), props);
-    trackUmami("game_completed", props, hostUserId(room));
+    trackPosthog("game_completed", props, hostUserId(room));
   }
 
   const userChannel = (userId) => `user:${userId}`;
@@ -201,7 +201,7 @@ app.prepare().then(() => {
       const userId =
         socket.data.userId ?? (await getAuthenticatedUserId(socket.handshake.headers.cookie));
       logEvent(type, userId ?? null, properties ?? {});
-      trackUmami(type, properties ?? {}, userId ?? null);
+      trackPosthog(type, properties ?? {}, userId ?? null);
     });
 
     socket.on(
@@ -348,7 +348,7 @@ app.prepare().then(() => {
           source: pending?.claimSeatId ? "claim" : pending ? "link" : "friend_request",
         };
         logEvent("player_joined", toUserId, joinProps);
-        trackUmami("player_joined", joinProps, toUserId);
+        trackPosthog("player_joined", joinProps, toUserId);
       })
     );
 
@@ -385,7 +385,7 @@ app.prepare().then(() => {
         setUserRoom(userId, room.code);
         broadcastPresence(userId).catch(logPresenceError("room:create presence update"));
         logEvent("room_created", userId, { maxPlayers });
-        trackUmami("room_created", { maxPlayers }, userId);
+        trackPosthog("room_created", { maxPlayers }, userId);
       })
     );
 
@@ -508,7 +508,7 @@ app.prepare().then(() => {
         broadcastPresence(reconnectUserId).catch(logPresenceError("room:join presence update"));
         const ownSeatProps = { roomCode: room.code, source: "own_seat" };
         logEvent("player_joined", reconnectUserId, ownSeatProps);
-        trackUmami("player_joined", ownSeatProps, reconnectUserId);
+        trackPosthog("player_joined", ownSeatProps, reconnectUserId);
       })
     );
 
@@ -544,7 +544,7 @@ app.prepare().then(() => {
         sponsored: charged.sponsored,
       };
       logEvent("game_started", hostUserId(room), startProps);
-      trackUmami("game_started", startProps, hostUserId(room));
+      trackPosthog("game_started", startProps, hostUserId(room));
 
       // The room is no longer an open lobby, so it's no longer something a
       // friend could "ask to join" — clear it out of everyone's presence.
@@ -879,7 +879,7 @@ app.prepare().then(() => {
           rematchOf: room.code,
         };
         logEvent("game_started", hostUserId(newRoom), rematchProps);
-        trackUmami("game_started", rematchProps, hostUserId(newRoom));
+        trackPosthog("game_started", rematchProps, hostUserId(newRoom));
 
         // Push each distinct account's new seats directly — mirrors how
         // room:joinRequest:approve already pushes seats to a specific

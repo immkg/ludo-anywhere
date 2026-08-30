@@ -2,7 +2,7 @@ import type { Payment } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOrder } from "@/lib/uropai";
 import { getPricingConfig, logEvent } from "@/lib/entitlements";
-import { trackUmami } from "@/server/umami.js";
+import { trackPosthog } from "@/server/posthog.js";
 
 // Uropai's webhook delivery is best-effort/advisory, not the source of
 // truth (per their docs) — so both the webhook route and the status
@@ -81,9 +81,12 @@ async function grantPayment(payment: Payment) {
   if (granted) {
     const eventType = payment.purpose === "PACK" ? "pack_purchased" : "subscription_started";
     await logEvent(eventType, payment.userId, { purpose: payment.purpose, amountInr: payment.amountInr });
-    // revenue/currency are Umami's special property names for its Revenue
-    // report — see docs.umami.is/docs/revenue.
-    trackUmami(
+    // revenue/currency were Umami's special property names for its Revenue
+    // report. Kept as plain properties here — PostHog's revenue analytics
+    // setup (which event/property shape it expects) hasn't been configured
+    // yet; verify against posthog.com/docs/data/revenue-analytics before
+    // relying on a built-in revenue dashboard.
+    trackPosthog(
       eventType,
       { purpose: payment.purpose, revenue: payment.amountInr, currency: "INR" },
       payment.userId,
@@ -98,6 +101,6 @@ async function failPayment(payment: Payment) {
   });
   if (updated.count > 0) {
     await logEvent("payment_failed", payment.userId, { purpose: payment.purpose });
-    trackUmami("payment_failed", { purpose: payment.purpose }, payment.userId);
+    trackPosthog("payment_failed", { purpose: payment.purpose }, payment.userId);
   }
 }

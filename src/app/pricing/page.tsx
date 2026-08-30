@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { logEvent } from "@/lib/entitlements";
-import { trackUmami } from "@/server/umami.js";
+import { trackPosthog } from "@/server/posthog.js";
 import { getPendingRequestCount, getDisplayName } from "@/lib/nav-data";
 import AuthenticatedNav from "@/components/nav/AuthenticatedNav";
 import PricingPageClient from "@/components/pricing/PricingPageClient";
@@ -11,7 +11,7 @@ export default async function PricingPage() {
   if (!session?.user) redirect("/");
 
   logEvent("pricing_viewed", session.user.id);
-  trackUmami("pricing_viewed", {}, session.user.id);
+  trackPosthog("pricing_viewed", {}, session.user.id);
 
   const pendingRequestCount = await getPendingRequestCount(session.user.id);
 

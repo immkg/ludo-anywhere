@@ -3,7 +3,7 @@ import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { logEvent } from "@/lib/entitlements";
-import { trackUmami } from "@/server/umami.js";
+import { trackPosthog } from "@/server/posthog.js";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -35,7 +35,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         create: { userId, profileId: profile.id },
       });
       logEvent("user_signed_in", userId);
-      trackUmami("user_signed_in", {}, userId);
+      trackPosthog("user_signed_in", {}, userId);
     },
     // Fires exactly once, when the PrismaAdapter inserts a brand-new User
     // row — the actual acquisition moment, distinct from signIn above
@@ -43,7 +43,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async createUser({ user }) {
       if (!user.id) return;
       logEvent("user_signed_up", user.id);
-      trackUmami("user_signed_up", {}, user.id);
+      trackPosthog("user_signed_up", {}, user.id);
     },
   },
 });
