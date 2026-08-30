@@ -4,7 +4,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -12,6 +11,7 @@ import {
   useAnimationControls,
   useMotionValue,
   animate as animateValue,
+  type MotionValue,
 } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { playDiceRoll } from "@/lib/sound";
@@ -20,10 +20,9 @@ const MIN_SPIN_MS = 650;
 const SPIN_LOOP_SECONDS = 0.5;
 const LAND_SECONDS = 0.55;
 const LAND_EASE = [0.16, 1, 0.3, 1] as const;
-const CUBE_SIZE = 64; // px — matches h-16 w-16
+const CUBE_SIZE = 58; // px — 10% down from the original 64 (h-16); matches the button's h-[58px] w-[58px] below
 const HALF = CUBE_SIZE / 2;
 const AUTO_ROLL_MS = 5000;
-const AUTO_MOVE_MS = 15000;
 // Pointer down->up shorter than this is a plain tap (today's simple
 // in-place roll); at or past it counts as a deliberate hold-and-release,
 // which throws the die onto the board instead — see startRoll below.
@@ -43,16 +42,21 @@ const ABANDON_PENALTY_MS = 2000;
 // mostly opaque so the die itself reads clearly.
 const ON_BOARD_OPACITY = 0.88;
 
-// A warm off-white (not the theme's bg-surface, which flips dark in dark
-// mode) — a physical die's plastic is always this color regardless of the
-// app's theme, same reasoning as Token.tsx's fixed WHITE border. The
-// gradient (lighter top-left, deeper bottom-right) plus the highlight blob
-// in Face below are what actually sell "glossy and domed", the same trick
-// used for the token discs.
+// A plain white/black die — not tinted per player, so it reads the same
+// physical object no matter whose turn it is (that's what the player
+// cards' own borders/traces are for now — see PlayerCorner.tsx). Fixed
+// colors rather than theme tokens (which flip dark in dark mode), same
+// reasoning as Token.tsx's fixed WHITE border: a physical die's plastic
+// stays the same color regardless of the app's theme.
+// The gradient (lighter top-left, deeper bottom-right) plus the highlight
+// blob in Face below are what actually sell "glossy and domed", the same
+// trick used for the token discs.
 const DICE_FACE_BG =
-  "linear-gradient(135deg, #fffdf6 0%, #f5eeda 45%, #e6dcbe 100%)";
+  "linear-gradient(135deg, #ffffff 0%, #f3f3f0 45%, #e2e0d8 100%)";
 const DICE_FACE_SHADOW =
-  "inset 0 2px 3px rgba(255,255,255,0.8), inset 0 -3px 5px rgba(0,0,0,0.14), inset 2px 0 3px rgba(255,255,255,0.35)";
+  "inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -3px 5px rgba(0,0,0,0.14), inset 2px 0 3px rgba(255,255,255,0.35)";
+const DICE_FRAME_COLOR = "#241c15";
+const DICE_PIP_COLOR = "#241c15";
 
 const PIP_LAYOUTS: Record<number, [number, number][]> = {
   1: [[1, 1]],
@@ -153,25 +157,14 @@ function randomScreenRotate() {
   );
 }
 
-function Face({
-  value,
-  numberColor,
-  frameColor,
-}: {
-  value: number;
-  // The pips: colored for whoever actually rolled this number.
-  numberColor: string;
-  // The border: colored for whoever currently needs to roll/move, even
-  // once that's someone else — see the cubeColor/color split below.
-  frameColor: string;
-}) {
+function Face({ value }: { value: number }) {
   const pips = PIP_LAYOUTS[value] ?? [];
   return (
     <div
       className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl border-2 p-1.5 [backface-visibility:hidden]"
       style={{
         transform: FACE_PLACEMENT[value],
-        borderColor: frameColor,
+        borderColor: DICE_FRAME_COLOR,
         background: DICE_FACE_BG,
         boxShadow: DICE_FACE_SHADOW,
       }}
@@ -197,7 +190,7 @@ function Face({
             style={
               active
                 ? {
-                    backgroundColor: numberColor,
+                    backgroundColor: DICE_PIP_COLOR,
                     boxShadow: "inset 0 1px 1.5px rgba(0,0,0,0.3)",
                   }
                 : undefined
@@ -221,15 +214,6 @@ type DiceProps = {
   // press rolls in place exactly as before; a deliberate hold-and-release
   // throws the die onto the board (see handleClick below).
   onRoll: (style: ThrowStyle) => void;
-  // True while it's this device's turn and a token move is pending — drives
-  // the same countdown ring as canRoll, just on the longer auto-move clock,
-  // so a stalled move is just as visible as a stalled roll.
-  canMove: boolean;
-  // The color of whichever seat currently needs to roll/move — stays put
-  // (doesn't fade back to neutral) until that turn actually advances, so
-  // the dice keeps reading as "this is so-and-so's turn" through bonus
-  // rolls too, not just the instant right after a roll.
-  color: string;
   // Mirrors isRolling out to the parent — the "Roll"/"Move" label now lives
   // up in the player-name row (see DiceLabel), separate from this cube, but
   // still needs to hide for the same window the spin animation is playing.
@@ -249,6 +233,11 @@ type DiceProps = {
   // triggered it (see game:diceThrow in GameView.tsx) so every viewer sees
   // the same flourish, not just the roller.
   throwStyle?: ThrowStyle;
+  // The auto-roll countdown's 0..1 motion value — owned here by default,
+  // but a parent that also wants to trace the same countdown somewhere
+  // else (see PlayerCorner.tsx's card border) can create it and pass it in
+  // instead, so both places read the exact same pausable progress.
+  rollProgress?: MotionValue<number>;
 };
 
 function randomBetween(min: number, max: number) {
@@ -260,13 +249,12 @@ export default function Dice({
   rollSeq,
   canRoll,
   onRoll,
-  canMove,
-  color,
   onRollingChange,
   restPoint,
   safeRegion,
   diceValue,
   throwStyle,
+  rollProgress,
 }: DiceProps) {
   const [isRolling, setIsRolling] = useState(false);
   const [orientation, setOrientation] = useState(() =>
@@ -278,19 +266,6 @@ export default function Dice({
   const prevRollSeqRef = useRef(rollSeq);
   const spinStartRef = useRef(0);
   const landTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The pips stay in whichever color rolled the number currently on
-  // display — they only change when a *new* roll actually lands, not
-  // whenever `color` (whose turn it is now) moves on, e.g. once that
-  // player's token move ends their turn with no bonus roll. The face's
-  // border and everything else outside the cube (ring, countdown arc)
-  // track `color` directly, since those are about whose turn it is now.
-  const [cubeColor, setCubeColor] = useState(color);
-  // Holds `color` as of just before the current render, so the roll-landing
-  // effect below can read "who actually rolled" even when that same update
-  // also advances the turn (a roll with no valid moves ends the turn in the
-  // same broadcast) — by the time this render's `color` prop is read, it may
-  // already be the next player's.
-  const prevColorRef = useRef(color);
 
   // Position/phase machinery for the "flick" throw — untouched by a plain
   // tap, which never moves this at all (stays at {x:0, y:0}, i.e. its
@@ -307,12 +282,15 @@ export default function Dice({
   const pendingTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rolledThisPressRef = useRef(false);
 
-  // The auto-roll countdown (ring progress 0..1, driving both the visual
-  // arc and the actual auto-roll trigger via its onComplete) — a plain
-  // motion value + imperative animation rather than a declarative one, so
-  // touching the die can pause it mid-flight and resume it later at a
-  // penalized remaining duration. See startAutoRollCountdown below.
-  const rollProgressMV = useMotionValue(0);
+  // The auto-roll countdown (progress 0..1, driving both the actual
+  // auto-roll trigger via its onComplete and — see PlayerCorner.tsx — the
+  // card-border trace) — a plain motion value + imperative animation
+  // rather than a declarative one, so touching the die can pause it
+  // mid-flight and resume it later at a penalized remaining duration. See
+  // startAutoRollCountdown below. Falls back to an internally-owned value
+  // when no parent shares one in (e.g. the dev test harness).
+  const internalRollProgressMV = useMotionValue(0);
+  const rollProgressMV = rollProgress ?? internalRollProgressMV;
   const rollAnimRef = useRef<ReturnType<typeof animateValue> | null>(null);
 
   function spinFrom(prev: { x: number; y: number }) {
@@ -393,7 +371,6 @@ export default function Dice({
   useEffect(() => {
     if (rollSeq === prevRollSeqRef.current) return;
     prevRollSeqRef.current = rollSeq;
-    const rollerColor = prevColorRef.current;
     const style = throwStyle ?? "tap";
     const durationMs =
       style === "flick" ? randomBetween(...THROW_MS_RANGE) : MIN_SPIN_MS;
@@ -421,7 +398,6 @@ export default function Dice({
       setOrientation({ x: target.x + 360 * 2, y: target.y + 360 * 2 });
       setScreenRotateDeg(randomScreenRotate());
       setIsRolling(false);
-      setCubeColor(rollerColor);
     }, remaining);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rollSeq, lastRoll]);
@@ -437,12 +413,6 @@ export default function Dice({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diceValue]);
-
-  // Runs after the roll-landing effect above on any render where both
-  // change together, so that effect still sees the pre-update color.
-  useEffect(() => {
-    prevColorRef.current = color;
-  }, [color]);
 
   useEffect(() => {
     return () => {
@@ -597,6 +567,21 @@ export default function Dice({
         className="relative"
         style={{ transform: `rotate(${screenRotateDeg}deg)` }}
       >
+        {/* A soft white glow behind the die, only while it's actively
+            spinning — see DICE_ROLL_GLOW above. */}
+        <motion.div
+          className="pointer-events-none absolute -inset-3 rounded-[28px] blur-xl"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(255,255,255,0.9), transparent 70%)",
+          }}
+          animate={{ opacity: isRolling ? [0.25, 0.8, 0.25] : 0 }}
+          transition={
+            isRolling
+              ? { duration: 0.6, repeat: Infinity, ease: "easeInOut" }
+              : { duration: 0.25 }
+          }
+        />
         <button
           onClick={handleClick}
           onPointerDown={handlePointerDown}
@@ -606,9 +591,9 @@ export default function Dice({
           disabled={(!canRoll && !onBoard) || isRolling}
           aria-label={onBoard ? "Bring the die back" : undefined}
           className={cn(
-            "relative h-16 w-16 rounded-2xl transition disabled:opacity-40",
+            "relative h-[58px] w-[58px] rounded-2xl transition disabled:opacity-40",
             canRoll && !isRolling
-              ? "ring-2 ring-offset-2 ring-offset-bg active:scale-95"
+              ? "ring-2 ring-[#FFD400]/70 ring-offset-2 ring-offset-bg active:scale-95"
               : "",
           )}
           style={{
@@ -621,9 +606,6 @@ export default function Dice({
             // foreshortening, not the shearing a Z-axis rotate caused when
             // it used to live inside this same 3D scene.
             perspective: 180,
-            ...(canRoll && !isRolling
-              ? ({ "--tw-ring-color": color } as CSSProperties)
-              : {}),
           }}
         >
           <div
@@ -659,73 +641,8 @@ export default function Dice({
               }}
             >
               {[1, 2, 3, 4, 5, 6].map((value) => (
-                <Face
-                  key={value}
-                  value={value}
-                  numberColor={cubeColor}
-                  frameColor={color}
-                />
+                <Face key={value} value={value} />
               ))}
-
-              {/* The countdown rings sit in the same 3D plane as the face
-                currently shown (same FACE_PLACEMENT transform, same
-                inset-0 box as the face's own border), so they trace right
-                along that border and tilt/rotate along with the die
-                instead of floating as a flat overlay outside its edge. */}
-              {canRoll && !isRolling && (
-                <div
-                  className="pointer-events-none absolute inset-0 [backface-visibility:hidden]"
-                  style={{ transform: FACE_PLACEMENT[lastRoll ?? 1] }}
-                >
-                  <svg
-                    className="h-full w-full -rotate-90"
-                    viewBox="0 0 100 100"
-                  >
-                    <motion.rect
-                      x="2"
-                      y="2"
-                      width="96"
-                      height="96"
-                      rx="22"
-                      fill="none"
-                      stroke={color}
-                      strokeWidth="4"
-                      strokeLinecap="round"
-                      style={{ pathLength: rollProgressMV }}
-                    />
-                  </svg>
-                </div>
-              )}
-              {canMove && !isRolling && (
-                <div
-                  key="move"
-                  className="pointer-events-none absolute inset-0 [backface-visibility:hidden]"
-                  style={{ transform: FACE_PLACEMENT[lastRoll ?? 1] }}
-                >
-                  <svg
-                    className="h-full w-full -rotate-90"
-                    viewBox="0 0 100 100"
-                  >
-                    <motion.rect
-                      x="2"
-                      y="2"
-                      width="96"
-                      height="96"
-                      rx="22"
-                      fill="none"
-                      stroke={color}
-                      strokeWidth="4"
-                      strokeLinecap="round"
-                      initial={{ pathLength: 0 }}
-                      animate={{ pathLength: 1 }}
-                      transition={{
-                        duration: AUTO_MOVE_MS / 1000,
-                        ease: "linear",
-                      }}
-                    />
-                  </svg>
-                </div>
-              )}
             </motion.div>
           </div>
         </button>

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useReducedMotion } from "framer-motion";
 import { useGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/useGameStore";
 import { useRoomStore } from "@/store/useRoomStore";
@@ -90,6 +90,14 @@ export default function GameView({ room }: { room: Room }) {
   } | null>(null);
   const [lastThrowStyle, setLastThrowStyle] = useState<ThrowStyle>("tap");
   const hasGame = Boolean(game);
+  // Shared with whichever PlayerCorner currently has the turn, so its card
+  // border traces the exact same pausable auto-roll countdown Dice.tsx
+  // drives — see PlayerCorner.tsx's rollProgress prop.
+  const rollProgressMV = useMotionValue(0);
+  // Which corner the dice currently sits next to (see the render below) —
+  // its on-screen position moves with this, so the flick-throw geometry
+  // below needs to recompute on every change, not just on resize.
+  const currentArm = currentSeat?.armIndex ?? null;
 
   useLayoutEffect(() => {
     const areaEl = boardAreaRef.current;
@@ -137,8 +145,12 @@ export default function GameView({ room }: { room: Room }) {
     // renders without these refs at all), so the very first run of this
     // effect finds every ref unmounted and bails out; without this
     // dependency it would never run again once the real layout exists,
-    // leaving boardSize/diceGeometry permanently null.
-  }, [hasGame]);
+    // leaving boardSize/diceGeometry permanently null. Also re-attempts on
+    // every `currentArm` change: the dice moves to a different row/side
+    // each turn (see the render below), which shifts diceWrapRef's own
+    // position without necessarily changing any observed element's size,
+    // so the ResizeObserver alone wouldn't catch it.
+  }, [hasGame, currentArm]);
 
   const showReaction = (reaction: Reaction) => {
     setActiveReaction(reaction);
@@ -304,6 +316,26 @@ export default function GameView({ room }: { room: Room }) {
     emitRollDice(room.code, currentSeat.id, style);
   };
 
+  // Mounted once, next to whichever corner currently has the turn (see
+  // currentArm above and the row JSX below) — not in a fixed spot anymore,
+  // so this same single Dice instance just relocates as the turn passes
+  // instead of a separate copy living in each corner.
+  const diceMount = currentArm != null && (
+    <div ref={diceWrapRef}>
+      <Dice
+        lastRoll={game.lastRoll}
+        rollSeq={game.rollSeq}
+        canRoll={canRoll}
+        onRoll={handleRoll}
+        restPoint={diceGeometry?.restPoint ?? null}
+        safeRegion={diceGeometry?.safeRegion ?? null}
+        diceValue={game.diceValue}
+        throwStyle={lastThrowStyle}
+        rollProgress={rollProgressMV}
+      />
+    </div>
+  );
+
   // Apply the move locally right away — engine.moveToken is the same pure,
   // deterministic function the server runs, so this renders the token's
   // motion instantly instead of waiting on a round trip. The emit still goes
@@ -356,22 +388,30 @@ export default function GameView({ room }: { room: Room }) {
 
       <div ref={boardAreaRef} className="flex min-h-0 flex-1 flex-col items-center justify-center">
         <div ref={topRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pb-2 sm:px-4">
-          <PlayerCorner
-            seat={seatByArm.get(0) ?? null}
-            avatarFirst
-            isTurn={seatByArm.get(0)?.id === currentSeat?.id}
-            placement={placementForArm(seatByArm.get(0))}
-            suspended={suspendedForArm(seatByArm.get(0))}
-            onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
-          />
-          <PlayerCorner
-            seat={seatByArm.get(1) ?? null}
-            avatarFirst={false}
-            isTurn={seatByArm.get(1)?.id === currentSeat?.id}
-            placement={placementForArm(seatByArm.get(1))}
-            suspended={suspendedForArm(seatByArm.get(1))}
-            onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
-          />
+          <div className="flex items-center gap-3">
+            <PlayerCorner
+              seat={seatByArm.get(0) ?? null}
+              isTurn={seatByArm.get(0)?.id === currentSeat?.id}
+              placement={placementForArm(seatByArm.get(0))}
+              suspended={suspendedForArm(seatByArm.get(0))}
+              onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
+              rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
+              canMove={currentArm === 0 && canMove}
+            />
+            {currentArm === 0 && diceMount}
+          </div>
+          <div className="flex items-center gap-3">
+            {currentArm === 1 && diceMount}
+            <PlayerCorner
+              seat={seatByArm.get(1) ?? null}
+              isTurn={seatByArm.get(1)?.id === currentSeat?.id}
+              placement={placementForArm(seatByArm.get(1))}
+              suspended={suspendedForArm(seatByArm.get(1))}
+              onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
+              rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
+              canMove={currentArm === 1 && canMove}
+            />
+          </div>
         </div>
 
         <div
@@ -422,39 +462,30 @@ export default function GameView({ room }: { room: Room }) {
         </p>
 
         <div ref={bottomRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pt-2 sm:px-4">
-          <PlayerCorner
-            seat={seatByArm.get(3) ?? null}
-            avatarFirst
-            isTurn={seatByArm.get(3)?.id === currentSeat?.id}
-            placement={placementForArm(seatByArm.get(3))}
-            suspended={suspendedForArm(seatByArm.get(3))}
-            onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
-          />
-          <PlayerCorner
-            seat={seatByArm.get(2) ?? null}
-            avatarFirst={false}
-            isTurn={seatByArm.get(2)?.id === currentSeat?.id}
-            placement={placementForArm(seatByArm.get(2))}
-            suspended={suspendedForArm(seatByArm.get(2))}
-            onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
-          />
-        </div>
-      </div>
-
-      <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-center border-t border-line bg-bg px-2 pt-2 pb-4 sm:px-4 sm:pb-6">
-        <div ref={diceWrapRef}>
-          <Dice
-            lastRoll={game.lastRoll}
-            rollSeq={game.rollSeq}
-            canRoll={canRoll}
-            onRoll={handleRoll}
-            canMove={canMove}
-            color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
-            restPoint={diceGeometry?.restPoint ?? null}
-            safeRegion={diceGeometry?.safeRegion ?? null}
-            diceValue={game.diceValue}
-            throwStyle={lastThrowStyle}
-          />
+          <div className="flex items-center gap-3">
+            <PlayerCorner
+              seat={seatByArm.get(3) ?? null}
+              isTurn={seatByArm.get(3)?.id === currentSeat?.id}
+              placement={placementForArm(seatByArm.get(3))}
+              suspended={suspendedForArm(seatByArm.get(3))}
+              onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
+              rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
+              canMove={currentArm === 3 && canMove}
+            />
+            {currentArm === 3 && diceMount}
+          </div>
+          <div className="flex items-center gap-3">
+            {currentArm === 2 && diceMount}
+            <PlayerCorner
+              seat={seatByArm.get(2) ?? null}
+              isTurn={seatByArm.get(2)?.id === currentSeat?.id}
+              placement={placementForArm(seatByArm.get(2))}
+              suspended={suspendedForArm(seatByArm.get(2))}
+              onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
+              rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
+              canMove={currentArm === 2 && canMove}
+            />
+          </div>
         </div>
       </div>
     </div>

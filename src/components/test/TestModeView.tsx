@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useMotionValue } from "framer-motion";
 import { createGame, rollDice, moveToken, getValidMoves, pickAutoMoveToken, placementFor } from "@/game/engine";
 import { armForSeatIndex, colorForArm, YARD, finished as finishLine, trackSteps } from "@/game/board";
 import { cn } from "@/lib/utils";
@@ -45,8 +46,10 @@ function createTestSetup(count: number) {
 // demand (an exact dice value, an arbitrary token position, an instant win).
 export default function TestModeView() {
   const [{ seats, game }, setState] = useState(() => createTestSetup(4));
+  const rollProgressMV = useMotionValue(0);
 
   const currentSeat = game.seats[game.currentSeatIndex] ?? null;
+  const currentArm = currentSeat?.armIndex ?? null;
   const validMoves = currentSeat ? getValidMoves(game, currentSeat.id) : [];
   const canRoll = game.status === "playing" && game.diceValue == null;
   const canMove = game.status === "playing" && game.diceValue != null && validMoves.length > 0;
@@ -66,6 +69,20 @@ export default function TestModeView() {
     if (!canRoll) return;
     updateGame(rollDice);
   }
+
+  // Mirrors GameView.tsx's own diceMount: a single Dice instance that
+  // relocates next to whichever corner currently has the turn instead of
+  // sitting in one fixed spot.
+  const diceMount = currentArm != null && (
+    <Dice
+      lastRoll={game.lastRoll}
+      rollSeq={game.rollSeq}
+      canRoll={canRoll}
+      onRoll={handleRoll}
+      diceValue={game.diceValue}
+      rollProgress={rollProgressMV}
+    />
+  );
 
   // Forces a specific face without touching engine.js: rollDice() draws its
   // number from Math.random(), so pinning that for the one call reuses the
@@ -170,18 +187,26 @@ export default function TestModeView() {
         )}
 
         <div className="relative flex shrink-0 items-center justify-between px-4">
-          <PlayerCorner
-            seat={seatByArm.get(0) ?? null}
-            avatarFirst
-            isTurn={seatByArm.get(0)?.id === currentSeat?.id}
-            placement={placementForArm(seatByArm.get(0))}
-          />
-          <PlayerCorner
-            seat={seatByArm.get(1) ?? null}
-            avatarFirst={false}
-            isTurn={seatByArm.get(1)?.id === currentSeat?.id}
-            placement={placementForArm(seatByArm.get(1))}
-          />
+          <div className="flex items-center gap-3">
+            <PlayerCorner
+              seat={seatByArm.get(0) ?? null}
+              isTurn={seatByArm.get(0)?.id === currentSeat?.id}
+              placement={placementForArm(seatByArm.get(0))}
+              rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
+              canMove={currentArm === 0 && canMove}
+            />
+            {currentArm === 0 && diceMount}
+          </div>
+          <div className="flex items-center gap-3">
+            {currentArm === 1 && diceMount}
+            <PlayerCorner
+              seat={seatByArm.get(1) ?? null}
+              isTurn={seatByArm.get(1)?.id === currentSeat?.id}
+              placement={placementForArm(seatByArm.get(1))}
+              rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
+              canMove={currentArm === 1 && canMove}
+            />
+          </div>
         </div>
 
         <div className="min-h-0 flex-1">
@@ -195,30 +220,26 @@ export default function TestModeView() {
         </div>
 
         <div className="relative flex min-h-16 shrink-0 items-center justify-between px-4">
-          <PlayerCorner
-            seat={seatByArm.get(3) ?? null}
-            avatarFirst
-            isTurn={seatByArm.get(3)?.id === currentSeat?.id}
-            placement={placementForArm(seatByArm.get(3))}
-          />
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="pointer-events-auto">
-              <Dice
-                lastRoll={game.lastRoll}
-                rollSeq={game.rollSeq}
-                canRoll={canRoll}
-                onRoll={handleRoll}
-                canMove={canMove}
-                color={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
-              />
-            </div>
+          <div className="flex items-center gap-3">
+            <PlayerCorner
+              seat={seatByArm.get(3) ?? null}
+              isTurn={seatByArm.get(3)?.id === currentSeat?.id}
+              placement={placementForArm(seatByArm.get(3))}
+              rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
+              canMove={currentArm === 3 && canMove}
+            />
+            {currentArm === 3 && diceMount}
           </div>
-          <PlayerCorner
-            seat={seatByArm.get(2) ?? null}
-            avatarFirst={false}
-            isTurn={seatByArm.get(2)?.id === currentSeat?.id}
-            placement={placementForArm(seatByArm.get(2))}
-          />
+          <div className="flex items-center gap-3">
+            {currentArm === 2 && diceMount}
+            <PlayerCorner
+              seat={seatByArm.get(2) ?? null}
+              isTurn={seatByArm.get(2)?.id === currentSeat?.id}
+              placement={placementForArm(seatByArm.get(2))}
+              rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
+              canMove={currentArm === 2 && canMove}
+            />
+          </div>
         </div>
       </div>
 
