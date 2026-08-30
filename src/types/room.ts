@@ -19,6 +19,9 @@ export type Room = {
   hostSeatId: string | null;
   status: RoomStatus;
   sponsored: boolean;
+  // True for a room matched via "Find Player Online" rather than created
+  // directly — see matchmaking:join in server.js.
+  matchmaking: boolean;
   seats: Seat[];
 };
 

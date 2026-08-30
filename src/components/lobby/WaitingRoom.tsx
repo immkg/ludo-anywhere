@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { getSocket } from "@/lib/socket";
 import { armForSeatIndex, colorForArm } from "@/game/board";
 import {
   startGame,
@@ -13,8 +14,10 @@ import {
   trackShare,
   leaveRoom,
   fillBotSeats,
+  requestStart,
+  requestBotFill,
 } from "@/lib/socketActions";
-import { shareOnWhatsApp, roomJoinUrl } from "@/lib/share";
+import { shareRoomLink, roomJoinUrl } from "@/lib/share";
 import { saveOwnedSeats, clearOwnedSeats } from "@/lib/identity";
 import { generateDummyEmail, randomEmailSuffix } from "@/lib/dummyEmail";
 import { useFriends } from "@/hooks/useFriends";
@@ -56,13 +59,23 @@ const NAV_ITEMS = [
   { href: "/history", label: "History", icon: IconClock, active: false },
 ];
 
+function formatElapsed(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: OwnedSeat[] }) {
   const router = useRouter();
   const { data: session } = useSession();
   const [copied, setCopied] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [addPlayerOpen, setAddPlayerOpen] = useState(false);
   const [fillingBots, setFillingBots] = useState(false);
+  const [incomingRequest, setIncomingRequest] = useState<{ type: "start" | "bots"; fromName: string } | null>(null);
+  const requestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const error = useRoomStore((s) => s.error);
   const setError = useRoomStore((s) => s.setError);
   const resetRoomStore = useRoomStore((s) => s.reset);
@@ -70,6 +83,42 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
   const canStart = isHost && room.seats.length >= 2;
   const openSlots = Math.max(0, room.maxPlayers - room.seats.length);
   const hostName = room.seats.find((s) => s.id === room.hostSeatId)?.name;
+  const myName = mySeats[0]?.name ?? "A player";
+
+  // Nudges from a non-host in a matchmaking room asking the host to start
+  // early or fill with bots — purely a relayed toast (see room:requestStart/
+  // room:requestBotFill in server.js), the host still has to actually click
+  // Start/Fill Bots below.
+  useEffect(() => {
+    if (!isHost) return;
+    const socket = getSocket();
+    const onRequestStart = ({ fromName }: { fromName: string }) => {
+      setIncomingRequest({ type: "start", fromName });
+      if (requestTimerRef.current) clearTimeout(requestTimerRef.current);
+      requestTimerRef.current = setTimeout(() => setIncomingRequest(null), 8000);
+    };
+    const onRequestBotFill = ({ fromName }: { fromName: string }) => {
+      setIncomingRequest({ type: "bots", fromName });
+      if (requestTimerRef.current) clearTimeout(requestTimerRef.current);
+      requestTimerRef.current = setTimeout(() => setIncomingRequest(null), 8000);
+    };
+    socket.on("room:requestStart", onRequestStart);
+    socket.on("room:requestBotFill", onRequestBotFill);
+    return () => {
+      socket.off("room:requestStart", onRequestStart);
+      socket.off("room:requestBotFill", onRequestBotFill);
+      if (requestTimerRef.current) clearTimeout(requestTimerRef.current);
+    };
+  }, [isHost]);
+
+  // A simple client-side stopwatch for "how long have I been waiting" in a
+  // matchmaking room — resets on remount (e.g. a refresh), which is fine
+  // since it's just a rough sense of elapsed time, not a stored value.
+  useEffect(() => {
+    if (!room.matchmaking) return;
+    const timer = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [room.matchmaking]);
 
   const handleFillBots = async () => {
     if (!room.hostSeatId) return;
@@ -93,9 +142,14 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
     }
   };
 
-  const handleShareLink = () => {
+  const handleShareLink = async () => {
     trackShare("room_shared", { roomCode: room.code });
-    shareOnWhatsApp(`Join my Ludo room on MyLudo! ${roomJoinUrl(room.code)}`);
+    const url = roomJoinUrl(room.code);
+    const result = await shareRoomLink(`Join my Ludo room on MyLudo! ${url}`, url);
+    if (result === "copied") {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1500);
+    }
   };
 
   const handleLeave = () => {
@@ -169,7 +223,7 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
 
         <main className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row md:items-start">
           <div className="flex min-w-0 flex-1 flex-col gap-6 md:max-w-xl">
-            <div className="flex items-center justify-between gap-3">
+            <div className="sticky top-0 z-10 -mx-5 flex items-center justify-between gap-3 bg-bg px-5 py-3 md:static md:mx-0 md:bg-transparent md:px-0 md:py-0">
               {isHost ? (
                 <Button disabled={!canStart} onClick={() => startGame(room.code, room.hostSeatId!)} className="flex-1">
                   <span className="flex items-center justify-center gap-2">
@@ -192,6 +246,31 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
               </p>
             )}
 
+            {isHost && incomingRequest && (
+              <div className="flex items-center gap-3 rounded-2xl border border-accent bg-surface p-3">
+                <p className="min-w-0 flex-1 text-sm">
+                  <span className="font-semibold">{incomingRequest.fromName}</span>{" "}
+                  {incomingRequest.type === "start" ? "wants you to start the game" : "wants you to fill the rest with bots"}
+                </p>
+                <button
+                  onClick={() => {
+                    setIncomingRequest(null);
+                    if (incomingRequest.type === "start") startGame(room.code, room.hostSeatId!);
+                    else handleFillBots();
+                  }}
+                  className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+                >
+                  {incomingRequest.type === "start" ? "Start now" : "Fill bots"}
+                </button>
+                <button
+                  onClick={() => setIncomingRequest(null)}
+                  className="shrink-0 text-xs font-semibold text-ink-muted underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
             {error && (
               <div className="flex items-start justify-between gap-3 rounded-2xl border border-accent bg-surface p-3">
                 <p className="text-sm">
@@ -212,7 +291,14 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
             )}
 
             <div className="flex flex-col gap-3 rounded-3xl border-2 border-accent/25 bg-surface p-4 sm:p-5">
-              <p className="text-sm text-ink-muted">Share this code with your friends</p>
+              {room.matchmaking ? (
+                <p className="flex items-center gap-1.5 text-sm text-ink-muted">
+                  <IconClock className="h-4 w-4 shrink-0" />
+                  Waiting for more players — {formatElapsed(elapsedSeconds)}
+                </p>
+              ) : (
+                <p className="text-sm text-ink-muted">Share this code with your friends</p>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleCopy}
@@ -238,12 +324,20 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
               <div className="flex gap-2">
                 <Button variant="secondary" className="flex-1" onClick={handleShareLink}>
                   <span className="flex items-center justify-center gap-2">
-                    <IconLink className="h-4 w-4" /> Share
+                    {shareCopied ? (
+                      <>
+                        <IconCheck className="h-4 w-4" /> Link copied!
+                      </>
+                    ) : (
+                      <>
+                        <IconLink className="h-4 w-4" /> Share
+                      </>
+                    )}
                   </span>
                 </Button>
                 <Button variant="secondary" className="flex-1" onClick={() => setInviteOpen((v) => !v)}>
                   <span className="flex items-center justify-center gap-2">
-                    <IconUsers className="h-4 w-4" /> Invite
+                    <IconUsers className="h-4 w-4" /> Friends
                   </span>
                 </Button>
               </div>
@@ -268,8 +362,10 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                   // The host can remove anyone but themselves (down to
                   // hosting alone); a non-host device can only remove seats
                   // it added itself — see the matching check in
-                  // room:removeSeat (server.js).
-                  const canRemove = seat.id !== room.hostSeatId && (isHost || mine);
+                  // room:removeSeat (server.js). In a matchmaking room the
+                  // host has no say over strangers they didn't invite — only
+                  // removing seats you added yourself is allowed there.
+                  const canRemove = seat.id !== room.hostSeatId && (room.matchmaking ? mine : isHost || mine);
                   return (
                     <OccupiedSeatCard
                       key={seat.id}
@@ -300,6 +396,17 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                 })}
               </div>
             </div>
+
+            {!isHost && room.matchmaking && room.seats.length < room.maxPlayers && (
+              <div className="flex gap-2">
+                <Button variant="secondary" className="flex-1" onClick={() => requestStart(room.code, myName)}>
+                  Ask host to start
+                </Button>
+                <Button variant="secondary" className="flex-1" onClick={() => requestBotFill(room.code, myName)}>
+                  Ask for bots
+                </Button>
+              </div>
+            )}
 
             <div className="flex items-center gap-2.5 rounded-2xl border border-line bg-surface-2 p-3 text-xs sm:text-sm">
               <IconGlobe className="h-5 w-5 shrink-0 text-ink-muted" />

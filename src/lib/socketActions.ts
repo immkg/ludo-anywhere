@@ -153,6 +153,23 @@ export function declineJoinRequest(roomCode: string, toUserId: string) {
   getSocket().emit("room:joinRequest:decline", { roomCode, toUserId });
 }
 
+// Random-opponent matchmaking: joins the shared pool (always a 4-seat
+// room — see matchmaking.js). Resolves the same shape as createRoom, so
+// callers reuse the same navigate-into-room flow.
+export function findMatch(seats: SeatRequest[]) {
+  return emitWithAck("matchmaking:join", { seats, deviceId: getDeviceId() });
+}
+
+// Ephemeral nudges — the host still has to act via their own Start/Fill
+// Bots buttons, this just surfaces a toast asking them to.
+export function requestStart(roomCode: string, fromName: string) {
+  getSocket().emit("room:requestStart", { roomCode, fromName });
+}
+
+export function requestBotFill(roomCode: string, fromName: string) {
+  getSocket().emit("room:requestBotFill", { roomCode, fromName });
+}
+
 export function refreshPresence(): Promise<{ presence: Record<string, { online: boolean; roomCode: string | null }> }> {
   return new Promise((resolve) => {
     getSocket().emit("presence:refresh", {}, resolve);

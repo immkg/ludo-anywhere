@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
-import { createRoom, createRoomAsGuest, fillBotSeats, startGame } from "@/lib/socketActions";
+import { createRoom, createRoomAsGuest, fillBotSeats, findMatch, startGame } from "@/lib/socketActions";
 import { saveOwnedSeats, getGuestName, saveGuestName, randomFunnyName } from "@/lib/identity";
 import { useRoomStore } from "@/store/useRoomStore";
 import { useProfiles } from "@/hooks/useProfiles";
@@ -70,6 +70,30 @@ export default function CreateRoom() {
       router.push(`/room/${res.roomCode}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create room");
+      setLoading(false);
+    }
+  };
+
+  // Matches into a shared 4-seat pool rather than a room this device
+  // created — ignores totalPlayers entirely (see matchmaking.js: a small
+  // user base needs one queue, not one per player count). Whoever's in the
+  // room once matched can start early for a smaller game — see
+  // WaitingRoom's Start button, unchanged from the private-room flow.
+  const handleFindMatch = async () => {
+    if (!myProfileId) {
+      setError("Could not find your player profile");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await findMatch([{ profileId: myProfileId }]);
+      if (!res.roomCode || !res.seats) throw new Error("Could not find a match");
+      saveOwnedSeats(res.roomCode, res.seats);
+      addMySeats(res.seats);
+      router.push(`/room/${res.roomCode}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not find a match");
       setLoading(false);
     }
   };
@@ -237,20 +261,25 @@ export default function CreateRoom() {
               </Link>
             </div>
           ) : (
-            <Button
-              onClick={handleCreate}
-              disabled={loading || profilesLoading || !myProfileId}
-              className="w-full"
-            >
-              <span className="flex w-full items-center justify-center gap-2">
-                {loading ? "Creating…" : "Create Room"}
-                {!loading && (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>
-                )}
-              </span>
-            </Button>
+            <>
+              <Button
+                onClick={handleFindMatch}
+                disabled={loading || profilesLoading || !myProfileId}
+                className="w-full"
+                subtitle="Get matched with other players"
+              >
+                {loading ? "Finding…" : "Find Players Online"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={handleCreate}
+                disabled={loading || profilesLoading || !myProfileId}
+                className="w-full"
+                subtitle="Share a code with your friends"
+              >
+                {loading ? "Creating…" : "Create Private Room"}
+              </Button>
+            </>
           )}
 
           <div className="flex items-start gap-3 rounded-2xl border border-line bg-surface-2 p-3.5 sm:p-4">

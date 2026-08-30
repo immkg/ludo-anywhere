@@ -5,7 +5,7 @@ import PillButton from "./PillButton";
 import { IconChat } from "./icons";
 import { IconCopy, IconCheck } from "@/components/lobby/icons";
 import { GREEN } from "@/components/nav/navItems";
-import { shareOnWhatsApp } from "@/lib/share";
+import { shareText } from "@/lib/share";
 import { trackShare } from "@/lib/socketActions";
 
 const ACCENT = "var(--color-accent)";
@@ -63,11 +63,11 @@ export default function InviteLinkCard() {
           onClick={() => {
             if (!url) return;
             trackShare("invite_link_shared");
-            shareOnWhatsApp(`Add me as a friend on MyLudo! ${url}`);
+            shareText(`Add me as a friend on MyLudo! ${url}`);
           }}
           disabled={!url}
         >
-          WhatsApp
+          Share
         </PillButton>
       </div>
     </div>

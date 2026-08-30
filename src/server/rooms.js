@@ -397,6 +397,16 @@ export function startGame(room) {
     return { error: "Duplicate players in room" };
   }
 
+  // Seats were spaced out as they joined assuming the room would fill to
+  // maxPlayers (see addSeats/fillWithBots) — a game that actually starts
+  // with fewer seats (e.g. a matchmaking room's host starting early with
+  // 2 of 4) needs to re-space them against the real final headcount now,
+  // so 2 players land on opposite corners instead of wherever a 4-seat
+  // spacing happened to leave them.
+  room.seats.forEach((seat, i) => {
+    seat.armIndex = armForSeatIndex(i, room.seats.length);
+  });
+
   room.status = "playing";
   room.startedAt = new Date();
   room.game = createGame(room.seats.map((s) => ({ id: s.id, armIndex: s.armIndex })));
@@ -410,6 +420,7 @@ export function serializeRoom(room) {
     hostSeatId: room.hostSeatId,
     status: room.status,
     sponsored: room.sponsored,
+    matchmaking: !!room.matchmaking,
     seats: room.seats.map((s) => ({
       id: s.id,
       name: s.name,

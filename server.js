@@ -26,6 +26,7 @@ import {
   guestKeyFor,
   isGuestKey,
 } from "./src/server/rooms.js";
+import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
 import { rollDice, moveToken, pickAutoMoveToken } from "./src/game/engine.js";
 import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
@@ -147,6 +148,51 @@ app.prepare().then(() => {
 
   function logPresenceError(context) {
     return (err) => console.error(`Presence: ${context} failed:`, err);
+  }
+
+  // Charges whoever ends up as host (sponsoring the rest of the room unless
+  // their charge resolved to plain FREE-tier), then locks in the roster and
+  // starts the game — shared by a host's manual game:start click and
+  // matchmaking's auto-start once a room fills. `notify` lets each caller
+  // decide who hears about a failure: the clicking host only (manual start)
+  // vs everyone in the room (nobody "clicked" to explain themselves to).
+  async function attemptGameStart(room, notify) {
+    const charged = await checkGameStart(room);
+    if (!charged.ok) {
+      notify({
+        message: `${charged.name ?? "A player"} can't play right now — free games used up today`,
+        seatId: charged.seatId,
+      });
+      return false;
+    }
+    room.sponsored = charged.sponsored;
+
+    const { error } = startGame(room);
+    if (error) {
+      notify({ message: error });
+      return false;
+    }
+
+    broadcastRoom(room);
+    broadcastGame(room);
+    scheduleBotTurn(room);
+    const startProps = {
+      roomCode: room.code,
+      playerCount: room.seats.length,
+      source: charged.source,
+      sponsored: charged.sponsored,
+    };
+    logEvent("game_started", hostUserId(room), startProps);
+    trackPosthog("game_started", startProps, hostUserId(room));
+
+    // The room is no longer an open lobby, so it's no longer something a
+    // friend could "ask to join" — clear it out of everyone's presence.
+    room.seats.forEach((seat) => {
+      if (!seat.userId) return;
+      clearUserRoom(seat.userId, room.code);
+      broadcastPresence(seat.userId).catch(logPresenceError("game:start presence update"));
+    });
+    return true;
   }
 
   // Wraps a socket handler with an ack callback so any thrown/rejected
@@ -402,6 +448,65 @@ app.prepare().then(() => {
       })
     );
 
+    // Random-opponent matchmaking: one shared pool, always a 4-seat room —
+    // splitting by player count would only slow matching down with a small
+    // user base. Signed-in only (no account to charge/attribute a match
+    // to); guests keep the instant "Play with Bots" flow instead.
+    socket.on(
+      "matchmaking:join",
+      withAck(async ({ seats, deviceId }, ack) => {
+        if (!Array.isArray(seats) || seats.length < 1 || seats.length > MATCHMAKING_SIZE) {
+          return ack?.({ error: "Invalid seat request" });
+        }
+
+        const userId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        if (!userId) return ack?.({ error: "Sign in to find players online" });
+
+        const resolved = await resolveSeatProfiles(seats, userId);
+        if (resolved.error) return ack?.({ error: resolved.error });
+
+        // Everything from here is synchronous (no `await`) so two
+        // concurrent matchmaking:join calls can't both read "no open room"
+        // and each create their own — Node's single-threaded event loop
+        // runs this whole block to completion before the next queued
+        // handler.
+        let room = findOpenMatchRoom(getRoom);
+        let created = false;
+        if (!room) {
+          room = createRoom({ maxPlayers: MATCHMAKING_SIZE });
+          room.matchmaking = true;
+          created = true;
+        }
+        const { error, seats: addedSeats } = addSeats(room, resolved.seats, {
+          socketId: socket.id,
+          deviceId,
+          userId,
+        });
+        if (error) {
+          if (created) deleteRoom(room.code);
+          return ack?.({ error });
+        }
+
+        socket.join(room.code);
+        if (created) markOpen(room.code);
+        if (room.seats.length >= room.maxPlayers) markClosed(room.code);
+
+        ack?.({
+          roomCode: room.code,
+          seats: addedSeats.map((s) => ({ id: s.id, token: s.token, armIndex: s.armIndex, name: s.name })),
+        });
+        broadcastRoom(room);
+        setUserRoom(userId, room.code);
+        broadcastPresence(userId).catch(logPresenceError("matchmaking:join presence update"));
+        logEvent("matchmaking_joined", userId, { roomCode: room.code, seatCount: room.seats.length });
+        trackPosthog("matchmaking_joined", { seatCount: room.seats.length }, userId);
+
+        if (room.seats.length >= room.maxPlayers) {
+          await attemptGameStart(room, (e) => io.to(room.code).emit("error", e));
+        }
+      })
+    );
+
     socket.on(
       "room:join",
       withAck(async ({ roomCode, seats, deviceId, knownTokens }, ack) => {
@@ -504,7 +609,11 @@ app.prepare().then(() => {
           ? room.seats.some((s) => s.userId === reconnectUserId)
           : room.seats.some((s) => !s.userId && s.deviceId === deviceId);
         const preInvited = !!reconnectUserId && room.invitedUserIds.has(reconnectUserId);
-        if (!alreadySeated && !preInvited) {
+        // A matchmaking room has no host curation to begin with (see the
+        // matching canRemove gate in WaitingRoom.tsx) — a stranger opening
+        // its join link is exactly what matchmaking is for, so there's
+        // nobody meaningful to ask.
+        if (!alreadySeated && !preInvited && !room.matchmaking) {
           if (room.seats.length + resolved.seats.length > room.maxPlayers) {
             return ack?.({ error: "Room is full" });
           }
@@ -555,40 +664,7 @@ app.prepare().then(() => {
         return socket.emit("error", { message: "Only the host can start the game" });
       }
 
-      // Charges the host first, then (unless the host's charge is sponsoring
-      // the room) every other distinct account seated — atomically, so a
-      // blocked seat leaves nobody charged for a game that never starts.
-      const charged = await checkGameStart(room);
-      if (!charged.ok) {
-        return socket.emit("error", {
-          message: `${charged.name ?? "A player"} can't play right now — free games used up today`,
-          seatId: charged.seatId,
-        });
-      }
-      room.sponsored = charged.sponsored;
-
-      const { error } = startGame(room);
-      if (error) return socket.emit("error", { message: error });
-
-      broadcastRoom(room);
-      broadcastGame(room);
-      scheduleBotTurn(room);
-      const startProps = {
-        roomCode: room.code,
-        playerCount: room.seats.length,
-        source: charged.source,
-        sponsored: charged.sponsored,
-      };
-      logEvent("game_started", hostUserId(room), startProps);
-      trackPosthog("game_started", startProps, hostUserId(room));
-
-      // The room is no longer an open lobby, so it's no longer something a
-      // friend could "ask to join" — clear it out of everyone's presence.
-      room.seats.forEach((seat) => {
-        if (!seat.userId) return;
-        clearUserRoom(seat.userId, room.code);
-        broadcastPresence(seat.userId).catch(logPresenceError("game:start presence update"));
-      });
+      await attemptGameStart(room, (e) => socket.emit("error", e));
     });
 
     socket.on("game:rollDice", ({ roomCode, seatId, style }) => {
@@ -642,6 +718,19 @@ app.prepare().then(() => {
           alt: typeof reaction.alt === "string" ? reaction.alt.slice(0, 60) : "",
         });
       }
+    });
+
+    // Ephemeral nudges a non-host can send in a matchmaking room — the host
+    // still has to act on it via their own existing Start/Fill-bots
+    // buttons, this is purely a relayed toast, no server-side privileged
+    // action or persisted state.
+    socket.on("room:requestStart", ({ roomCode, fromName } = {}) => {
+      if (typeof roomCode !== "string" || typeof fromName !== "string" || !socket.rooms.has(roomCode)) return;
+      socket.to(roomCode).emit("room:requestStart", { fromName: fromName.slice(0, 20) });
+    });
+    socket.on("room:requestBotFill", ({ roomCode, fromName } = {}) => {
+      if (typeof roomCode !== "string" || typeof fromName !== "string" || !socket.rooms.has(roomCode)) return;
+      socket.to(roomCode).emit("room:requestBotFill", { fromName: fromName.slice(0, 20) });
     });
 
     socket.on(

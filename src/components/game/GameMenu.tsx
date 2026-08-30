@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { endGame as emitEndGame, trackShare } from "@/lib/socketActions";
-import { shareOnWhatsApp, roomJoinUrl } from "@/lib/share";
+import { shareRoomLink, roomJoinUrl } from "@/lib/share";
 import Button from "@/components/ui/Button";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -23,11 +23,21 @@ export default function GameMenu({
   const [confirmingEnd, setConfirmingEnd] = useState(false);
   const [endGameLoading, setEndGameLoading] = useState(false);
   const [endGameError, setEndGameError] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
   const reduceMotion = useReducedMotion();
 
-  const handleInvite = () => {
+  const handleInvite = async () => {
     trackShare("room_shared", { roomCode });
-    shareOnWhatsApp(`Join my Ludo room on MyLudo! ${roomJoinUrl(roomCode)}`);
+    const url = roomJoinUrl(roomCode);
+    const result = await shareRoomLink(`Join my Ludo room on MyLudo! ${url}`, url);
+    if (result === "copied") {
+      setInviteCopied(true);
+      setTimeout(() => {
+        setInviteCopied(false);
+        onClose();
+      }, 1200);
+      return;
+    }
     onClose();
   };
 
@@ -95,7 +105,7 @@ export default function GameMenu({
                 onClick={handleInvite}
                 className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
               >
-                Invite
+                {inviteCopied ? "Link copied!" : "Invite"}
               </button>
               {isHost && (
                 <button
