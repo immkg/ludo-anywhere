@@ -36,7 +36,7 @@ export default function GuestDashboard() {
         >
           <div className="min-w-0">
             <p className="text-base font-extrabold text-accent sm:text-lg">Create Room</p>
-            <p className="mt-1 text-xs text-ink-muted sm:text-sm">Sign in to start a new game</p>
+            <p className="mt-1 text-xs text-ink-muted sm:text-sm">Start a new game now</p>
           </div>
           <div className="flex items-end justify-between gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -60,7 +60,7 @@ export default function GuestDashboard() {
             <p className="text-base font-extrabold sm:text-lg" style={{ color: BLUE }}>
               Join Room
             </p>
-            <p className="mt-1 text-xs text-ink-muted sm:text-sm">Enter a code and play now</p>
+            <p className="mt-1 text-xs text-ink-muted sm:text-sm">Enter code and play</p>
           </div>
           <div className="flex items-end justify-between gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}

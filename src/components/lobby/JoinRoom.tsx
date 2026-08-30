@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { joinRoom, joinRoomAsGuest, requestToJoinRoom, claimSeat, type ClaimableSeat } from "@/lib/socketActions";
-import { saveOwnedSeats, getGuestName, saveGuestName } from "@/lib/identity";
+import { saveOwnedSeats, getGuestName, saveGuestName, randomFunnyName } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { useRoomStore } from "@/store/useRoomStore";
 import { useProfiles } from "@/hooks/useProfiles";
@@ -26,6 +26,7 @@ export default function JoinRoom() {
 
   const [roomCode, setRoomCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
   const [guestName, setGuestName] = useState(() => getGuestName());
+  const [funnyName] = useState(() => randomFunnyName());
   const [loading, setLoading] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,11 +55,7 @@ export default function JoinRoom() {
       setError("Enter the room code");
       return;
     }
-    const trimmedGuestName = guestName.trim();
-    if (!session?.user && !trimmedGuestName) {
-      setError("Enter your name");
-      return;
-    }
+    const trimmedGuestName = guestName.trim() || `Guest ${funnyName}`;
     setLoading(true);
     setError(null);
     try {
@@ -159,17 +156,26 @@ export default function JoinRoom() {
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
-      <Link
-        href={session?.user ? "/" : "/play"}
-        aria-label="Back to home"
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink-muted"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-      </Link>
+      <div className="flex items-center gap-3">
+        <Link
+          href={session?.user ? "/" : "/play"}
+          aria-label="Back to home"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink-muted"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </Link>
+        {!claimable && !waiting && (
+          <div className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/icon-join.png" alt="" aria-hidden className="hidden h-8 w-8 min-[390px]:block" />
+            <h1 className="text-2xl font-extrabold tracking-tight text-ink sm:text-4xl">Join Room</h1>
+          </div>
+        )}
+      </div>
 
-      <div className="mt-6 flex flex-col gap-8 md:mt-10 md:flex-row md:items-center md:gap-14 lg:gap-20">
+      <div className="mt-4 flex flex-col gap-8 md:mt-10 md:flex-row md:items-center md:gap-14 lg:gap-20">
         <div className="flex w-full max-w-md flex-1 flex-col gap-6">
           {claimable ? (
             <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
@@ -211,14 +217,7 @@ export default function JoinRoom() {
           ) : (
             <>
               <div>
-                <div className="flex items-center gap-2.5">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/brand/icon-join.png" alt="" aria-hidden className="hidden h-8 w-8 min-[390px]:block" />
-                  <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Join Room</h1>
-                </div>
-                <p className="mt-1.5 max-w-[34ch] text-sm text-ink-muted sm:text-base">
-                  Enter the room code your host shared, or ask a friend who&rsquo;s already playing.
-                </p>
+                <p className="mt-1.5 text-sm text-ink-muted sm:text-base">Enter a room code, or ask a friend.</p>
               </div>
 
               {friendsPlayingNow.length > 0 && (
@@ -247,7 +246,7 @@ export default function JoinRoom() {
                   </label>
                   <Input
                     id="guest-name"
-                    placeholder="What should we call you?"
+                    placeholder={funnyName}
                     value={guestName}
                     maxLength={20}
                     onChange={(e) => {

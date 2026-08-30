@@ -27,6 +27,50 @@ export function saveGuestName(name: string) {
   localStorage.setItem(GUEST_NAME_KEY, name);
 }
 
+const FUNNY_ADJECTIVES = [
+  "Sneaky",
+  "Dizzy",
+  "Bouncy",
+  "Sleepy",
+  "Grumpy",
+  "Wobbly",
+  "Speedy",
+  "Fluffy",
+  "Mighty",
+  "Silly",
+  "Clever",
+  "Jolly",
+  "Zesty",
+  "Turbo",
+  "Ninja",
+];
+const FUNNY_NOUNS = [
+  "Panda",
+  "Penguin",
+  "Llama",
+  "Tiger",
+  "Koala",
+  "Otter",
+  "Dragon",
+  "Unicorn",
+  "Raccoon",
+  "Walrus",
+  "Falcon",
+  "Hamster",
+  "Yeti",
+  "Pawn",
+];
+
+// A lighthearted placeholder for the guest-name field, and the fallback
+// name (prefixed "Guest " by the caller) if someone doesn't bother typing
+// one — friendlier than a hard "enter your name" error for a flow whose
+// whole point is zero friction.
+export function randomFunnyName(): string {
+  const adjective = FUNNY_ADJECTIVES[Math.floor(Math.random() * FUNNY_ADJECTIVES.length)];
+  const noun = FUNNY_NOUNS[Math.floor(Math.random() * FUNNY_NOUNS.length)];
+  return `${adjective} ${noun}`;
+}
+
 export function saveOwnedSeats(roomCode: string, seats: OwnedSeat[]) {
   if (typeof window === "undefined") return;
   const existing = loadOwnedSeats(roomCode);
