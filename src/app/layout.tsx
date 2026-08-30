@@ -4,6 +4,7 @@ import SocketProvider from "@/components/SocketProvider";
 import AuthProvider from "@/components/AuthProvider";
 import ThemeProvider from "@/components/ThemeProvider";
 import PosthogProvider from "@/components/PosthogProvider";
+import JsonLd from "@/components/seo/JsonLd";
 
 // Runs before hydration so the `.dark` class (and thus every --color-* var)
 // is correct on first paint — an effect in ThemeProvider would flash light
@@ -13,13 +14,14 @@ const NO_FLASH_THEME_SCRIPT = `(function(){try{var s=localStorage.getItem("ludo:
 
 const SITE_URL = "https://www.myludo.life";
 const SITE_NAME = "MyLudo";
+const TITLE = "MyLudo — Play Ludo Online, No App, No Ads";
 const DESCRIPTION =
-  "Play Ludo online with friends and family. Create a room or join one with a code — 2 to 4 players, any mix of devices, no app to install.";
+  "Create a room and play Ludo with 2–4 players across any mix of phones, tablets, and computers. No download, no ads, ever — just a link and a game.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "MyLudo — Play Ludo Online with Friends",
+    default: TITLE,
     template: "%s | MyLudo",
   },
   description: DESCRIPTION,
@@ -29,6 +31,8 @@ export const metadata: Metadata = {
     "play ludo with friends",
     "multiplayer ludo",
     "ludo game online",
+    "ludo without ads",
+    "cross device ludo",
     "online board games",
     "myludo",
   ],
@@ -39,13 +43,13 @@ export const metadata: Metadata = {
     type: "website",
     url: SITE_URL,
     siteName: SITE_NAME,
-    title: "MyLudo — Play Ludo Online with Friends",
+    title: TITLE,
     description: DESCRIPTION,
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    title: "MyLudo — Play Ludo Online with Friends",
+    title: TITLE,
     description: DESCRIPTION,
   },
   robots: {
@@ -54,24 +58,33 @@ export const metadata: Metadata = {
   },
 };
 
+// maximumScale/userScalable previously disabled pinch-zoom site-wide, which
+// fails WCAG 1.4.4 (reflow) for low-vision users — the game canvas has its
+// own controls that don't need it, so there's no reason to block it.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#fbf6ef" },
     { media: "(prefers-color-scheme: dark)", color: "#16130f" },
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME_SCRIPT }} />
+        <JsonLd />
       </head>
-      <body className="min-h-dvh" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <body
+        className="min-h-dvh"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
         <ThemeProvider>
           <PosthogProvider>
             <AuthProvider>
