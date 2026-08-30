@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { getTopPlayers } from "@/lib/leaderboard";
 import GuestNav from "@/components/nav/GuestNav";
 import GuestDashboard from "@/components/home/GuestDashboard";
 
@@ -12,9 +13,11 @@ export default async function PlayPage() {
   const session = await auth();
   if (session?.user) redirect("/");
 
+  const topPlayers = await getTopPlayers(5);
+
   return (
     <GuestNav>
-      <GuestDashboard />
+      <GuestDashboard topPlayers={topPlayers} />
     </GuestNav>
   );
 }

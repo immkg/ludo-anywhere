@@ -5,6 +5,8 @@ import Link from "next/link";
 import posthog from "posthog-js";
 import { IconArrowRight } from "@/components/home/icons";
 import { IconUsers, IconTrophy, IconClock } from "@/components/lobby/icons";
+import TopPlayersList from "@/components/home/TopPlayersList";
+import type { TopPlayer } from "@/lib/leaderboard";
 
 const BLUE = "#1565E8";
 
@@ -12,8 +14,10 @@ const BLUE = "#1565E8";
 // button on the marketing landing page (LandingHero.tsx). No stats/recent
 // rooms (nothing to show without an account); Create still routes to
 // /create, which itself prompts sign-in inline (see CreateRoom.tsx) —
-// Join is fully playable as a guest.
-export default function GuestDashboard() {
+// Join is fully playable as a guest. The leaderboard itself is public (see
+// src/app/leaderboard/page.tsx), so the same Top Players preview
+// HomeDashboard shows makes sense here too.
+export default function GuestDashboard({ topPlayers }: { topPlayers: TopPlayer[] }) {
   useEffect(() => {
     posthog.capture("guest_dashboard_viewed");
   }, []);
@@ -74,6 +78,8 @@ export default function GuestDashboard() {
           </div>
         </Link>
       </div>
+
+      <TopPlayersList players={topPlayers} />
 
       <section className="rounded-2xl border border-line bg-surface p-4 sm:p-5">
         <h2 className="text-sm font-bold text-ink-muted">See more once you sign in</h2>

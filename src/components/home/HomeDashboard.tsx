@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { IconArrowRight } from "@/components/home/icons";
-import { IconUsers, IconTrophy } from "@/components/lobby/icons";
-import { formatLastSeen } from "@/lib/time";
-import { cn } from "@/lib/utils";
+import { IconTrophy } from "@/components/lobby/icons";
+import TopPlayersList from "@/components/home/TopPlayersList";
+import type { TopPlayer } from "@/lib/leaderboard";
 
 // Fixed brand colors used elsewhere already (src/components/brand/Wordmark.tsx,
 // src/game/board.js's colorForArm) — reused here rather than adding new
@@ -11,13 +11,6 @@ import { cn } from "@/lib/utils";
 const BLUE = "#1565E8";
 const GREEN = "#1F9E4C";
 const VIOLET = "#8b5cf6";
-
-export type RecentRoom = {
-  roomCode: string;
-  playerCount: number;
-  maxPlayers: number;
-  endedAt: string; // ISO
-};
 
 export type DashboardStats = {
   gamesPlayed: number;
@@ -28,14 +21,14 @@ export type DashboardStats = {
 
 type HomeDashboardProps = {
   displayName: string;
-  recentRooms: RecentRoom[];
+  topPlayers: TopPlayer[];
   stats: DashboardStats;
 };
 
 // Identity/notifications/credits/account-nav now live in AuthenticatedNav
 // (src/app/page.tsx wraps this component with it) — this is just the
 // page's own dashboard content.
-export default function HomeDashboard({ displayName, recentRooms, stats }: HomeDashboardProps) {
+export default function HomeDashboard({ displayName, topPlayers, stats }: HomeDashboardProps) {
   const hasStats = stats.gamesPlayed > 0 || stats.roomsCreated > 0;
 
   return (
@@ -101,49 +94,7 @@ export default function HomeDashboard({ displayName, recentRooms, stats }: HomeD
             </Link>
           </div>
 
-          <section>
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-ink-muted">Recent Rooms</h2>
-              {recentRooms.length > 0 && (
-                <Link href="/history" className="text-xs font-semibold text-accent underline">
-                  View all
-                </Link>
-              )}
-            </div>
-            {recentRooms.length === 0 ? (
-              <p className="mt-2 rounded-2xl border border-dashed border-line p-3 text-sm text-ink-muted">
-                Play a room and it&rsquo;ll show up here.
-              </p>
-            ) : (
-              <ul className="mt-2 flex flex-col gap-2">
-                {recentRooms.map((room, i) => (
-                  <li
-                    key={`${room.roomCode}-${room.endedAt}`}
-                    className={cn(
-                      "items-center gap-3 rounded-2xl border border-line bg-surface p-3",
-                      // 360px shows 1 room, 390px+ shows 2, md+ shows all 3 —
-                      // display (flex/hidden) is the only thing that varies
-                      // per index, so it's fully replaced rather than mixed
-                      // with a base "flex" that could conflict with "hidden".
-                      i === 0 && "flex",
-                      i === 1 && "hidden min-[390px]:flex",
-                      i >= 2 && "hidden xl:flex"
-                    )}
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-ink-muted">
-                      <IconUsers className="h-4 w-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold">{room.roomCode}</p>
-                      <p className="truncate text-xs text-ink-muted">
-                        {room.playerCount}/{room.maxPlayers} players · {formatLastSeen(room.endedAt)}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <TopPlayersList players={topPlayers} />
         </div>
 
         <div className="flex flex-col gap-5 xl:w-[300px] xl:shrink-0 2xl:w-[360px]">
