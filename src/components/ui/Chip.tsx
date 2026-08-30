@@ -11,13 +11,15 @@ type ChipProps = {
 
 export default function Chip({ icon, label, subtitle, onClick, className }: ChipProps) {
   const Tag = onClick ? "button" : "div";
+  const interactive = Boolean(onClick);
 
   if (subtitle) {
     return (
       <Tag
         onClick={onClick}
         className={cn(
-          "flex flex-col items-center gap-1 rounded-2xl border border-line bg-surface-2 px-2 py-3 text-center",
+          "flex flex-col items-center gap-1 rounded-2xl px-2 py-3 text-center",
+          interactive ? "border border-line bg-surface-2" : "bg-transparent",
           className
         )}
       >
@@ -32,7 +34,8 @@ export default function Chip({ icon, label, subtitle, onClick, className }: Chip
     <Tag
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-sm font-semibold text-ink",
+        "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold text-ink",
+        interactive ? "border border-line bg-surface" : "bg-transparent",
         className
       )}
     >

@@ -282,8 +282,8 @@ export default function CreateRoom() {
             </>
           )}
 
-          <div className="flex items-start gap-3 rounded-2xl border border-line bg-surface-2 p-3.5 sm:p-4">
-            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface">
+          <div className="flex items-start gap-3 p-3.5 sm:p-4">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/brand/icon-device.png" alt="" aria-hidden className="h-5 w-5" />
             </span>
