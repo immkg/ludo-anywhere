@@ -86,9 +86,24 @@ async function grantPayment(payment: Payment) {
     // setup (which event/property shape it expects) hasn't been configured
     // yet; verify against posthog.com/docs/data/revenue-analytics before
     // relying on a built-in revenue dashboard.
+    //
+    // $set is PostHog's special property key for updating the *person*
+    // profile, not just this one event — needed so "current paying
+    // customers" / "breakdown by plan" dashboards can query person state
+    // directly instead of re-deriving it from purchase-event history each
+    // time (a PACK purchase doesn't change plan since it's a one-off, not a
+    // subscription).
     trackPosthog(
       eventType,
-      { purpose: payment.purpose, revenue: payment.amountInr, currency: "INR" },
+      {
+        purpose: payment.purpose,
+        revenue: payment.amountInr,
+        currency: "INR",
+        $set: {
+          is_paying_customer: true,
+          ...(payment.purpose !== "PACK" ? { plan: payment.purpose } : {}),
+        },
+      },
       payment.userId,
     );
   }
