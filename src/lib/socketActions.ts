@@ -4,6 +4,9 @@ import type { OwnedSeat } from "@/types/room";
 import type { Reaction } from "@/components/game/ReactionPicker";
 
 export type SeatRequest = { profileId: string };
+// A signed-out joiner has no verified profile — just a chosen name (see
+// resolveGuestSeats in src/server/profiles.js).
+export type GuestSeatRequest = { name: string };
 export type ClaimableSeat = { id: string; name: string };
 // `pending` means the join needs host approval — see room:join in
 // server.js. `seats` is absent until room:joinApproved arrives later.
@@ -27,17 +30,33 @@ function emitWithAck(event: string, payload: unknown): Promise<Ack> {
   });
 }
 
-export function createRoom(maxPlayers: number, seats: SeatRequest[]) {
+export function createRoom(maxPlayers: number, seats: SeatRequest[] | GuestSeatRequest[]) {
   return emitWithAck("room:create", { maxPlayers, seats, deviceId: getDeviceId() });
 }
 
-export function joinRoom(roomCode: string, seats: SeatRequest[], knownTokens: string[] = []) {
+// A guest host has no account/profile — same "just a chosen name" shape as
+// joinRoomAsGuest (see resolveGuestSeats in src/server/profiles.js). Always
+// exactly one seat; everyone else fills in from the lobby (bots, or a
+// friend who joins the room code) same as a signed-in host.
+export function createRoomAsGuest(maxPlayers: number, name: string) {
+  return createRoom(maxPlayers, [{ name }]);
+}
+
+export function joinRoom(
+  roomCode: string,
+  seats: SeatRequest[] | GuestSeatRequest[],
+  knownTokens: string[] = []
+) {
   return emitWithAck("room:join", {
     roomCode: roomCode.toUpperCase(),
     seats,
     knownTokens,
     deviceId: getDeviceId(),
   });
+}
+
+export function joinRoomAsGuest(roomCode: string, name: string, knownTokens: string[] = []) {
+  return joinRoom(roomCode, [{ name }], knownTokens);
 }
 
 export function startGame(roomCode: string, seatId: string) {
@@ -59,31 +78,39 @@ export function leaveRoom(roomCode: string) {
   getSocket().emit("room:leave", { roomCode });
 }
 
-export function removeSeat(roomCode: string, seatId: string) {
-  return emitWithAck("room:removeSeat", { roomCode, seatId });
+// `callerSeatId` (the caller's own seat) is only consulted server-side when
+// there's no cookie session — a guest has no account to check host-ness or
+// "is this my own seat" against, so it proves both the same way fillBots
+// proves host-ness: by seatId, not a cookie.
+export function removeSeat(roomCode: string, seatId: string, callerSeatId?: string) {
+  return emitWithAck("room:removeSeat", { roomCode, seatId, callerSeatId });
 }
 
 // Host-only, lobby-only: fills every remaining open seat with a bot (see
 // room:fillBots in server.js) — no seats to hand back, room:update carries
-// the new roster same as any other join.
-export function fillBotSeats(roomCode: string) {
-  return emitWithAck("room:fillBots", { roomCode });
+// the new roster same as any other join. Host-ness is proven by seatId
+// (same as game:start), not a cookie — a guest host has no account to
+// check against.
+export function fillBotSeats(roomCode: string, hostSeatId: string) {
+  return emitWithAck("room:fillBots", { roomCode, seatId: hostSeatId });
 }
 
-export function suspendSeat(roomCode: string, seatId: string) {
-  return emitWithAck("room:suspendSeat", { roomCode, seatId });
+// Host-only — seatId is the caller's OWN (host) seat, same proof fillBots
+// uses; a guest host has no account for a cookie-based check.
+export function suspendSeat(roomCode: string, seatId: string, hostSeatId: string) {
+  return emitWithAck("room:suspendSeat", { roomCode, seatId, callerSeatId: hostSeatId });
 }
 
-export function resumeSeat(roomCode: string, seatId: string) {
-  return emitWithAck("room:resumeSeat", { roomCode, seatId });
+export function resumeSeat(roomCode: string, seatId: string, hostSeatId: string) {
+  return emitWithAck("room:resumeSeat", { roomCode, seatId, callerSeatId: hostSeatId });
 }
 
-export function transferHost(roomCode: string, toSeatId: string) {
-  return emitWithAck("room:transferHost", { roomCode, toSeatId });
+export function transferHost(roomCode: string, toSeatId: string, hostSeatId: string) {
+  return emitWithAck("room:transferHost", { roomCode, toSeatId, callerSeatId: hostSeatId });
 }
 
-export function endGame(roomCode: string) {
-  return emitWithAck("room:endGame", { roomCode });
+export function endGame(roomCode: string, hostSeatId: string) {
+  return emitWithAck("room:endGame", { roomCode, seatId: hostSeatId });
 }
 
 export function claimSeat(roomCode: string, seatId: string, profileId: string) {
@@ -93,8 +120,8 @@ export function claimSeat(roomCode: string, seatId: string, profileId: string) {
 // Resolves to the new room's code once it's actually started — the seats
 // themselves arrive separately via the room:rematchReady push (see
 // useSocketConnection), same as an approved join.
-export function rematch(roomCode: string) {
-  return emitWithAck("room:rematch", { roomCode });
+export function rematch(roomCode: string, hostSeatId: string) {
+  return emitWithAck("room:rematch", { roomCode, seatId: hostSeatId });
 }
 
 export function inviteFriendToRoom(roomCode: string, friendUserId: string) {

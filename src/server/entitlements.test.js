@@ -252,4 +252,31 @@ describe("checkGameStart", () => {
     expect(prisma._state.usageEvents).toHaveLength(2);
     expect(prisma._state.usageEvents.every((e) => e.userId === "joiner")).toBe(true);
   });
+
+  it("charges nobody when the host is a guest (no account) and bots fill the rest", async () => {
+    const prisma = createFakePrisma();
+    const guestRoom = room({
+      seats: [
+        { id: "seat-host", userId: null, name: "Guest" },
+        { id: "seat-bot", userId: null, name: "Bot 1", bot: true },
+      ],
+    });
+    const result = await checkGameStart(guestRoom, prisma);
+    expect(result).toEqual({ ok: true, sponsored: false, source: "FREE" });
+    expect(prisma._state.usageEvents).toHaveLength(0);
+  });
+
+  it("still charges a signed-in joiner who joined a guest-hosted room", async () => {
+    const prisma = createFakePrisma();
+    const guestRoom = room({
+      seats: [
+        { id: "seat-host", userId: null, name: "Guest" },
+        { id: "seat-joiner", userId: "joiner", name: "Joiner" },
+      ],
+    });
+    const result = await checkGameStart(guestRoom, prisma);
+    expect(result).toEqual({ ok: true, sponsored: false, source: "FREE" });
+    expect(prisma._state.usageEvents).toHaveLength(1);
+    expect(prisma._state.usageEvents[0]).toMatchObject({ userId: "joiner", role: "JOINER" });
+  });
 });

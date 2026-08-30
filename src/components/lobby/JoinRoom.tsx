@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { joinRoom, requestToJoinRoom, claimSeat, type ClaimableSeat } from "@/lib/socketActions";
-import { saveOwnedSeats } from "@/lib/identity";
+import { joinRoom, joinRoomAsGuest, requestToJoinRoom, claimSeat, type ClaimableSeat } from "@/lib/socketActions";
+import { saveOwnedSeats, getGuestName, saveGuestName } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { useRoomStore } from "@/store/useRoomStore";
 import { useProfiles } from "@/hooks/useProfiles";
@@ -25,6 +25,7 @@ export default function JoinRoom() {
   const { profiles, loading: profilesLoading, createProfile } = useProfiles();
 
   const [roomCode, setRoomCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
+  const [guestName, setGuestName] = useState(() => getGuestName());
   const [loading, setLoading] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,11 +54,22 @@ export default function JoinRoom() {
       setError("Enter the room code");
       return;
     }
+    const trimmedGuestName = guestName.trim();
+    if (!session?.user && !trimmedGuestName) {
+      setError("Enter your name");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const profileId = await resolveMyProfileId();
-      const res = await joinRoom(code, [{ profileId }]);
+      let res;
+      if (session?.user) {
+        const profileId = await resolveMyProfileId();
+        res = await joinRoom(code, [{ profileId }]);
+      } else {
+        saveGuestName(trimmedGuestName);
+        res = await joinRoomAsGuest(code, trimmedGuestName);
+      }
       // A brand-new account's join needs host approval — see room:join in
       // server.js. The eventual result arrives later via the same
       // room:joinApproved/room:joinRequest:declined listeners below that
@@ -148,7 +160,7 @@ export default function JoinRoom() {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
       <Link
-        href="/"
+        href={session?.user ? "/" : "/play"}
         aria-label="Back to home"
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink-muted"
       >
@@ -199,9 +211,11 @@ export default function JoinRoom() {
           ) : (
             <>
               <div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/brand/icon-join.png" alt="" aria-hidden className="hidden h-8 w-8 min-[390px]:block" />
-                <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Join Room</h1>
+                <div className="flex items-center gap-2.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/brand/icon-join.png" alt="" aria-hidden className="hidden h-8 w-8 min-[390px]:block" />
+                  <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Join Room</h1>
+                </div>
                 <p className="mt-1.5 max-w-[34ch] text-sm text-ink-muted sm:text-base">
                   Enter the room code your host shared, or ask a friend who&rsquo;s already playing.
                 </p>
@@ -223,6 +237,24 @@ export default function JoinRoom() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {!session?.user && (
+                <div className="flex flex-col gap-3 rounded-3xl border-2 border-line bg-surface p-4 sm:p-5">
+                  <label htmlFor="guest-name" className="text-sm font-semibold text-ink-muted">
+                    Your name
+                  </label>
+                  <Input
+                    id="guest-name"
+                    placeholder="What should we call you?"
+                    value={guestName}
+                    maxLength={20}
+                    onChange={(e) => {
+                      setGuestName(e.target.value);
+                      setError(null);
+                    }}
+                  />
                 </div>
               )}
 

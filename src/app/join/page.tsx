@@ -1,10 +1,10 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { Suspense } from "react";
 import JoinRoom from "@/components/lobby/JoinRoom";
 
-export default async function JoinPage() {
-  const session = await auth();
-  if (!session?.user) redirect("/");
-
-  return <JoinRoom />;
+export default function JoinPage() {
+  return (
+    <Suspense>
+      <JoinRoom />
+    </Suspense>
+  );
 }

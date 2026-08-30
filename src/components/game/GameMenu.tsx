@@ -12,10 +12,12 @@ import ThemeToggle from "@/components/ThemeToggle";
 export default function GameMenu({
   roomCode,
   isHost,
+  hostSeatId,
   onClose,
 }: {
   roomCode: string;
   isHost: boolean;
+  hostSeatId: string | null;
   onClose: () => void;
 }) {
   const [confirmingEnd, setConfirmingEnd] = useState(false);
@@ -33,7 +35,7 @@ export default function GameMenu({
     setEndGameLoading(true);
     setEndGameError(null);
     try {
-      await emitEndGame(roomCode);
+      await emitEndGame(roomCode, hostSeatId!);
       onClose();
     } catch (e) {
       setEndGameError(e instanceof Error ? e.message : "Could not end the game");

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
+import posthog from "posthog-js";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import AppIconMark from "@/components/brand/AppIconMark";
@@ -107,6 +108,20 @@ export default function LandingHero() {
           </div>
 
           <div className="flex w-full flex-col items-center gap-3 md:items-start">
+            <Button
+              className="w-full"
+              onClick={() => {
+                posthog.capture("play_now_clicked");
+                router.push("/play");
+              }}
+            >
+              <span className="flex w-full items-center justify-center gap-2 md:justify-start">
+                Play Now
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </span>
+            </Button>
             <Button
               variant="secondary"
               className="w-full"

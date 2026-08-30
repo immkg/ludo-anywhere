@@ -1,6 +1,7 @@
 import type { OwnedSeat } from "@/types/room";
 
 const DEVICE_ID_KEY = "ludo:deviceId";
+const GUEST_NAME_KEY = "ludo:guestName";
 const seatsKey = (roomCode: string) => `ludo:seats:${roomCode.toUpperCase()}`;
 
 export function getDeviceId(): string {
@@ -11,6 +12,19 @@ export function getDeviceId(): string {
     localStorage.setItem(DEVICE_ID_KEY, id);
   }
   return id;
+}
+
+// A guest's chosen display name, remembered per-device so it doesn't need
+// retyping on the next room they join (see server.js's room:join, which
+// identifies a signed-out joiner by deviceId rather than a real account).
+export function getGuestName(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(GUEST_NAME_KEY) ?? "";
+}
+
+export function saveGuestName(name: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GUEST_NAME_KEY, name);
 }
 
 export function saveOwnedSeats(roomCode: string, seats: OwnedSeat[]) {

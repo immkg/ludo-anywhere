@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/useGameStore";
@@ -42,6 +43,7 @@ const REACTION_DISPLAY_MS = 1600;
 
 export default function GameView({ room }: { room: Room }) {
   const router = useRouter();
+  const { data: session } = useSession();
   const { game, currentSeat, isMyTurn, validMoves } = useGame();
   const setGame = useGameStore((s) => s.setGame);
   const mySeats = useRoomStore((s) => s.mySeats);
@@ -185,7 +187,7 @@ export default function GameView({ room }: { room: Room }) {
       // The new room's seats arrive via the room:rematchReady push (see
       // useSocketConnection), which navigates everyone in automatically —
       // this call itself doesn't need to do anything with its result.
-      await rematch(room.code);
+      await rematch(room.code, room.hostSeatId!);
     } catch (e) {
       setRematchError(e instanceof Error ? e.message : "Could not start a rematch");
       setRematchLoading(false);
@@ -261,7 +263,7 @@ export default function GameView({ room }: { room: Room }) {
             {rematchLoading ? "Starting…" : "Play again with same players"}
           </Button>
         )}
-        <Button variant="secondary" onClick={() => router.push("/")}>
+        <Button variant="secondary" onClick={() => router.push(session?.user ? "/" : "/play")}>
           Back home
         </Button>
       </motion.div>
@@ -307,7 +309,14 @@ export default function GameView({ room }: { room: Room }) {
           onClose={() => setSelectedSeatId(null)}
         />
       )}
-      {gameMenuOpen && <GameMenu roomCode={room.code} isHost={isHost} onClose={() => setGameMenuOpen(false)} />}
+      {gameMenuOpen && (
+        <GameMenu
+          roomCode={room.code}
+          isHost={isHost}
+          hostSeatId={room.hostSeatId}
+          onClose={() => setGameMenuOpen(false)}
+        />
+      )}
 
       {/* The game bar and dice bar stay pinned to the viewport's top/bottom
           edges (root scrolls instead of clipping, so sticky has a scroll
@@ -462,7 +471,7 @@ function PlayerActionsModal({
     setEndGameLoading(true);
     setEndGameError(null);
     try {
-      await emitEndGame(room.code);
+      await emitEndGame(room.code, room.hostSeatId!);
       onClose();
     } catch (e) {
       setEndGameError(e instanceof Error ? e.message : "Could not end the game");
@@ -517,14 +526,14 @@ function PlayerActionsModal({
             {!won && !removed && (
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => (suspended ? resumeSeat : suspendSeat)(room.code, seatId).catch(() => {})}
+                  onClick={() => (suspended ? resumeSeat : suspendSeat)(room.code, seatId, room.hostSeatId!).catch(() => {})}
                   className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
                 >
                   {suspended ? "Resume" : "Pause"}
                 </button>
                 <button
                   onClick={() => {
-                    removeSeat(room.code, seatId).catch(() => {});
+                    removeSeat(room.code, seatId, room.hostSeatId!).catch(() => {});
                     onClose();
                   }}
                   className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
@@ -533,7 +542,7 @@ function PlayerActionsModal({
                 </button>
                 {seat.connected && !suspended && (
                   <button
-                    onClick={() => transferHost(room.code, seatId).catch(() => {})}
+                    onClick={() => transferHost(room.code, seatId, room.hostSeatId!).catch(() => {})}
                     className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-ink-muted"
                   >
                     Make host

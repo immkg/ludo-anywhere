@@ -12,7 +12,11 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const VARIANT_CLASSES: Record<Variant, string> = {
-  primary: "bg-accent text-white shadow-lg shadow-accent/30 active:scale-[0.98]",
+  // Glossy top highlight (inset) + a dark bottom edge for a raised, 3D
+  // "physical button" feel, plus a two-layer colored glow (tight + wide)
+  // so it visibly stands out as the one thing on the page to press.
+  primary:
+    "bg-accent text-white active:scale-[0.98] shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_2px_0_rgba(0,0,0,0.18),0_6px_16px_-2px_var(--color-accent),0_14px_36px_-10px_var(--color-accent)]",
   secondary: "bg-surface-2 text-ink border border-line active:scale-[0.98]",
   ghost: "bg-transparent text-ink-muted hover:text-ink",
 };

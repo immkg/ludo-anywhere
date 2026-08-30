@@ -13,6 +13,19 @@ const DISCONNECT_GRACE_MS = 2 * 60 * 1000;
 
 const rooms = new Map();
 
+// A guest (no signed-in account) is identified by device rather than by a
+// real User id — this synthetic key stands in for `userId` anywhere a
+// pending join request or presence-channel needs a unique per-joiner string
+// (see room:join/room:joinRequest:approve in server.js). Never written to
+// a seat's actual `userId` field — see isGuestKey below.
+export function guestKeyFor(deviceId) {
+  return `guest:${deviceId}`;
+}
+
+export function isGuestKey(key) {
+  return typeof key === "string" && key.startsWith("guest:");
+}
+
 function randomRoomCode() {
   let code = "";
   for (let i = 0; i < 5; i++) {

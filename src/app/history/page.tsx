@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getPendingRequestCount, getDisplayName } from "@/lib/nav-data";
 import AuthenticatedNav from "@/components/nav/AuthenticatedNav";
+import GuestNav from "@/components/nav/GuestNav";
+import SignInTeaser from "@/components/nav/SignInTeaser";
 import Button from "@/components/ui/Button";
 import HistoryFilterBar from "@/components/history/HistoryFilterBar";
 import { RANGE_OPTIONS } from "@/components/history/historyFilterOptions";
@@ -44,12 +46,21 @@ export default async function HistoryPage({
 
   if (!session?.user) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-sm flex-col items-center justify-center gap-4 px-6 py-10 text-center">
-        <p className="text-ink-muted">Sign in with Google on the home page to see your game history.</p>
-        <Link href="/">
-          <Button variant="secondary">Back home</Button>
-        </Link>
-      </main>
+      <GuestNav>
+        <main className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-6 px-4 pb-10 pt-6 sm:gap-7 sm:px-6 sm:pt-8 lg:px-10 lg:pt-10">
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">Game History</h1>
+            <p className="mt-1 text-sm text-ink-muted sm:text-base">
+              Games played by you and the players on your devices.
+            </p>
+          </div>
+          <SignInTeaser
+            title="Keep a record of every game"
+            subtitle="Sign in to see your past games, results, and placements."
+            source="history"
+          />
+        </main>
+      </GuestNav>
     );
   }
 

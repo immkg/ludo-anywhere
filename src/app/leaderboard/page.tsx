@@ -1,8 +1,8 @@
-import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getPendingRequestCount, getDisplayName } from "@/lib/nav-data";
 import AuthenticatedNav from "@/components/nav/AuthenticatedNav";
+import GuestNav from "@/components/nav/GuestNav";
 import LeaderboardFilterBar from "@/components/leaderboard/LeaderboardFilterBar";
 import LeaderboardRows, { type LeaderboardPlayer } from "@/components/leaderboard/LeaderboardRows";
 import ScoringInfoPanel from "@/components/leaderboard/ScoringInfoPanel";
@@ -37,17 +37,21 @@ export default async function LeaderboardPage({
   searchParams: Promise<{ range?: string; scope?: string }>;
 }) {
   const session = await auth();
-  if (!session?.user) redirect("/");
 
   const { range: rawRange, scope: rawScope } = await searchParams;
   const range = RANGE_OPTIONS.some((o) => o.value === rawRange) ? rawRange! : "all";
-  const scope = SCOPE_OPTIONS.some((o) => o.value === rawScope) ? rawScope! : "all";
+  // "My players" needs an account to know which profiles are yours — a
+  // guest always sees the global board, same as the leaderboard data itself
+  // (it's public, unlike friends/history/profiles).
+  const scope = session?.user && SCOPE_OPTIONS.some((o) => o.value === rawScope) ? rawScope! : "all";
   const rangeStart = rangeStartFor(range);
 
-  const myEmail = session.user.email?.toLowerCase() ?? null;
+  const myEmail = session?.user?.email?.toLowerCase() ?? null;
 
   const [myLinks, players, pendingRequestCount] = await Promise.all([
-    prisma.userProfile.findMany({ where: { userId: session.user.id }, select: { profileId: true } }),
+    session?.user
+      ? prisma.userProfile.findMany({ where: { userId: session.user.id }, select: { profileId: true } })
+      : Promise.resolve([]),
     prisma.gamePlayer.findMany({
       where: {
         profileId: { not: null },
@@ -55,7 +59,7 @@ export default async function LeaderboardPage({
       },
       include: { profile: true, game: true },
     }),
-    getPendingRequestCount(session.user.id),
+    session?.user ? getPendingRequestCount(session.user.id) : Promise.resolve(0),
   ]);
 
   const myProfileIds = new Set(myLinks.map((l) => l.profileId));
@@ -91,13 +95,40 @@ export default async function LeaderboardPage({
         rank: i + 1,
         name: row.name,
         email: row.email,
-        image: isMe ? session.user.image ?? null : null,
+        image: isMe ? session?.user?.image ?? null : null,
         wins: row.wins,
         losses: row.losses,
         points: row.points,
         isMe,
       };
     });
+
+  const content = (
+    <main className="mx-auto flex min-h-dvh max-w-4xl flex-col gap-6 px-4 pb-10 pt-6 sm:gap-7 sm:px-6 sm:pt-8 lg:px-10 lg:pt-10">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">Leaderboard</h1>
+          <p className="mt-1 text-sm text-ink-muted sm:text-base">Top players ranked by total points.</p>
+        </div>
+        <LeaderboardFilterBar range={range} scope={scope} showScopeFilter={!!session?.user} />
+      </div>
+
+      <ScoringInfoPanel />
+
+      {ranked.length === 0 ? (
+        <div className="rounded-2xl border border-line bg-surface p-6 text-center">
+          <p className="font-semibold text-ink">Nobody on the leaderboard yet.</p>
+          <p className="mt-1 text-sm text-ink-muted">Play some games to start climbing.</p>
+        </div>
+      ) : (
+        <LeaderboardRows players={ranked} />
+      )}
+    </main>
+  );
+
+  if (!session?.user) {
+    return <GuestNav>{content}</GuestNav>;
+  }
 
   return (
     <AuthenticatedNav
@@ -106,26 +137,7 @@ export default async function LeaderboardPage({
       userImage={session.user.image ?? null}
       pendingRequestCount={pendingRequestCount}
     >
-      <main className="mx-auto flex min-h-dvh max-w-4xl flex-col gap-6 px-4 pb-10 pt-6 sm:gap-7 sm:px-6 sm:pt-8 lg:px-10 lg:pt-10">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">Leaderboard</h1>
-            <p className="mt-1 text-sm text-ink-muted sm:text-base">Top players ranked by total points.</p>
-          </div>
-          <LeaderboardFilterBar range={range} scope={scope} />
-        </div>
-
-        <ScoringInfoPanel />
-
-        {ranked.length === 0 ? (
-          <div className="rounded-2xl border border-line bg-surface p-6 text-center">
-            <p className="font-semibold text-ink">Nobody on the leaderboard yet.</p>
-            <p className="mt-1 text-sm text-ink-muted">Play some games to start climbing.</p>
-          </div>
-        ) : (
-          <LeaderboardRows players={ranked} />
-        )}
-      </main>
+      {content}
     </AuthenticatedNav>
   );
 }

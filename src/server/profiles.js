@@ -29,3 +29,16 @@ export async function resolveSeatProfiles(seatRequests, userId) {
   }
   return { seats };
 }
+
+// A guest (no signed-in account) joins with just a chosen display name —
+// there's no PlayerProfile to verify against, so this never touches the DB.
+// Always exactly one seat: a guest joining a room is always "just me", same
+// as the signed-in join flow (see JoinRoom.tsx).
+export function resolveGuestSeats(seatRequests) {
+  if (!Array.isArray(seatRequests) || seatRequests.length !== 1) {
+    return { error: "Invalid seat request" };
+  }
+  const name = seatRequests[0]?.name?.trim();
+  if (!name) return { error: "Enter your name" };
+  return { seats: [{ name: name.slice(0, 20), profileId: null }] };
+}

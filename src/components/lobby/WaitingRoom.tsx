@@ -72,9 +72,10 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
   const hostName = room.seats.find((s) => s.id === room.hostSeatId)?.name;
 
   const handleFillBots = async () => {
+    if (!room.hostSeatId) return;
     setFillingBots(true);
     try {
-      await fillBotSeats(room.code);
+      await fillBotSeats(room.code, room.hostSeatId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add bots");
     } finally {
@@ -101,7 +102,7 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
     leaveRoom(room.code);
     clearOwnedSeats(room.code);
     resetRoomStore();
-    router.push("/");
+    router.push(session?.user ? "/" : "/play");
   };
 
   return (
@@ -276,7 +277,13 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                       isMine={mine}
                       isHostSeat={seat.id === room.hostSeatId}
                       canRemove={canRemove}
-                      onRemove={() => removeSeat(room.code, seat.id).catch(() => {})}
+                      onRemove={() =>
+                        removeSeat(
+                          room.code,
+                          seat.id,
+                          mySeats.find((s) => s.id === room.hostSeatId)?.id ?? mySeats[0]?.id
+                        ).catch(() => {})
+                      }
                     />
                   );
                 })}

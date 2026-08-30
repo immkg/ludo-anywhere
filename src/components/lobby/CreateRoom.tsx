@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
-import { createRoom } from "@/lib/socketActions";
-import { saveOwnedSeats } from "@/lib/identity";
+import { useSession, signIn } from "next-auth/react";
+import { createRoom, createRoomAsGuest, fillBotSeats, startGame } from "@/lib/socketActions";
+import { saveOwnedSeats, getGuestName, saveGuestName } from "@/lib/identity";
 import { useRoomStore } from "@/store/useRoomStore";
 import { useProfiles } from "@/hooks/useProfiles";
 import Button from "@/components/ui/Button";
+import Input from "@/components/ui/Input";
 import { cn } from "@/lib/utils";
 import type { EntitlementStatus } from "@/types/billing";
 
@@ -24,13 +25,15 @@ export default function CreateRoom() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [billing, setBilling] = useState<EntitlementStatus | null>(null);
+  const [guestName, setGuestName] = useState(() => getGuestName());
 
   useEffect(() => {
+    if (!session?.user) return;
     fetch("/api/billing/status")
       .then((res) => res.json())
       .then(setBilling)
       .catch(() => {});
-  }, []);
+  }, [session?.user]);
 
   // Only a hard signal (no free slot, no credit, no active plan) blocks the
   // button — this is a pre-check, the real charge happens server-side at
@@ -63,10 +66,39 @@ export default function CreateRoom() {
     }
   };
 
+  // Zero-friction guest path: no account, no friends to invite yet — just
+  // start a game right now with bots filling every seat but this one. The
+  // room/host mechanics underneath are identical to a signed-in host's
+  // (see room:create/checkGameStart's guest-host handling in
+  // server.js/entitlements.js); a guest is just never charged for it.
+  const handlePlayWithBots = async () => {
+    const trimmedGuestName = guestName.trim();
+    if (!trimmedGuestName) {
+      setError("Enter your name");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      saveGuestName(trimmedGuestName);
+      const res = await createRoomAsGuest(totalPlayers, trimmedGuestName);
+      if (!res.roomCode || !res.seats?.[0]) throw new Error("Could not create room");
+      saveOwnedSeats(res.roomCode, res.seats);
+      addMySeats(res.seats);
+      const hostSeatId = res.seats[0].id;
+      if (totalPlayers > 1) await fillBotSeats(res.roomCode, hostSeatId);
+      startGame(res.roomCode, hostSeatId);
+      router.push(`/room/${res.roomCode}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start game");
+      setLoading(false);
+    }
+  };
+
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
       <Link
-        href="/"
+        href={session?.user ? "/" : "/play"}
         aria-label="Back to home"
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink-muted"
       >
@@ -78,14 +110,16 @@ export default function CreateRoom() {
       <div className="mt-6 flex flex-col gap-8 md:mt-10 md:flex-row md:items-center md:gap-14 lg:gap-20">
         <div className="flex w-full max-w-md flex-1 flex-col gap-6">
           <div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/brand/icon-confetti.png"
-              alt=""
-              aria-hidden
-              className="hidden h-8 w-8 min-[390px]:block"
-            />
-            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Create Room</h1>
+            <div className="flex items-center gap-2.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/icon-confetti.png"
+                alt=""
+                aria-hidden
+                className="hidden h-8 w-8 min-[390px]:block"
+              />
+              <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Create Room</h1>
+            </div>
             <p className="mt-1.5 max-w-[34ch] text-sm text-ink-muted sm:text-base">
               Choose how many players will play. You can invite everyone else from the lobby.
             </p>
@@ -152,7 +186,7 @@ export default function CreateRoom() {
             </div>
           </div>
 
-          {billing && !blocked && (
+          {session?.user && billing && !blocked && (
             <p className="text-xs text-ink-muted">
               {billing.entitlement
                 ? "Unlimited games"
@@ -164,7 +198,44 @@ export default function CreateRoom() {
 
           {error && <p className="text-sm text-accent">{error}</p>}
 
-          {blocked ? (
+          {!session?.user ? (
+            <>
+              <div className="flex flex-col gap-3 rounded-3xl border-2 border-line bg-surface p-4 sm:p-5">
+                <label htmlFor="guest-name" className="text-sm font-semibold text-ink-muted">
+                  Your name
+                </label>
+                <Input
+                  id="guest-name"
+                  placeholder="What should we call you?"
+                  value={guestName}
+                  maxLength={20}
+                  onChange={(e) => {
+                    setGuestName(e.target.value);
+                    setError(null);
+                  }}
+                />
+              </div>
+
+              {/* Primary: the one thing a guest can do with zero friction —
+                  play right now, nobody else to invite yet. */}
+              <Button onClick={handlePlayWithBots} disabled={loading} className="w-full" subtitle="Instant — no sign-in needed">
+                {loading ? "Starting…" : "Play Free with Bots"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => signIn("google", { callbackUrl: "/create" })}
+                disabled={loading}
+                className="w-full"
+                icon={
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src="/brand/icon-google.png" alt="" className="h-full w-full" />
+                }
+                subtitle="Save your players & invite them by name"
+              >
+                Login to Play with Friends
+              </Button>
+            </>
+          ) : blocked ? (
             <div className="flex flex-col gap-2 rounded-2xl border border-accent bg-surface p-4 text-center">
               <p className="text-sm">You&rsquo;ve used today&rsquo;s free games.</p>
               <Link href="/pricing">

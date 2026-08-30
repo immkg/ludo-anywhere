@@ -172,23 +172,31 @@ export async function getEntitlementStatus(userId, prisma = getPrisma()) {
 // host — or an earlier-charged joiner — spent on a game that never starts.
 export async function checkGameStart(room, prisma = getPrisma()) {
   const hostSeat = room.seats.find((s) => s.id === room.hostSeatId);
-  const hostUserId = hostSeat?.userId;
-  if (!hostUserId) return { ok: false, reason: "No host" };
+  if (!hostSeat) return { ok: false, reason: "No host" };
+  const hostUserId = hostSeat.userId;
 
   const playerCount = room.seats.length;
 
   try {
     return await prisma.$transaction(async (tx) => {
-      const hostDecision = await resolveCharge(hostUserId, playerCount, tx);
-      if (!hostDecision.allowed) {
-        throw new ChargeBlockedError(hostSeat.id, hostSeat.name, hostDecision.reason);
+      // A guest host (no account) has nothing to charge or meter — same
+      // free-for-guests posture room:join's pre-flight check already
+      // documents for a guest joiner. Skip straight to charging whichever
+      // OTHER seats are real accounts (e.g. a signed-in friend who joined
+      // the guest's room); a room of just a guest host + bots charges
+      // nobody at all.
+      if (hostUserId) {
+        const hostDecision = await resolveCharge(hostUserId, playerCount, tx);
+        if (!hostDecision.allowed) {
+          throw new ChargeBlockedError(hostSeat.id, hostSeat.name, hostDecision.reason);
+        }
+        await writeCharge(tx, hostDecision, { userId: hostUserId, roomCode: room.code, role: "HOST", playerCount });
+        if (hostDecision.source !== "FREE") {
+          return { ok: true, sponsored: true, source: hostDecision.source };
+        }
       }
-      await writeCharge(tx, hostDecision, { userId: hostUserId, roomCode: room.code, role: "HOST", playerCount });
 
-      const sponsored = hostDecision.source !== "FREE";
-      if (sponsored) return { ok: true, sponsored: true, source: hostDecision.source };
-
-      const chargedUserIds = new Set([hostUserId]);
+      const chargedUserIds = new Set(hostUserId ? [hostUserId] : []);
       for (const seat of room.seats) {
         if (!seat.userId || chargedUserIds.has(seat.userId)) continue;
         chargedUserIds.add(seat.userId);

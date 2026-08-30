@@ -14,7 +14,15 @@ function CalendarIcon() {
   );
 }
 
-export default function LeaderboardFilterBar({ range, scope }: { range: string; scope: string }) {
+export default function LeaderboardFilterBar({
+  range,
+  scope,
+  showScopeFilter = true,
+}: {
+  range: string;
+  scope: string;
+  showScopeFilter?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -36,13 +44,15 @@ export default function LeaderboardFilterBar({ range, scope }: { range: string; 
         options={RANGE_OPTIONS}
         onChange={(v) => update("range", v)}
       />
-      <FilterDropdown
-        ariaLabel="Filter by player scope"
-        icon={<IconPerson className="h-4 w-4 text-ink-muted" />}
-        value={scope}
-        options={SCOPE_OPTIONS}
-        onChange={(v) => update("scope", v)}
-      />
+      {showScopeFilter && (
+        <FilterDropdown
+          ariaLabel="Filter by player scope"
+          icon={<IconPerson className="h-4 w-4 text-ink-muted" />}
+          value={scope}
+          options={SCOPE_OPTIONS}
+          onChange={(v) => update("scope", v)}
+        />
+      )}
     </div>
   );
 }
