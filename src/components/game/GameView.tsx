@@ -16,9 +16,11 @@ import {
   removeSeat,
   transferHost,
   endGame as emitEndGame,
+  leaveRoom,
   rematch,
   sendReaction,
 } from "@/lib/socketActions";
+import { clearOwnedSeats } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { colorForArm } from "@/game/board";
 import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor } from "@/game/engine";
@@ -47,6 +49,7 @@ export default function GameView({ room }: { room: Room }) {
   const { game, currentSeat, isMyTurn, validMoves } = useGame();
   const setGame = useGameStore((s) => s.setGame);
   const mySeats = useRoomStore((s) => s.mySeats);
+  const resetRoomStore = useRoomStore((s) => s.reset);
   const isHost = !!room.hostSeatId && mySeats.some((s) => s.id === room.hostSeatId);
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
@@ -110,10 +113,10 @@ export default function GameView({ room }: { room: Room }) {
       const clusterTop = areaRect.top + (areaRect.height - clusterHeight) / 2;
       const boardTop = clusterTop + topRowHeight;
       const boardLeft = areaRect.left + (areaRect.width - size) / 2;
-      const diceRect = diceEl.getBoundingClientRect();
       // An 80%-of-the-board square, centered, so a throw never lands flush
       // against the edge.
       const safeSize = size * 0.8;
+      const diceRect = diceEl.getBoundingClientRect();
       setDiceGeometry({
         restPoint: { x: diceRect.left + diceRect.width / 2, y: diceRect.top + diceRect.height / 2 },
         safeRegion: {
@@ -192,6 +195,19 @@ export default function GameView({ room }: { room: Room }) {
       setRematchError(e instanceof Error ? e.message : "Could not start a rematch");
       setRematchLoading(false);
     }
+  };
+
+  // Bar shortcuts for the two things everyone eventually wants mid-game —
+  // one click + a confirm, instead of burying them in the "more" menu.
+  const handleBarEndGame = () => {
+    emitEndGame(room.code, room.hostSeatId!).catch(() => {});
+  };
+
+  const handleLeaveGame = () => {
+    leaveRoom(room.code);
+    clearOwnedSeats(room.code);
+    resetRoomStore();
+    router.push(session?.user ? "/" : "/play");
   };
 
   // If a player doesn't tap a token in time, move one for them: prefer a
@@ -323,7 +339,13 @@ export default function GameView({ room }: { room: Room }) {
           context to stick within on short viewports); the player rows sit
           as ordinary flex siblings immediately against the board instead. */}
       <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 py-2 sm:px-4">
-        <ReactionBar onReact={handleReact} onMore={() => setGameMenuOpen(true)} />
+        <ReactionBar
+          onReact={handleReact}
+          onMore={() => setGameMenuOpen(true)}
+          isHost={isHost}
+          onEndGame={handleBarEndGame}
+          onLeaveGame={handleLeaveGame}
+        />
       </div>
 
       {isHost && (
@@ -419,7 +441,7 @@ export default function GameView({ room }: { room: Room }) {
         </div>
       </div>
 
-      <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-center border-t border-line bg-bg px-2 py-2 sm:px-4">
+      <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-center border-t border-line bg-bg px-2 pt-2 pb-4 sm:px-4 sm:pb-6">
         <div ref={diceWrapRef}>
           <Dice
             lastRoll={game.lastRoll}

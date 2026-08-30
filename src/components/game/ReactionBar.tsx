@@ -1,21 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { IconSmiley, IconPalette, IconKebab } from "@/components/game/gameIcons";
 import ReactionPicker, { type Reaction } from "@/components/game/ReactionPicker";
 
 // A small floating bar of game-wide controls (not tied to any player seat):
-// the two reaction triggers, and "more" for the room-wide Game Menu (see
-// GameMenu.tsx, opened by GameView).
+// the two reaction triggers, an End/Leave shortcut (one click + a confirm,
+// instead of burying the most-reached-for action in the "more" menu), and
+// "more" for the room-wide Game Menu (see GameMenu.tsx, opened by GameView).
 export default function ReactionBar({
   onReact,
   onMore,
+  isHost,
+  onEndGame,
+  onLeaveGame,
 }: {
   onReact: (reaction: Reaction) => void;
   onMore: () => void;
+  isHost: boolean;
+  onEndGame: () => void;
+  onLeaveGame: () => void;
 }) {
-  const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | null>(null);
+  const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | "confirm" | null>(null);
+  const reduceMotion = useReducedMotion();
 
   return (
     <div className="relative flex items-center gap-1 rounded-2xl border border-line bg-surface px-1.5 py-1 shadow-sm">
@@ -47,6 +55,53 @@ export default function ReactionBar({
         <AnimatePresence>
           {openPicker === "sticker" && (
             <ReactionPicker mode="sticker" onSelect={onReact} onClose={() => setOpenPicker(null)} />
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="relative">
+        <button
+          onClick={() => setOpenPicker(openPicker === "confirm" ? null : "confirm")}
+          aria-label={isHost ? "End game" : "Leave game"}
+          aria-expanded={openPicker === "confirm"}
+          className="flex min-h-11 items-center justify-center rounded-xl px-2.5 text-sm font-bold text-accent transition hover:bg-accent/10"
+        >
+          {isHost ? "End" : "Leave"}
+        </button>
+        <AnimatePresence>
+          {openPicker === "confirm" && (
+            <motion.div
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.96 }}
+              transition={{ duration: 0.15 }}
+              className="absolute right-0 top-full z-20 mt-2 w-60 rounded-2xl border border-line bg-surface p-3 shadow-lg"
+              role="menu"
+            >
+              <p className="text-sm text-ink-muted">
+                {isHost
+                  ? "Play stops for everyone right away."
+                  : "You'll be paused — the host can let you back in."}
+              </p>
+              <div className="mt-2.5 flex gap-2">
+                <button
+                  onClick={() => setOpenPicker(null)}
+                  className="flex-1 rounded-xl border border-line py-2 text-sm font-semibold text-ink-muted transition hover:bg-surface-2"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenPicker(null);
+                    if (isHost) onEndGame();
+                    else onLeaveGame();
+                  }}
+                  className="flex-1 rounded-xl bg-accent py-2 text-sm font-bold text-white"
+                >
+                  {isHost ? "End game" : "Leave"}
+                </button>
+              </div>
+            </motion.div>
           )}
         </AnimatePresence>
       </div>
