@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import { createRoom, createRoomAsGuest, fillBotSeats, startGame } from "@/lib/socketActions";
@@ -21,12 +21,13 @@ export default function CreateRoom() {
   const addMySeats = useRoomStore((s) => s.addMySeats);
   const { profiles, loading: profilesLoading } = useProfiles();
 
-  const [totalPlayers, setTotalPlayers] = useState(4);
+  const [totalPlayers, setTotalPlayers] = useState(2);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [billing, setBilling] = useState<EntitlementStatus | null>(null);
   const [guestName, setGuestName] = useState(() => getGuestName());
   const [funnyName] = useState(() => randomFunnyName());
+  const playerCountTouched = useRef(false);
 
   useEffect(() => {
     if (!session?.user) return;
@@ -34,6 +35,12 @@ export default function CreateRoom() {
       .then((res) => res.json())
       .then(setBilling)
       .catch(() => {});
+  }, [session?.user]);
+
+  // Guests default to 2 (fastest path with bots); once we know the visitor
+  // is signed in, default up to 4 — unless they already picked a count.
+  useEffect(() => {
+    if (session?.user && !playerCountTouched.current) setTotalPlayers(4);
   }, [session?.user]);
 
   // Only a hard signal (no free slot, no credit, no active plan) blocks the
@@ -129,7 +136,10 @@ export default function CreateRoom() {
                 <button
                   key={n}
                   type="button"
-                  onClick={() => setTotalPlayers(n)}
+                  onClick={() => {
+                    playerCountTouched.current = true;
+                    setTotalPlayers(n);
+                  }}
                   aria-pressed={selected}
                   className={cn(
                     "relative flex min-h-[4.5rem] flex-col items-center justify-center gap-0.5 rounded-2xl border-2 py-3 transition sm:min-h-20",
