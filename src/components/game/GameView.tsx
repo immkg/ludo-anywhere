@@ -389,30 +389,27 @@ export default function GameView({ room }: { room: Room }) {
 
       <div ref={boardAreaRef} className="flex min-h-0 flex-1 flex-col items-center justify-center">
         <div ref={topRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pb-2 sm:px-4">
-          <div className="flex items-center gap-3">
-            <PlayerCorner
-              seat={seatByArm.get(0) ?? null}
-              isTurn={seatByArm.get(0)?.id === currentSeat?.id}
-              placement={placementForArm(seatByArm.get(0))}
-              suspended={suspendedForArm(seatByArm.get(0))}
-              onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
-              rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
-              canMove={currentArm === 0 && canMove}
-            />
-            {currentArm === 0 && diceMount}
-          </div>
-          <div className="flex items-center gap-3">
-            {currentArm === 1 && diceMount}
-            <PlayerCorner
-              seat={seatByArm.get(1) ?? null}
-              isTurn={seatByArm.get(1)?.id === currentSeat?.id}
-              placement={placementForArm(seatByArm.get(1))}
-              suspended={suspendedForArm(seatByArm.get(1))}
-              onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
-              rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
-              canMove={currentArm === 1 && canMove}
-            />
-          </div>
+          <PlayerCorner
+            seat={seatByArm.get(0) ?? null}
+            isTurn={seatByArm.get(0)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(0))}
+            suspended={suspendedForArm(seatByArm.get(0))}
+            onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
+            rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
+            canMove={currentArm === 0 && canMove}
+            dice={currentArm === 0 ? diceMount : undefined}
+          />
+          <PlayerCorner
+            seat={seatByArm.get(1) ?? null}
+            isTurn={seatByArm.get(1)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(1))}
+            suspended={suspendedForArm(seatByArm.get(1))}
+            onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
+            rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
+            canMove={currentArm === 1 && canMove}
+            dice={currentArm === 1 ? diceMount : undefined}
+            diceFirst
+          />
         </div>
 
         <div
@@ -463,30 +460,27 @@ export default function GameView({ room }: { room: Room }) {
         </p>
 
         <div ref={bottomRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pt-2 sm:px-4">
-          <div className="flex items-center gap-3">
-            <PlayerCorner
-              seat={seatByArm.get(3) ?? null}
-              isTurn={seatByArm.get(3)?.id === currentSeat?.id}
-              placement={placementForArm(seatByArm.get(3))}
-              suspended={suspendedForArm(seatByArm.get(3))}
-              onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
-              rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
-              canMove={currentArm === 3 && canMove}
-            />
-            {currentArm === 3 && diceMount}
-          </div>
-          <div className="flex items-center gap-3">
-            {currentArm === 2 && diceMount}
-            <PlayerCorner
-              seat={seatByArm.get(2) ?? null}
-              isTurn={seatByArm.get(2)?.id === currentSeat?.id}
-              placement={placementForArm(seatByArm.get(2))}
-              suspended={suspendedForArm(seatByArm.get(2))}
-              onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
-              rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
-              canMove={currentArm === 2 && canMove}
-            />
-          </div>
+          <PlayerCorner
+            seat={seatByArm.get(3) ?? null}
+            isTurn={seatByArm.get(3)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(3))}
+            suspended={suspendedForArm(seatByArm.get(3))}
+            onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
+            rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
+            canMove={currentArm === 3 && canMove}
+            dice={currentArm === 3 ? diceMount : undefined}
+          />
+          <PlayerCorner
+            seat={seatByArm.get(2) ?? null}
+            isTurn={seatByArm.get(2)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(2))}
+            suspended={suspendedForArm(seatByArm.get(2))}
+            onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
+            rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
+            canMove={currentArm === 2 && canMove}
+            dice={currentArm === 2 ? diceMount : undefined}
+            diceFirst
+          />
         </div>
       </div>
     </div>

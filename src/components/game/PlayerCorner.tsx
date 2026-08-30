@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { MotionValue } from "framer-motion";
 import { motion } from "framer-motion";
 import { colorForArm } from "@/game/board";
@@ -14,14 +15,20 @@ const GOLD_DARK = "#C99A00";
 // cosmetic countdown trace, not the source of truth for the actual timeout.
 const AUTO_MOVE_MS = 15000;
 
-// Fixed card footprint (see the outer wrapper below) — every card is this
-// same size regardless of name length or which state it's in, so the four
-// corners never shift the board around as turns change. The trace SVG's
-// viewBox below is hand-matched to this box (not a 0..100 abstraction) so
-// its rounded corners trace the actual border radius instead of stretching
-// into an ellipse.
+// Fixed footprint of the name+avatar block (see the wrapper below) — every
+// card is this same size regardless of name length or which state it's in,
+// so the four corners never shift the board around as turns change.
 const CARD_WIDTH = 80;
-const CARD_HEIGHT = 76;
+const CARD_HEIGHT = 70;
+
+// The outer shell's footprint when a <Dice/> is attached (see the `dice`
+// prop below) — the name+avatar block above plus the die's own fixed
+// 58px (Dice.tsx's CUBE_SIZE), the (tight) gap between them, and this
+// shell's own (tight) padding. Hand-matched to the actual classes below,
+// same as CARD_WIDTH/HEIGHT, so the trace SVG's rounded corners line up
+// with the real border-radius instead of stretching into an ellipse.
+const SHELL_WIDTH = 154;
+const SHELL_HEIGHT = 66;
 
 // Drawn in code rather than an image asset — a simple 3-peak crown with
 // the finishing place (1/2/3) badged at its base, positioned over the
@@ -88,6 +95,17 @@ type PlayerCornerProps = {
   // window — a plain declarative trace since (unlike the roll countdown)
   // it's never paused/resumed by touching anything.
   canMove?: boolean;
+  // The <Dice/> for whichever corner currently has the turn (see
+  // GameView.tsx) — when set, this card's own outline/background grows to
+  // enclose it instead of the die sitting next to it as a separate chip,
+  // so the two read as one shape. The die's own position/size don't
+  // change — only the card's border/fill extends out to meet it.
+  dice?: ReactNode;
+  // Which side of the name/avatar block the die sits on: true puts it
+  // first (dice-then-player, for a right-side corner where the board is
+  // to the die's own left), false puts it last (player-then-dice, for a
+  // left-side corner). Ignored when `dice` isn't set.
+  diceFirst?: boolean;
 };
 
 export default function PlayerCorner({
@@ -98,67 +116,30 @@ export default function PlayerCorner({
   onClick,
   rollProgress,
   canMove,
+  dice,
+  diceFirst,
 }: PlayerCornerProps) {
   if (!seat) return <div style={{ width: CARD_WIDTH, height: CARD_HEIGHT }} />;
 
   const color = colorForArm(seat.armIndex);
-  const Wrapper = onClick ? "button" : "div";
+  // The click target (host's "manage this player") is just the name+avatar
+  // — not the whole card, and not the die — so it stays a plain <div> at
+  // the outer level; only this inner piece becomes a <button>.
+  const InnerWrapper = onClick ? "button" : "div";
+  const showTrace = isTurn && (rollProgress || canMove);
+  const traceW = dice ? SHELL_WIDTH : CARD_WIDTH;
+  const traceH = dice ? SHELL_HEIGHT : CARD_HEIGHT;
 
-  return (
-    <Wrapper
+  const nameAndAvatar = (
+    <InnerWrapper
       onClick={onClick}
       aria-label={onClick ? `Manage ${seat.name}` : undefined}
       className={cn(
-        "relative flex shrink-0 flex-col items-center gap-1 rounded-2xl border px-2 py-2 shadow-sm transition-shadow",
+        "flex shrink-0 flex-col items-center gap-1",
         onClick && "cursor-pointer",
       )}
-      style={{
-        width: CARD_WIDTH,
-        backgroundColor: `${color.hex}1A`,
-        borderColor: isTurn ? color.hex : `${color.hex}40`,
-        boxShadow: isTurn ? `0 0 0 3px ${color.hex}33, 0 2px 6px ${color.hex}26` : undefined,
-        opacity: seat.connected && !suspended ? 1 : 0.55,
-      }}
+      style={{ width: CARD_WIDTH }}
     >
-      {isTurn && (rollProgress || canMove) && (
-        <svg
-          className="pointer-events-none absolute inset-0 h-full w-full -rotate-90"
-          viewBox={`0 0 ${CARD_WIDTH} ${CARD_HEIGHT}`}
-          preserveAspectRatio="none"
-        >
-          {rollProgress ? (
-            <motion.rect
-              x="1.5"
-              y="1.5"
-              width={CARD_WIDTH - 3}
-              height={CARD_HEIGHT - 3}
-              rx="16"
-              fill="none"
-              stroke={color.hex}
-              strokeWidth="3"
-              strokeLinecap="round"
-              style={{ pathLength: rollProgress }}
-            />
-          ) : (
-            <motion.rect
-              key="move-trace"
-              x="1.5"
-              y="1.5"
-              width={CARD_WIDTH - 3}
-              height={CARD_HEIGHT - 3}
-              rx="16"
-              fill="none"
-              stroke={color.hex}
-              strokeWidth="3"
-              strokeLinecap="round"
-              initial={{ pathLength: 0 }}
-              animate={{ pathLength: 1 }}
-              transition={{ duration: AUTO_MOVE_MS / 1000, ease: "linear" }}
-            />
-          )}
-        </svg>
-      )}
-
       <span
         className="w-full truncate text-center text-sm font-bold leading-tight"
         style={{ color: color.hex }}
@@ -183,6 +164,82 @@ export default function PlayerCorner({
         {placement && placement <= 3 && <PlacementCrown placement={placement} />}
         {suspended && <SuspendedBadge />}
       </span>
-    </Wrapper>
+    </InnerWrapper>
+  );
+
+  return (
+    <div
+      className={cn(
+        "relative flex shrink-0 items-center rounded-2xl border shadow-sm transition-shadow",
+        dice ? "gap-1 px-1.5 py-1" : "flex-col gap-1 px-1.5 py-1.5",
+      )}
+      style={{
+        width: dice ? undefined : CARD_WIDTH,
+        backgroundColor: `${color.hex}1A`,
+        borderColor: isTurn ? color.hex : `${color.hex}40`,
+        boxShadow: isTurn ? `0 0 0 3px ${color.hex}33, 0 2px 6px ${color.hex}26` : undefined,
+        opacity: seat.connected && !suspended ? 1 : 0.55,
+      }}
+    >
+      {showTrace && (
+        // No rotation here — a rect's pathLength naturally starts at its
+        // top-left corner and traces clockwise, which is a fine start
+        // point on its own; CSS-rotating this box (as it used to) badly
+        // distorted the wide dice-attached shell, since rotating a
+        // non-square element 90° no longer fits its own layout box.
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full"
+          viewBox={`0 0 ${traceW} ${traceH}`}
+          preserveAspectRatio="none"
+        >
+          {rollProgress ? (
+            <motion.rect
+              x="1.5"
+              y="1.5"
+              width={traceW - 3}
+              height={traceH - 3}
+              rx="16"
+              fill="none"
+              stroke={color.hex}
+              strokeWidth="3"
+              strokeLinecap="round"
+              style={{ pathLength: rollProgress }}
+            />
+          ) : (
+            <motion.rect
+              key="move-trace"
+              x="1.5"
+              y="1.5"
+              width={traceW - 3}
+              height={traceH - 3}
+              rx="16"
+              fill="none"
+              stroke={color.hex}
+              strokeWidth="3"
+              strokeLinecap="round"
+              initial={{ pathLength: 0 }}
+              animate={{ pathLength: 1 }}
+              transition={{ duration: AUTO_MOVE_MS / 1000, ease: "linear" }}
+            />
+          )}
+        </svg>
+      )}
+
+      {dice ? (
+        diceFirst ? (
+          <>
+            {dice}
+            {nameAndAvatar}
+          </>
+        ) : (
+          <>
+            {nameAndAvatar}
+            {dice}
+          </>
+        )
+      ) : (
+        nameAndAvatar
+      )}
+    </div>
   );
 }

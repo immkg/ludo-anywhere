@@ -188,26 +188,23 @@ export default function TestModeView() {
         )}
 
         <div className="relative flex shrink-0 items-center justify-between px-4">
-          <div className="flex items-center gap-3">
-            <PlayerCorner
-              seat={seatByArm.get(0) ?? null}
-              isTurn={seatByArm.get(0)?.id === currentSeat?.id}
-              placement={placementForArm(seatByArm.get(0))}
-              rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
-              canMove={currentArm === 0 && canMove}
-            />
-            {currentArm === 0 && diceMount}
-          </div>
-          <div className="flex items-center gap-3">
-            {currentArm === 1 && diceMount}
-            <PlayerCorner
-              seat={seatByArm.get(1) ?? null}
-              isTurn={seatByArm.get(1)?.id === currentSeat?.id}
-              placement={placementForArm(seatByArm.get(1))}
-              rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
-              canMove={currentArm === 1 && canMove}
-            />
-          </div>
+          <PlayerCorner
+            seat={seatByArm.get(0) ?? null}
+            isTurn={seatByArm.get(0)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(0))}
+            rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
+            canMove={currentArm === 0 && canMove}
+            dice={currentArm === 0 ? diceMount : undefined}
+          />
+          <PlayerCorner
+            seat={seatByArm.get(1) ?? null}
+            isTurn={seatByArm.get(1)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(1))}
+            rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
+            canMove={currentArm === 1 && canMove}
+            dice={currentArm === 1 ? diceMount : undefined}
+            diceFirst
+          />
         </div>
 
         <div className="min-h-0 flex-1">
@@ -221,26 +218,23 @@ export default function TestModeView() {
         </div>
 
         <div className="relative flex min-h-16 shrink-0 items-center justify-between px-4">
-          <div className="flex items-center gap-3">
-            <PlayerCorner
-              seat={seatByArm.get(3) ?? null}
-              isTurn={seatByArm.get(3)?.id === currentSeat?.id}
-              placement={placementForArm(seatByArm.get(3))}
-              rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
-              canMove={currentArm === 3 && canMove}
-            />
-            {currentArm === 3 && diceMount}
-          </div>
-          <div className="flex items-center gap-3">
-            {currentArm === 2 && diceMount}
-            <PlayerCorner
-              seat={seatByArm.get(2) ?? null}
-              isTurn={seatByArm.get(2)?.id === currentSeat?.id}
-              placement={placementForArm(seatByArm.get(2))}
-              rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
-              canMove={currentArm === 2 && canMove}
-            />
-          </div>
+          <PlayerCorner
+            seat={seatByArm.get(3) ?? null}
+            isTurn={seatByArm.get(3)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(3))}
+            rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
+            canMove={currentArm === 3 && canMove}
+            dice={currentArm === 3 ? diceMount : undefined}
+          />
+          <PlayerCorner
+            seat={seatByArm.get(2) ?? null}
+            isTurn={seatByArm.get(2)?.id === currentSeat?.id}
+            placement={placementForArm(seatByArm.get(2))}
+            rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
+            canMove={currentArm === 2 && canMove}
+            dice={currentArm === 2 ? diceMount : undefined}
+            diceFirst
+          />
         </div>
       </div>
 
