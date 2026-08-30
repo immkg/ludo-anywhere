@@ -962,19 +962,21 @@ app.prepare().then(() => {
         if (eligible.length < 2) return ack?.({ error: "Not enough players left for a rematch" });
 
         const newRoom = createRoom({ maxPlayers: room.maxPlayers });
+        const newSeatByOldSeatId = new Map();
         for (const seat of eligible) {
           // Seated with no live socket yet — each client binds its own
           // once it navigates in and reconnects with the fresh token
           // pushed below, same as any other approved join.
-          const { error: seatError } = addSeats(newRoom, [{ name: seat.name, profileId: seat.profileId }], {
-            socketId: null,
-            deviceId: seat.deviceId,
-            userId: seat.userId,
-          });
+          const { error: seatError, seats: addedSeats } = addSeats(
+            newRoom,
+            [{ name: seat.name, profileId: seat.profileId }],
+            { socketId: null, deviceId: seat.deviceId, userId: seat.userId }
+          );
           if (seatError) {
             deleteRoom(newRoom.code);
             return ack?.({ error: seatError });
           }
+          newSeatByOldSeatId.set(seat.id, addedSeats[0]);
         }
         // Whoever triggered the rematch stays host, regardless of seating
         // order (which may not match the old room's host if it had been
@@ -1025,6 +1027,22 @@ app.prepare().then(() => {
         }
         for (const [userId, seatsForUser] of seatsByUser) {
           io.to(userChannel(userId)).emit("room:rematchReady", { roomCode: newRoom.code, seats: seatsForUser });
+        }
+
+        // Guests have no durable per-account channel to push into — reach
+        // them on whatever live socket they're still holding open on the
+        // old room's finished-game screen instead.
+        const guestSeatsBySocket = new Map();
+        for (const oldSeat of eligible) {
+          if (oldSeat.userId || !oldSeat.socketId) continue;
+          const newSeat = newSeatByOldSeatId.get(oldSeat.id);
+          if (!newSeat) continue;
+          const list = guestSeatsBySocket.get(oldSeat.socketId) ?? [];
+          list.push({ id: newSeat.id, token: newSeat.token, armIndex: newSeat.armIndex, name: newSeat.name });
+          guestSeatsBySocket.set(oldSeat.socketId, list);
+        }
+        for (const [socketId, seatsForSocket] of guestSeatsBySocket) {
+          io.to(socketId).emit("room:rematchReady", { roomCode: newRoom.code, seats: seatsForSocket });
         }
 
         ack?.({ roomCode: newRoom.code });
