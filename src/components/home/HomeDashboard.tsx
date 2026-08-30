@@ -61,7 +61,7 @@ export default function HomeDashboard({ displayName, recentRooms, stats }: HomeD
               className="flex min-h-[128px] flex-col justify-between rounded-3xl border-2 border-accent/30 bg-accent/10 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6),0_2px_0_rgba(0,0,0,0.06),0_8px_20px_-6px_var(--color-accent),0_16px_36px_-12px_var(--color-accent)] transition active:scale-[0.98] sm:min-h-[150px] sm:p-5"
             >
               <div className="min-w-0">
-                <p className="text-base font-extrabold text-accent sm:text-lg">Create Room</p>
+                <p className="text-base font-extrabold text-accent sm:text-lg">Play Now</p>
                 <p className="mt-1 text-xs text-ink-muted sm:text-sm">Start a new game and invite friends</p>
               </div>
               <div className="flex items-end justify-between gap-2">
@@ -84,9 +84,9 @@ export default function HomeDashboard({ displayName, recentRooms, stats }: HomeD
             >
               <div className="min-w-0">
                 <p className="text-base font-extrabold sm:text-lg" style={{ color: BLUE }}>
-                  Join Room
+                  I Have a Code
                 </p>
-                <p className="mt-1 text-xs text-ink-muted sm:text-sm">Enter code and join a game</p>
+                <p className="mt-1 text-xs text-ink-muted sm:text-sm">Join a friend&rsquo;s game</p>
               </div>
               <div className="flex items-end justify-between gap-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

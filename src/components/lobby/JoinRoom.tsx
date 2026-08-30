@@ -15,6 +15,7 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import FriendAvatar from "@/components/friends/FriendAvatar";
 import { IconClock } from "@/components/lobby/icons";
+import { cn } from "@/lib/utils";
 import type { OwnedSeat } from "@/types/room";
 
 export default function JoinRoom() {
@@ -257,12 +258,18 @@ export default function JoinRoom() {
                 </div>
               )}
 
-              <div className="flex flex-col gap-3 rounded-3xl border-2 border-accent/25 bg-surface p-4 sm:p-5">
+              <div
+                className={cn(
+                  "flex flex-col gap-3 rounded-3xl border-2 bg-surface p-4 sm:p-5",
+                  error ? "border-accent" : "border-accent/25"
+                )}
+              >
                 <label htmlFor="room-code" className="text-sm font-semibold text-ink-muted">
                   Room code
                 </label>
                 <Input
                   id="room-code"
+                  aria-invalid={!!error}
                   className="text-center text-2xl font-extrabold tracking-[0.3em] uppercase sm:text-3xl"
                   placeholder="ABCDE"
                   value={roomCode}
@@ -291,8 +298,15 @@ export default function JoinRoom() {
               </div>
 
               {error && (
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm text-accent">{error}</p>
+                <div className="flex flex-col gap-3 rounded-2xl border-2 border-accent bg-accent/10 p-3.5 sm:p-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 8v5M12 16h.01" />
+                      </svg>
+                    </span>
+                    <p className="text-sm font-bold text-accent">{error}</p>
+                  </div>
                   <Link href="/create">
                     <Button variant="secondary" className="w-full">
                       Create Room Instead?
