@@ -38,6 +38,11 @@ export async function reconcileOrder(uropaiOrderId: string): Promise<void> {
 async function grantPayment(payment: Payment) {
   const config = await getPricingConfig();
   const now = new Date();
+  // Captured inside the transaction below (if a coupon was redeemed), read
+  // afterward to decide whether to fire flash_offer_paid — see the comment
+  // by that call for why this closes a gap the client-side flash_splash_*
+  // events (DiscountSplash.tsx) can't see on their own.
+  let redeemedCouponRole: string | null = null;
 
   const granted = await prisma.$transaction(async (tx) => {
     const updated = await tx.payment.updateMany({
@@ -90,6 +95,7 @@ async function grantPayment(payment: Payment) {
         where: { id: payment.couponId },
         data: { status: "REDEEMED", redeemedAt: now, redeemedPaymentId: payment.id },
       });
+      redeemedCouponRole = coupon.role;
       if (coupon.role === "REFEREE_WELCOME" && coupon.referralId) {
         const referral = await tx.referral.update({
           where: { id: coupon.referralId },
@@ -130,6 +136,18 @@ async function grantPayment(payment: Payment) {
       },
       payment.userId,
     );
+
+    // The client-side flash_splash_shown/dismissed/claim_clicked events
+    // (DiscountSplash.tsx) only see intent — this is the one that answers
+    // whether the splash actually converts: a payment that redeemed a
+    // FLASH_OFFER coupon (see /api/coupons/claim-flash-offer) just settled.
+    if (redeemedCouponRole === "FLASH_OFFER") {
+      trackPosthog(
+        "flash_offer_paid",
+        { purpose: payment.purpose, revenue: payment.amountInr, discountInr: payment.discountInr, currency: "INR" },
+        payment.userId,
+      );
+    }
   }
 }
 
