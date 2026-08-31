@@ -6,6 +6,7 @@ import type { EntitlementStatus } from "@/types/billing";
 import { IconStar } from "@/components/nav/icons";
 import { IconArrowRight } from "@/components/home/icons";
 import { cn } from "@/lib/utils";
+import { useIsAndroidApp } from "@/lib/android-app";
 
 // Same fetch + framing as the entitlement summary AccountBar used to show
 // (see git history) — an existing usage entitlement, not an in-game
@@ -30,6 +31,7 @@ function summarize(status: EntitlementStatus): { label: string; cta: string } {
 
 export default function CreditBalance({ className }: { className?: string }) {
   const [billing, setBilling] = useState<EntitlementStatus | null>(null);
+  const isAndroidApp = useIsAndroidApp();
 
   useEffect(() => {
     fetch("/api/billing/status")
@@ -43,6 +45,22 @@ export default function CreditBalance({ className }: { className?: string }) {
   }
 
   const { label, cta } = summarize(billing);
+
+  // The Android app ships with no purchase surface — show the status,
+  // not a CTA that would lead nowhere.
+  if (isAndroidApp) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-11 items-center gap-2 rounded-2xl border border-line bg-surface-2 px-3 py-2.5 sm:px-4",
+          className
+        )}
+      >
+        <IconStar className="h-4 w-4 shrink-0 text-accent" />
+        <span className="truncate text-sm font-semibold text-ink">{label}</span>
+      </div>
+    );
+  }
 
   return (
     <Link
