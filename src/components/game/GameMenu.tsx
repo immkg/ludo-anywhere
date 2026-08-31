@@ -13,11 +13,17 @@ export default function GameMenu({
   roomCode,
   isHost,
   hostSeatId,
+  canEndGame,
+  onLeaveGame,
   onClose,
 }: {
   roomCode: string;
   isHost: boolean;
   hostSeatId: string | null;
+  // See canEndGame in GameView.tsx — false only for a matchmaking host with
+  // a real opponent still seated, who can leave but not end outright.
+  canEndGame: boolean;
+  onLeaveGame: () => void;
   onClose: () => void;
 }) {
   const [confirmingEnd, setConfirmingEnd] = useState(false);
@@ -86,16 +92,17 @@ export default function GameMenu({
           {confirmingEnd ? (
             <>
               <p className="text-sm text-ink-muted">
-                Play stops for everyone right away. It&rsquo;s saved to history but doesn&rsquo;t count as a
-                win or loss for anyone who hasn&rsquo;t already finished.
+                {canEndGame
+                  ? "Play stops for everyone right away. It’s saved to history but doesn’t count as a win or loss for anyone who hasn’t already finished."
+                  : "You'll leave the game — it continues for the other players."}
               </p>
               {endGameError && <p className="text-sm text-accent">{endGameError}</p>}
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={() => setConfirmingEnd(false)} disabled={endGameLoading}>
                   Cancel
                 </Button>
-                <Button onClick={handleEndGame} disabled={endGameLoading}>
-                  {endGameLoading ? "Ending…" : "End game"}
+                <Button onClick={canEndGame ? handleEndGame : onLeaveGame} disabled={endGameLoading}>
+                  {canEndGame ? (endGameLoading ? "Ending…" : "End game") : "Leave"}
                 </Button>
               </div>
             </>
@@ -112,7 +119,7 @@ export default function GameMenu({
                   onClick={() => setConfirmingEnd(true)}
                   className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
                 >
-                  End game
+                  {canEndGame ? "End game" : "Leave game"}
                 </button>
               )}
               <button

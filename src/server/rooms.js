@@ -424,6 +424,18 @@ export function handleSocketDisconnect(room, socketId, onChange) {
     return;
   }
 
+  // Mid-game, a disconnecting seat stays in room.seats (see the grace-period
+  // prune below), but if it was the host's seat, the host role can't just
+  // dangle on it — nothing else ever reassigns hostSeatId mid-game
+  // (transferHost requires *being* host to call it), so a leaving host would
+  // otherwise strand the room with no one able to act as host until they
+  // personally reconnect. Mirrors the lobby branch above, just without
+  // dropping the seat itself.
+  if (room.hostSeatId && affected.some((s) => s.id === room.hostSeatId)) {
+    const nextHost = room.seats.find((s) => !affected.includes(s) && s.connected);
+    if (nextHost) room.hostSeatId = nextHost.id;
+  }
+
   affected.forEach((seat) => {
     seat.connected = false;
     clearDisconnectTimer(room, seat.id);

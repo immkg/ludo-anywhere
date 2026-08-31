@@ -13,17 +13,24 @@ export default function ReactionBar({
   onReact,
   onMore,
   isHost,
+  canEndGame,
   onEndGame,
   onLeaveGame,
 }: {
   onReact: (reaction: Reaction) => void;
   onMore: () => void;
   isHost: boolean;
+  // Whether the host is allowed to end the game outright vs. only leave it
+  // (a matchmaking host with a real opponent still seated can only leave —
+  // see canEndGame in GameView.tsx). Irrelevant for a non-host, who can
+  // only ever leave.
+  canEndGame: boolean;
   onEndGame: () => void;
   onLeaveGame: () => void;
 }) {
   const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | "confirm" | null>(null);
   const reduceMotion = useReducedMotion();
+  const showEnd = isHost && canEndGame;
 
   return (
     <div className="relative flex items-center gap-1 rounded-2xl border border-line bg-surface px-1.5 py-1 shadow-sm">
@@ -61,11 +68,11 @@ export default function ReactionBar({
 
       <button
         onClick={() => setOpenPicker(openPicker === "confirm" ? null : "confirm")}
-        aria-label={isHost ? "End game" : "Leave game"}
+        aria-label={showEnd ? "End game" : "Leave game"}
         aria-expanded={openPicker === "confirm"}
         className="flex min-h-11 items-center justify-center rounded-xl px-2.5 text-sm font-bold text-accent transition hover:bg-accent/10"
       >
-        {isHost ? "End" : "Leave"}
+        {showEnd ? "End" : "Leave"}
       </button>
       {/* A real viewport-centered modal (matching GameMenu.tsx/
           PlayerActionsModal), not an anchored dropdown off this button —
@@ -91,9 +98,11 @@ export default function ReactionBar({
               role="menu"
             >
               <p className="text-sm text-ink-muted">
-                {isHost
+                {showEnd
                   ? "Play stops for everyone right away."
-                  : "You'll be paused — the host can let you back in."}
+                  : isHost
+                    ? "You'll leave the game — it continues for the other players."
+                    : "You'll be paused — the host can let you back in."}
               </p>
               <div className="mt-3 flex gap-2">
                 <button
@@ -105,12 +114,12 @@ export default function ReactionBar({
                 <button
                   onClick={() => {
                     setOpenPicker(null);
-                    if (isHost) onEndGame();
+                    if (showEnd) onEndGame();
                     else onLeaveGame();
                   }}
                   className="flex-1 rounded-xl bg-accent py-2 text-sm font-bold text-white"
                 >
-                  {isHost ? "End game" : "Leave"}
+                  {showEnd ? "End game" : "Leave"}
                 </button>
               </div>
             </motion.div>

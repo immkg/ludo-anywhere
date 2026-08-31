@@ -946,6 +946,14 @@ app.prepare().then(() => {
         if (!room.hostSeatId || room.hostSeatId !== seatId) {
           return ack?.({ error: "Only the host can end the game" });
         }
+        // A matchmaking host can only end the game outright once every
+        // other seat is a bot — with a real opponent still seated, ending
+        // would cut off someone who didn't choose to stop. The host can
+        // leave instead (room:leave), which hands the game to whoever's
+        // left rather than stopping it for them too.
+        if (room.matchmaking && room.seats.some((s) => s.id !== seatId && !s.bot)) {
+          return ack?.({ error: "You can't end this game while another player is in it — leave instead." });
+        }
 
         const { error } = midGameEndGame(room);
         if (error) return ack?.({ error });

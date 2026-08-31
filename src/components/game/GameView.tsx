@@ -51,6 +51,13 @@ export default function GameView({ room }: { room: Room }) {
   const mySeats = useRoomStore((s) => s.mySeats);
   const resetRoomStore = useRoomStore((s) => s.reset);
   const isHost = !!room.hostSeatId && mySeats.some((s) => s.id === room.hostSeatId);
+  // A matchmaking host can only end the whole game while every other seat
+  // is a bot — with a real opponent seated, they can only leave (their own
+  // seat exits, the match continues) — see room:endGame's matching guard
+  // in server.js. Rooms created directly (not matched) keep the
+  // unconditional End for their host, same as before this existed.
+  const canEndGame =
+    !room.matchmaking || !room.seats.some((s) => s.id !== room.hostSeatId && !s.bot);
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [rematchLoading, setRematchLoading] = useState(false);
@@ -410,6 +417,8 @@ export default function GameView({ room }: { room: Room }) {
           room={room}
           game={game}
           seatId={selectedSeatId}
+          canEndGame={canEndGame}
+          onLeaveGame={handleLeaveGame}
           onClose={() => setSelectedSeatId(null)}
         />
       )}
@@ -418,6 +427,8 @@ export default function GameView({ room }: { room: Room }) {
           roomCode={room.code}
           isHost={isHost}
           hostSeatId={room.hostSeatId}
+          canEndGame={canEndGame}
+          onLeaveGame={handleLeaveGame}
           onClose={() => setGameMenuOpen(false)}
         />
       )}
@@ -431,6 +442,7 @@ export default function GameView({ room }: { room: Room }) {
           onReact={handleReact}
           onMore={() => setGameMenuOpen(true)}
           isHost={isHost}
+          canEndGame={canEndGame}
           onEndGame={handleBarEndGame}
           onLeaveGame={handleLeaveGame}
         />
@@ -550,11 +562,15 @@ function PlayerActionsModal({
   room,
   game,
   seatId,
+  canEndGame,
+  onLeaveGame,
   onClose,
 }: {
   room: Room;
   game: GameState;
   seatId: string;
+  canEndGame: boolean;
+  onLeaveGame: () => void;
   onClose: () => void;
 }) {
   const seat = room.seats.find((s) => s.id === seatId);
@@ -601,16 +617,17 @@ function PlayerActionsModal({
           confirmingEnd ? (
             <>
               <p className="text-sm text-ink-muted">
-                Play stops for everyone right away. It&rsquo;s saved to history but doesn&rsquo;t count as a
-                win or loss for anyone who hasn&rsquo;t already finished.
+                {canEndGame
+                  ? "Play stops for everyone right away. It’s saved to history but doesn’t count as a win or loss for anyone who hasn’t already finished."
+                  : "You'll leave the game — it continues for the other players."}
               </p>
               {endGameError && <p className="text-sm text-accent">{endGameError}</p>}
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={() => setConfirmingEnd(false)} disabled={endGameLoading}>
                   Cancel
                 </Button>
-                <Button onClick={handleEndGame} disabled={endGameLoading}>
-                  {endGameLoading ? "Ending…" : "End game"}
+                <Button onClick={canEndGame ? handleEndGame : onLeaveGame} disabled={endGameLoading}>
+                  {canEndGame ? (endGameLoading ? "Ending…" : "End game") : "Leave"}
                 </Button>
               </div>
             </>
@@ -619,7 +636,7 @@ function PlayerActionsModal({
               onClick={() => setConfirmingEnd(true)}
               className="self-start rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
             >
-              End game
+              {canEndGame ? "End game" : "Leave game"}
             </button>
           )
         ) : (
