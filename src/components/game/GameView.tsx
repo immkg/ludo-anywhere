@@ -30,6 +30,14 @@ import ReactionBar from "@/components/game/ReactionBar";
 import GameMenu from "@/components/game/GameMenu";
 import ShareInviteButton from "@/components/nav/ShareInviteButton";
 import FeedbackPrompt from "@/components/game/FeedbackPrompt";
+import DiscountSplash from "@/components/game/DiscountSplash";
+import {
+  evaluateSplashTrigger,
+  noteGameFinished,
+  hasGuestSeenSplash,
+  markGuestSplashShown,
+  type SplashTrigger,
+} from "@/lib/splashTriggers";
 import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
@@ -84,6 +92,25 @@ export default function GameView({ room }: { room: Room }) {
   // in progress. Ended-early games always ask (rarer, higher-signal) — see
   // the finished branch below.
   const [showFeedbackSample] = useState(() => Math.random() < 1 / 3);
+  // Flash-discount splash (see src/components/game/DiscountSplash.tsx) —
+  // gameStartRef anchors "minutes played" for this game (component mounts
+  // fresh per room, including on rematch — see room.code in the layout
+  // effect's dependency comment below), and splashEvaluatedRef ensures the
+  // trigger check below only ever runs once per finished game, not on
+  // every re-render while the results screen is up.
+  const gameStartRef = useRef<number>(0);
+  const splashEvaluatedRef = useRef(false);
+  // A trigger firing (pendingSplashTrigger) only means "ask when they try to
+  // leave" — it does NOT consume the one-time server/local "shown" flag by
+  // itself. That only happens in handleBackHome below, right before the
+  // splash actually opens — so a host who taps "Play again" instead never
+  // burns their one shot on a splash nobody saw.
+  const [pendingSplashTrigger, setPendingSplashTrigger] = useState<SplashTrigger | null>(null);
+  const [splashOpen, setSplashOpen] = useState(false);
+  const [checkingSplash, setCheckingSplash] = useState(false);
+  useEffect(() => {
+    gameStartRef.current = Date.now();
+  }, []);
   const [activeReaction, setActiveReaction] = useState<Reaction | null>(null);
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Per-seat stickers sent via a player card's own sticker button (see
@@ -347,6 +374,60 @@ export default function GameView({ room }: { room: Room }) {
     setSelectedSeatId(seatId);
   };
 
+  // Evaluates once per finished game whether any flash-splash trigger
+  // signal (session count, pages browsed, minutes played, games completed,
+  // leaving /pricing — see src/lib/splashTriggers.ts) has fired. Purely
+  // local/synchronous — the actual eligibility check (and the one-time
+  // "shown" flag it sets) is deferred to handleBackHome below, so this
+  // never spends that budget on a game whose results screen the player
+  // never tries to leave.
+  useEffect(() => {
+    if (game?.status !== "finished" || splashEvaluatedRef.current) return;
+    splashEvaluatedRef.current = true;
+    const minutesPlayed = (Date.now() - gameStartRef.current) / 60000;
+    noteGameFinished(minutesPlayed);
+    const trigger = evaluateSplashTrigger();
+    if (trigger) {
+      // Deferred a tick — an effect shouldn't setState synchronously in its
+      // own body (see react-hooks/set-state-in-effect).
+      Promise.resolve().then(() => setPendingSplashTrigger(trigger));
+    }
+  }, [game?.status]);
+
+  const goHome = () => router.push(session?.user ? "/" : "/play");
+
+  // Intercepts "Back home" (not "Play again" — a rematch just continues,
+  // see handleRematch): only *here*, at the moment they actually try to
+  // leave, do we spend the one-time splash budget. Signed-in eligibility is
+  // a real server round trip (also the atomic "mark shown" — see
+  // /api/splash/eligibility); guests are checked/marked locally.
+  const handleBackHome = async () => {
+    if (!pendingSplashTrigger) {
+      goHome();
+      return;
+    }
+    if (session?.user) {
+      setCheckingSplash(true);
+      try {
+        const res = await fetch("/api/splash/eligibility", { method: "POST" });
+        const data: { eligible: boolean } = res.ok ? await res.json() : { eligible: false };
+        if (data.eligible) setSplashOpen(true);
+        else goHome();
+      } catch {
+        goHome();
+      } finally {
+        setCheckingSplash(false);
+      }
+      return;
+    }
+    if (hasGuestSeenSplash()) {
+      goHome();
+      return;
+    }
+    markGuestSplashShown();
+    setSplashOpen(true);
+  };
+
   if (!game) {
     return <div className="flex min-h-dvh items-center justify-center text-ink-muted">Loading game…</div>;
   }
@@ -387,12 +468,22 @@ export default function GameView({ room }: { room: Room }) {
       >
         <div className="flex w-full max-w-xs gap-2">
           <ShareInviteButton source="post_game" variant="button" buildMessage={buildShareMessage} />
-          <Button variant="secondary" className="flex-1" onClick={() => router.push(session?.user ? "/" : "/play")}>
+          <Button variant="secondary" className="flex-1" onClick={handleBackHome} disabled={checkingSplash}>
             Back home
           </Button>
         </div>
         {(showFeedbackSample || game.endedEarly) && (
           <FeedbackPrompt context="GAME_FINISHED" gameId={room.code} />
+        )}
+        {splashOpen && pendingSplashTrigger && (
+          <DiscountSplash
+            trigger={pendingSplashTrigger}
+            isSignedIn={!!session?.user}
+            onClose={() => {
+              setSplashOpen(false);
+              goHome();
+            }}
+          />
         )}
         <div className="flex w-full max-w-xs flex-col gap-1.5">
           {winners.map((r) => (

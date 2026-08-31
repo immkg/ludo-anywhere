@@ -37,8 +37,14 @@ export async function POST(request: Request) {
   // enforces.
   if (body?.applyCoupon) {
     const coupon = await getActiveCoupon(session.user.id);
-    if (coupon && coupon.campaign.active) {
-      discountInr = Math.round((amountInr * coupon.campaign.discountPercent) / 100);
+    const restrictedToOtherPurpose =
+      coupon?.campaign.restrictToPurpose && coupon.campaign.restrictToPurpose !== purpose;
+    if (coupon && coupon.campaign.active && !restrictedToOtherPurpose) {
+      // A fixed discountInr (the flash-splash campaigns) wins over the
+      // percent when set — see the Campaign.discountInr comment in
+      // prisma/schema.prisma for why percent alone can't hit those exact
+      // prices.
+      discountInr = coupon.campaign.discountInr ?? Math.round((amountInr * coupon.campaign.discountPercent) / 100);
       amountInr = Math.max(0, amountInr - discountInr);
       couponId = coupon.id;
     }
