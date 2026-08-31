@@ -26,6 +26,9 @@ model User {
   creditBatches       CreditBatch[]
   usageEvents         UsageEvent[]
   payments            Payment[]
+  coupons             Coupon[]
+  referralsMade       Referral[]    @relation("ReferralsMade")
+  referralsReceived   Referral[]    @relation("ReferralsReceived")
 }
 
 model Account {
@@ -228,9 +231,15 @@ model Payment {
   uropaiOrderId     String    @unique
   tenantOrderRef    String    @unique // idempotency key sent to Uropai when creating the order
   status            String // CREATED | PAID | FAILED
+  // The coupon selected at order-creation time, if any (see order/route.ts).
+  // Not unique — a coupon can sit on more than one CREATED payment across
+  // retries; only the one that actually settles marks the coupon REDEEMED
+  // via Coupon.redeemedPaymentId, which is unique.
+  couponId          String?
   createdAt         DateTime  @default(now())
   verifiedAt        DateTime?
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coupon            Coupon?   @relation(fields: [couponId], references: [id])
 
   @@index([userId, status])
 }
@@ -243,4 +252,71 @@ model AnalyticsEvent {
   createdAt  DateTime @default(now())
 
   @@index([type, createdAt])
+}
+
+// --- Coupons & referrals ---
+//
+// A user holds at most one *active* coupon at a time (see issueCoupon in
+// src/lib/coupons.ts) — claiming or earning a new one voids whatever
+// unclaimed coupon they already had, so campaigns never stack. A coupon is
+// only ever applied by explicit user choice at checkout (see
+// src/app/api/billing/uropai/order/route.ts) — nothing auto-discounts.
+
+model Campaign {
+  id              String    @id @default(cuid())
+  key             String    @unique // e.g. "referral", "diwali2026" — also the code typed in for a CAMPAIGN coupon
+  kind            String // REFERRAL | PROMO
+  discountPercent Int
+  active          Boolean   @default(true)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  createdAt       DateTime  @default(now())
+  coupons         Coupon[]
+}
+
+model Coupon {
+  id                String    @id @default(cuid())
+  code              String    @unique
+  campaignId        String
+  ownerUserId       String
+  role              String // CAMPAIGN | REFEREE_WELCOME | REFERRER_REWARD
+  status            String    @default("ACTIVE") // ACTIVE | REDEEMED | VOIDED
+  referralId        String?
+  createdAt         DateTime  @default(now())
+  redeemedAt        DateTime?
+  redeemedPaymentId String?   @unique
+  voidedAt          DateTime?
+  campaign          Campaign  @relation(fields: [campaignId], references: [id])
+  owner             User      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  referral          Referral? @relation(fields: [referralId], references: [id])
+  payments          Payment[]
+
+  @@index([ownerUserId, status])
+}
+
+model Referral {
+  id         String    @id @default(cuid())
+  referrerId String
+  refereeId  String    @unique // one referral relationship per referred user, ever
+  code       String // the inviteToken used to sign up
+  status     String    @default("PENDING") // PENDING | REWARDED | VOIDED
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+  referrer   User      @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: Cascade)
+  referee    User      @relation("ReferralsReceived", fields: [refereeId], references: [id], onDelete: Cascade)
+  coupons    Coupon[]
+
+  @@index([referrerId])
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  userId    String? // no FK, same pattern as AnalyticsEvent.userId — decoupled, non-critical data
+  gameId    String?
+  context   String // GAME_FINISHED | LEFT_EARLY
+  rating    Int?
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@index([context, createdAt])
 }

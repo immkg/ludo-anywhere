@@ -28,6 +28,8 @@ import Dice, { type ThrowStyle } from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import ReactionBar from "@/components/game/ReactionBar";
 import GameMenu from "@/components/game/GameMenu";
+import ShareInviteButton from "@/components/nav/ShareInviteButton";
+import FeedbackPrompt from "@/components/game/FeedbackPrompt";
 import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
@@ -77,6 +79,11 @@ export default function GameView({ room }: { room: Room }) {
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [rematchLoading, setRematchLoading] = useState(false);
   const [rematchError, setRematchError] = useState<string | null>(null);
+  // Sampled so a normal finish doesn't ask every single time — computed
+  // once per mount, not per render, so it stays stable while this game is
+  // in progress. Ended-early games always ask (rarer, higher-signal) — see
+  // the finished branch below.
+  const [showFeedbackSample] = useState(() => Math.random() < 1 / 3);
   const [activeReaction, setActiveReaction] = useState<Reaction | null>(null);
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Per-seat stickers sent via a player card's own sticker button (see
@@ -358,30 +365,52 @@ export default function GameView({ room }: { room: Room }) {
     const winners = game.placements.map((seatId, i) => ({ ...describe(seatId), rank: i + 1 }));
     const losers = game.seats.filter((s) => !game.placements.includes(s.id)).map((s) => describe(s.id));
 
+    // Leads the share message with the viewer's own result rather than a
+    // generic pitch — they're sharing *this* game, not just the app.
+    const myPlacement = winners.find((w) => mySeats.some((s) => s.id === w.seatId));
+    const playerCount = game.seats.length;
+    const resultLine = game.endedEarly
+      ? "Just played a game of Ludo on MyLudo!"
+      : myPlacement?.rank === 1
+        ? `I just won a ${playerCount}-player Ludo game on MyLudo! 🏆`
+        : myPlacement
+          ? `I just came ${myPlacement.rank === 2 ? "2nd" : "3rd"} in a ${playerCount}-player Ludo game on MyLudo!`
+          : `Just played a ${playerCount}-player Ludo game on MyLudo!`;
+    const buildShareMessage = (url: string, pct: number | null) =>
+      pct ? `${resultLine} Play with me — sign up and we both get ${pct}% off! ${url}` : `${resultLine} Play with me! ${url}`;
+
     return (
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="flex min-h-dvh flex-col items-center justify-center gap-6 px-8 text-center"
+        className="flex min-h-dvh flex-col items-center justify-center gap-3 overflow-y-auto px-8 py-4 text-center"
       >
-        <p className="text-ink-muted">{game.endedEarly ? "Game ended early" : "Results"}</p>
-        <div className="flex w-full max-w-xs flex-col gap-2">
+        <div className="flex w-full max-w-xs gap-2">
+          <ShareInviteButton source="post_game" variant="button" buildMessage={buildShareMessage} />
+          <Button variant="secondary" className="flex-1" onClick={() => router.push(session?.user ? "/" : "/play")}>
+            Back home
+          </Button>
+        </div>
+        {(showFeedbackSample || game.endedEarly) && (
+          <FeedbackPrompt context="GAME_FINISHED" gameId={room.code} />
+        )}
+        <div className="flex w-full max-w-xs flex-col gap-1.5">
           {winners.map((r) => (
-            <div key={r.seatId} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3">
+            <div key={r.seatId} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-2.5">
               <span className="w-5 shrink-0 text-lg font-extrabold text-ink-muted">{r.rank}</span>
-              {r.color && <span className="h-8 w-8 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
+              {r.color && <span className="h-7 w-7 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
               <span className="flex-1 truncate text-left font-semibold">{r.name}</span>
             </div>
           ))}
           {losers.map((r) => (
             <div
               key={r.seatId}
-              className="flex items-center gap-3 rounded-2xl border border-dashed border-line p-3 opacity-70"
+              className="flex items-center gap-3 rounded-2xl border border-dashed border-line p-2.5 opacity-70"
             >
               <span className="w-5 shrink-0 text-xs font-semibold text-ink-muted">
                 {game.endedEarly ? "—" : "Last"}
               </span>
-              {r.color && <span className="h-8 w-8 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
+              {r.color && <span className="h-7 w-7 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
               <span className="flex-1 truncate text-left font-semibold">{r.name}</span>
             </div>
           ))}
@@ -392,9 +421,6 @@ export default function GameView({ room }: { room: Room }) {
             {rematchLoading ? "Starting…" : "Play again with same players"}
           </Button>
         )}
-        <Button variant="secondary" onClick={() => router.push(session?.user ? "/" : "/play")}>
-          Back home
-        </Button>
       </motion.div>
     );
   }

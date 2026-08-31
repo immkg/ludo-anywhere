@@ -37,6 +37,15 @@ async function fetchStatus(): Promise<EntitlementStatus | null> {
   return res.json();
 }
 
+type ActiveCoupon = { id: string; campaign: { discountPercent: number; kind: string } };
+
+async function fetchActiveCoupon(): Promise<ActiveCoupon | null> {
+  const res = await fetch("/api/coupons/active");
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.coupon ?? null;
+}
+
 export default function PricingPageClient() {
   const { data: session } = useSession();
   const router = useRouter();
@@ -48,8 +57,15 @@ export default function PricingPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [confirmDelayed, setConfirmDelayed] = useState(false);
 
+  // Never auto-applied — the checkbox in CouponBar starts unchecked even
+  // when a coupon is available, so using it is always the user's own
+  // explicit choice (see src/lib/coupons.ts).
+  const [coupon, setCoupon] = useState<ActiveCoupon | null>(null);
+  const [applyCoupon, setApplyCoupon] = useState(false);
+
   useEffect(() => {
     fetchStatus().then(setStatus);
+    fetchActiveCoupon().then(setCoupon);
   }, []);
 
   // While "processing", the user has been redirected back from Uropai's
@@ -91,7 +107,7 @@ export default function PricingPageClient() {
         const res = await fetch("/api/billing/uropai/order", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ purpose }),
+          body: JSON.stringify({ purpose, applyCoupon: applyCoupon && !!coupon }),
         });
         if (!res.ok) throw new Error("Could not start checkout");
         const order = await res.json();
@@ -104,7 +120,7 @@ export default function PricingPageClient() {
         setBuying(null);
       }
     },
-    [session]
+    [session, applyCoupon, coupon]
   );
 
   const planType = status?.entitlement?.type ?? null;
@@ -122,7 +138,12 @@ export default function PricingPageClient() {
       )}
       {error && <p className="text-sm text-accent">{error}</p>}
 
-      <HostBenefitBanner />
+      <CouponBar
+        coupon={coupon}
+        applyCoupon={applyCoupon}
+        onToggle={setApplyCoupon}
+        onRedeemed={setCoupon}
+      />
 
       {!status ? (
         <LoadingSkeleton />
@@ -269,6 +290,8 @@ export default function PricingPageClient() {
         </>
       )}
 
+      <HostBenefitBanner />
+
       <PaymentFooter />
     </main>
   );
@@ -286,6 +309,78 @@ function HostBenefitBanner() {
         </p>
         <p className="text-xs text-ink-muted sm:text-sm">One person pays. Everyone at the table plays.</p>
       </div>
+    </div>
+  );
+}
+
+// Never auto-applies a coupon — even one the user already holds starts
+// unchecked, and redeeming a new code doesn't check it either. Applying a
+// coupon is always a separate, deliberate tap. See src/lib/coupons.ts for
+// why: a referred user picking a *different* coupon here is exactly what
+// forfeits their referrer's reward, so it can't be something that just
+// happens by default.
+function CouponBar({
+  coupon,
+  applyCoupon,
+  onToggle,
+  onRedeemed,
+}: {
+  coupon: ActiveCoupon | null;
+  applyCoupon: boolean;
+  onToggle: (v: boolean) => void;
+  onRedeemed: (coupon: ActiveCoupon) => void;
+}) {
+  const [code, setCode] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
+  const [redeemError, setRedeemError] = useState<string | null>(null);
+
+  const redeem = async () => {
+    if (!code.trim()) return;
+    setRedeeming(true);
+    setRedeemError(null);
+    try {
+      const res = await fetch("/api/coupons/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "That code isn't valid");
+      onRedeemed(data.coupon);
+      setCode("");
+    } catch (e) {
+      setRedeemError(e instanceof Error ? e.message : "That code isn't valid");
+    } finally {
+      setRedeeming(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+      {coupon ? (
+        <label className="flex min-h-11 items-center gap-3 text-sm">
+          <input type="checkbox" checked={applyCoupon} onChange={(e) => onToggle(e.target.checked)} className="h-4 w-4 shrink-0" />
+          <span className="font-semibold text-ink">Apply your {coupon.campaign.discountPercent}% off coupon</span>
+        </label>
+      ) : (
+        <p className="text-sm text-ink-muted">Have a coupon code?</p>
+      )}
+      <div className="flex min-w-0 items-center gap-2">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="Enter code"
+          className="min-h-9 min-w-0 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-sm text-ink placeholder:text-ink-muted sm:w-64 sm:flex-none"
+        />
+        <button
+          onClick={redeem}
+          disabled={redeeming || !code.trim()}
+          className="min-h-9 shrink-0 rounded-xl bg-surface-2 px-3 text-sm font-semibold text-ink disabled:opacity-40"
+        >
+          {redeeming ? "…" : "Redeem"}
+        </button>
+      </div>
+      {redeemError && <p className="text-xs text-accent sm:basis-full">{redeemError}</p>}
     </div>
   );
 }

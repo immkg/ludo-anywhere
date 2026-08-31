@@ -1,34 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import PillButton from "./PillButton";
 import { IconChat } from "./icons";
 import { IconCopy, IconCheck } from "@/components/lobby/icons";
 import { GREEN } from "@/components/nav/navItems";
-import { shareText } from "@/lib/share";
+import { shareWithImage, shareOrCopyWithImage } from "@/lib/share";
 import { trackShare } from "@/lib/socketActions";
+import { useInviteLink } from "@/lib/useInviteLink";
 
 const ACCENT = "var(--color-accent)";
 
 export default function InviteLinkCard() {
-  const [url, setUrl] = useState<string | null>(null);
+  const invite = useInviteLink();
+  const url = invite?.url ?? null;
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/friends/invite-link")
-      .then((res) => res.json())
-      .then((data) => setUrl(data.url ?? null))
-      .catch(() => {});
-  }, []);
 
   const handleCopy = async () => {
     if (!url) return;
     try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      trackShare("invite_link_shared", { source: "copy_button" });
+      const result = await shareOrCopyWithImage(
+        `Add me as a friend on MyLudo! ${url}`,
+        `${url}/opengraph-image`,
+        url
+      );
+      if (result === "copied") {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }
     } catch {
-      // clipboard may be unavailable — the link is on-screen regardless
+      // share/clipboard may both be unavailable — the link is on-screen regardless
     }
   };
 
@@ -62,12 +64,12 @@ export default function InviteLinkCard() {
           icon={<IconChat className="h-4 w-4" />}
           onClick={() => {
             if (!url) return;
-            trackShare("invite_link_shared");
-            shareText(`Add me as a friend on MyLudo! ${url}`);
+            trackShare("invite_link_shared", { source: "invite_button" });
+            shareWithImage(`Add me as a friend on MyLudo! ${url}`, `${url}/opengraph-image`);
           }}
           disabled={!url}
         >
-          Share
+          Invite
         </PillButton>
       </div>
     </div>
