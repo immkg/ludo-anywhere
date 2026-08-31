@@ -46,3 +46,6 @@ next-env.d.ts
 
 # local ad-hoc scripts (not for commit)
 /analytic.mjs
+
+# store listing drafts/screenshots (not for commit)
+/store-assets/
