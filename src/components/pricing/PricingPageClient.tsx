@@ -370,7 +370,7 @@ function CouponBar({
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="Enter code"
-          className="min-h-9 min-w-0 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-sm text-ink placeholder:text-ink-muted sm:w-64 sm:flex-none"
+          className="min-h-9 min-w-0 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-base text-ink placeholder:text-ink-muted sm:w-64 sm:flex-none sm:text-sm"
         />
         <button
           onClick={redeem}

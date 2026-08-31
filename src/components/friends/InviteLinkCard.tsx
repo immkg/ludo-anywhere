@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PillButton from "./PillButton";
 import { IconChat } from "./icons";
 import { IconCopy, IconCheck } from "@/components/lobby/icons";
 import { GREEN } from "@/components/nav/navItems";
-import { shareWithImage, shareOrCopyWithImage } from "@/lib/share";
+import { shareOnWhatsApp, shareOrCopyWithImage } from "@/lib/share";
 import { trackShare } from "@/lib/socketActions";
 import { useInviteLink } from "@/lib/useInviteLink";
 
@@ -15,6 +15,13 @@ export default function InviteLinkCard() {
   const invite = useInviteLink();
   const url = invite?.url ?? null;
   const [copied, setCopied] = useState(false);
+  // false on first render (SSR has no navigator) — set right after mount,
+  // before the user can interact, so the label just reflects reality
+  // rather than causing a hydration mismatch.
+  const [canShare, setCanShare] = useState(false);
+  useEffect(() => {
+    setCanShare(typeof navigator !== "undefined" && !!navigator.share);
+  }, []);
 
   const handleCopy = async () => {
     if (!url) return;
@@ -56,7 +63,7 @@ export default function InviteLinkCard() {
           onClick={handleCopy}
           disabled={!url}
         >
-          {copied ? "Copied!" : "Copy link"}
+          {copied ? "Copied!" : canShare ? "Share" : "Copy link"}
         </PillButton>
         <PillButton
           color={GREEN}
@@ -65,7 +72,10 @@ export default function InviteLinkCard() {
           onClick={() => {
             if (!url) return;
             trackShare("invite_link_shared", { source: "invite_button" });
-            shareWithImage(`Add me as a friend on MyLudo! ${url}`, `${url}/opengraph-image`);
+            // Always WhatsApp specifically here (not the general OS share
+            // sheet) — this button is the dedicated WhatsApp shortcut, the
+            // other one already covers "let the user pick an app".
+            shareOnWhatsApp(`Add me as a friend on MyLudo! ${url}`);
           }}
           disabled={!url}
         >
