@@ -68,7 +68,13 @@ export default function FilterDropdown({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.12 }}
-            className="absolute right-0 z-20 mt-2 max-h-64 min-w-[10rem] overflow-auto rounded-2xl border border-line bg-surface p-1 shadow-lg"
+            // Left-anchored (grows rightward from the trigger) rather than
+            // right-anchored: both call sites (HistoryFilterBar,
+            // LeaderboardFilterBar) cluster their dropdowns together near
+            // the left edge of a header that stacks to its own row on
+            // mobile — right-anchoring the first one there pushed this
+            // min-w-[10rem] menu left of the trigger and off-screen.
+            className="absolute left-0 z-20 mt-2 max-h-64 min-w-[10rem] overflow-auto rounded-2xl border border-line bg-surface p-1 shadow-lg"
           >
             {options.map((o) => (
               <li key={o.value}>

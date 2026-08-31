@@ -1,6 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
+import { cn } from "@/lib/utils";
 
 const EMOJIS = ["👍", "🎉", "😂", "😮", "😢", "🔥"];
 
@@ -26,10 +27,24 @@ export default function ReactionPicker({
   mode,
   onSelect,
   onClose,
+  align = "center",
+  vAlign = "bottom",
 }: {
   mode: "emoji" | "sticker";
   onSelect: (reaction: Reaction) => void;
   onClose: () => void;
+  // "center" (the default, used by the game-wide bar's own triggers, which
+  // sit away from the screen edges) centers the menu under the trigger.
+  // "left"/"right" instead anchor that edge of the menu to the trigger —
+  // for a trigger that itself sits near a screen edge (a per-player
+  // sticker button in a corner card — see PlayerCorner.tsx), centering
+  // would push half the menu off-screen.
+  align?: "left" | "right" | "center";
+  // "bottom" (the default) opens the menu below the trigger. "top" opens
+  // it above instead — for a trigger near the bottom of the viewport (a
+  // bottom-row player corner), opening downward could push the menu off
+  // the bottom of the screen.
+  vAlign?: "top" | "bottom";
 }) {
   const reduceMotion = useReducedMotion();
 
@@ -39,7 +54,13 @@ export default function ReactionPicker({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.96 }}
       transition={{ duration: 0.15 }}
-      className="absolute left-1/2 top-full z-20 mt-2 grid w-max -translate-x-1/2 grid-cols-4 gap-1.5 rounded-2xl border border-line bg-surface p-2 shadow-lg"
+      className={cn(
+        "absolute z-20 grid w-max grid-cols-4 gap-1.5 rounded-2xl border border-line bg-surface p-2 shadow-lg",
+        vAlign === "bottom" ? "top-full mt-2" : "bottom-full mb-2",
+        align === "center" && "left-1/2 -translate-x-1/2",
+        align === "left" && "left-0",
+        align === "right" && "right-0",
+      )}
       role="menu"
     >
       {mode === "emoji"

@@ -775,10 +775,17 @@ app.prepare().then(() => {
     // change, just relayed to everyone else currently viewing this room.
     // Payload shape is validated (not just trusted) since a hand-crafted
     // client could otherwise broadcast arbitrary strings/paths to others.
-    socket.on("game:reaction", ({ roomCode, reaction } = {}) => {
-      if (!getRoom(roomCode) || !socket.rooms.has(roomCode)) return;
+    // An optional targetSeatId (from a per-player sticker button — see
+    // PlayerCorner.tsx) pins it to that seat's home on the board instead of
+    // the usual center-screen pop; only relayed if it actually names a seat
+    // still in this room.
+    socket.on("game:reaction", ({ roomCode, reaction, targetSeatId } = {}) => {
+      const room = getRoom(roomCode);
+      if (!room || !socket.rooms.has(roomCode)) return;
+      const target =
+        typeof targetSeatId === "string" && room.seats.some((s) => s.id === targetSeatId) ? targetSeatId : undefined;
       if (reaction?.kind === "emoji" && typeof reaction.value === "string" && reaction.value.length <= 8) {
-        socket.to(roomCode).emit("game:reaction", { kind: "emoji", value: reaction.value });
+        socket.to(roomCode).emit("game:reaction", { kind: "emoji", value: reaction.value, targetSeatId: target });
       } else if (
         reaction?.kind === "sticker" &&
         typeof reaction.src === "string" &&
@@ -788,6 +795,7 @@ app.prepare().then(() => {
           kind: "sticker",
           src: reaction.src,
           alt: typeof reaction.alt === "string" ? reaction.alt.slice(0, 60) : "",
+          targetSeatId: target,
         });
       }
     });

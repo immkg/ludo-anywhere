@@ -178,6 +178,9 @@ export function refreshPresence(): Promise<{ presence: Record<string, { online: 
 
 // Ephemeral, fire-and-forget — the sender already shows it locally
 // (GameView.tsx), this just relays it to everyone else in the room.
-export function sendReaction(roomCode: string, reaction: Reaction) {
-  getSocket().emit("game:reaction", { roomCode, reaction });
+// `targetSeatId` (from a per-player sticker button — see PlayerCorner.tsx)
+// pins the reaction to that seat's home on the board instead of the usual
+// center-screen pop.
+export function sendReaction(roomCode: string, reaction: Reaction, targetSeatId?: string) {
+  getSocket().emit("game:reaction", { roomCode, reaction, targetSeatId });
 }

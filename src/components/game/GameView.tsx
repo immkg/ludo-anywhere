@@ -22,7 +22,7 @@ import {
 } from "@/lib/socketActions";
 import { clearOwnedSeats } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
-import { colorForArm } from "@/game/board";
+import { colorForArm, buildBoardLayout } from "@/game/board";
 import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor, DICE_HOLD_MS } from "@/game/engine";
 import Dice, { type ThrowStyle } from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
@@ -42,6 +42,22 @@ const Board = dynamic(() => import("@/components/game/Board"), {
 
 const AUTO_MOVE_MS = 15000;
 const REACTION_DISPLAY_MS = 1600;
+
+// Where a per-player sticker (see homeReactions below) lands: the center
+// of that arm's "cage" — the same board-space rect Board.tsx draws the
+// yard on — expressed as a 0..100 percentage of the board's own square
+// footprint, so it can position a plain HTML overlay over boardSlotRef
+// (sized to match the board exactly) without needing any of Konva's own
+// pixel math. buildBoardLayout() is a cached pure function (see
+// src/game/board.js), so this is cheap to call per seat, not memoized.
+function homePositionPercent(armIndex: number) {
+  const layout = buildBoardLayout();
+  const cage = layout.arms[armIndex].cage;
+  return {
+    left: ((cage.x + cage.width / 2) / layout.viewBox) * 100,
+    top: ((cage.y + cage.height / 2) / layout.viewBox) * 100,
+  };
+}
 
 export default function GameView({ room }: { room: Room }) {
   const router = useRouter();
@@ -64,6 +80,11 @@ export default function GameView({ room }: { room: Room }) {
   const [rematchError, setRematchError] = useState<string | null>(null);
   const [activeReaction, setActiveReaction] = useState<Reaction | null>(null);
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-seat stickers sent via a player card's own sticker button (see
+  // PlayerCorner.tsx) — shown at that seat's home on the board instead of
+  // center-screen, keyed by seatId so more than one can be up at once.
+  const [homeReactions, setHomeReactions] = useState<Record<string, Reaction>>({});
+  const homeReactionTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const reduceMotion = useReducedMotion();
 
   // Geometry for the board square and the dice's "flick" throw (see
@@ -222,18 +243,46 @@ export default function GameView({ room }: { room: Room }) {
     showReaction(reaction);
     sendReaction(room.code, reaction);
   };
-  useEffect(() => () => {
-    if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
-  }, []);
+
+  const showHomeReaction = (seatId: string, reaction: Reaction) => {
+    setHomeReactions((prev) => ({ ...prev, [seatId]: reaction }));
+    if (homeReactionTimersRef.current[seatId]) clearTimeout(homeReactionTimersRef.current[seatId]);
+    homeReactionTimersRef.current[seatId] = setTimeout(() => {
+      setHomeReactions((prev) => {
+        const next = { ...prev };
+        delete next[seatId];
+        return next;
+      });
+    }, REACTION_DISPLAY_MS);
+  };
+  const handleSendPlayerSticker = (seatId: string, reaction: Reaction) => {
+    showHomeReaction(seatId, reaction);
+    sendReaction(room.code, reaction, seatId);
+  };
+
+  useEffect(
+    () => () => {
+      if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
+      Object.values(homeReactionTimersRef.current).forEach(clearTimeout);
+    },
+    [],
+  );
 
   // Reactions broadcast from other seats/spectators in the same room — the
-  // sender already shows theirs locally via handleReact above, so this only
-  // ever fires for reactions someone else sent (see game:reaction in
-  // server.js, which relays to everyone but the sender).
+  // sender already shows theirs locally via handleReact/handleSendPlayerSticker
+  // above, so this only ever fires for reactions someone else sent (see
+  // game:reaction in server.js, which relays to everyone but the sender).
+  // A targetSeatId (a per-player sticker — see PlayerCorner.tsx) routes it
+  // to that seat's home instead of the usual center-screen pop.
   useEffect(() => {
     const socket = getSocket();
-    const onIncoming = (reaction: Reaction) => {
-      setActiveReaction(reaction);
+    const onIncoming = (payload: Reaction & { targetSeatId?: string }) => {
+      const { targetSeatId, ...reaction } = payload;
+      if (targetSeatId) {
+        showHomeReaction(targetSeatId, reaction as Reaction);
+        return;
+      }
+      setActiveReaction(reaction as Reaction);
       if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
       reactionTimerRef.current = setTimeout(() => setActiveReaction(null), REACTION_DISPLAY_MS);
     };
@@ -465,6 +514,7 @@ export default function GameView({ room }: { room: Room }) {
             rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 0 && canMove}
             dice={diceArm === 0 ? diceMount : undefined}
+            onSendSticker={handleSendPlayerSticker}
           />
           <PlayerCorner
             seat={seatByArm.get(1) ?? null}
@@ -476,6 +526,7 @@ export default function GameView({ room }: { room: Room }) {
             canMove={currentArm === 1 && canMove}
             dice={diceArm === 1 ? diceMount : undefined}
             diceFirst
+            onSendSticker={handleSendPlayerSticker}
           />
         </div>
 
@@ -494,6 +545,7 @@ export default function GameView({ room }: { room: Room }) {
           <AnimatePresence>
             {activeReaction && (
               <motion.div
+                key="center-reaction"
                 initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.4 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
@@ -512,6 +564,40 @@ export default function GameView({ room }: { room: Room }) {
                 )}
               </motion.div>
             )}
+            {Object.entries(homeReactions).map(([seatId, reaction]) => {
+              const seat = room.seats.find((s) => s.id === seatId);
+              if (!seat) return null;
+              const pos = homePositionPercent(seat.armIndex);
+              return (
+                <motion.div
+                  key={`home-${seatId}`}
+                  initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.4 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
+                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                  className="pointer-events-none absolute flex items-center justify-center"
+                  // `x`/`y` (framer-motion's own translate shorthand, not a
+                  // raw `transform` string) so this composes with the
+                  // `scale` in animate/exit into one transform instead of
+                  // one silently overwriting the other — a plain
+                  // `transform: "translate(-50%,-50%)"` here was getting
+                  // clobbered by the scale animation, leaving this
+                  // uncentered.
+                  style={{ left: `${pos.left}%`, top: `${pos.top}%`, x: "-50%", y: "-50%" }}
+                >
+                  {reaction.kind === "emoji" ? (
+                    <span className="text-[32cqmin] leading-none drop-shadow-lg">{reaction.value}</span>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={reaction.src}
+                      alt={reaction.alt}
+                      className="h-[32cqmin] w-[32cqmin] object-contain drop-shadow-lg"
+                    />
+                  )}
+                </motion.div>
+              );
+            })}
           </AnimatePresence>
         </div>
 
@@ -536,6 +622,8 @@ export default function GameView({ room }: { room: Room }) {
             rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 3 && canMove}
             dice={diceArm === 3 ? diceMount : undefined}
+            bottomRow
+            onSendSticker={handleSendPlayerSticker}
           />
           <PlayerCorner
             seat={seatByArm.get(2) ?? null}
@@ -547,6 +635,8 @@ export default function GameView({ room }: { room: Room }) {
             canMove={currentArm === 2 && canMove}
             dice={diceArm === 2 ? diceMount : undefined}
             diceFirst
+            bottomRow
+            onSendSticker={handleSendPlayerSticker}
           />
         </div>
       </div>

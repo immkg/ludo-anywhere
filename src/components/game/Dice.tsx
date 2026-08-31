@@ -20,7 +20,9 @@ const MIN_SPIN_MS = 650;
 const SPIN_LOOP_SECONDS = 0.5;
 const LAND_SECONDS = 0.55;
 const LAND_EASE = [0.16, 1, 0.3, 1] as const;
-const CUBE_SIZE = 58; // px — 10% down from the original 64 (h-16); matches the button's h-[58px] w-[58px] below
+const CUBE_SIZE = 48; // px — shrunk from 58 to land on the same size as PlayerCorner.tsx's
+// (now-enlarged) avatar circle, so the die and the avatar read as one
+// consistent scale — matches the button's h-[48px] w-[48px] below.
 const HALF = CUBE_SIZE / 2;
 const AUTO_ROLL_MS = 5000;
 // Pointer down->up shorter than this is a plain tap (today's simple
@@ -599,7 +601,7 @@ export default function Dice({
           disabled={(!canRoll && !onBoard) || isRolling}
           aria-label={onBoard ? "Bring the die back" : undefined}
           className={cn(
-            "relative h-[58px] w-[58px] rounded-2xl transition",
+            "relative h-[48px] w-[48px] rounded-2xl transition",
             waitingToRoll ? "ring-2 ring-[#FFD400]/70 ring-offset-2 ring-offset-bg active:scale-95" : "",
           )}
           style={{
@@ -610,8 +612,10 @@ export default function Dice({
             // above): that's a rigid rotation under any perspective
             // distance, so tightening this only adds correct depth
             // foreshortening, not the shearing a Z-axis rotate caused when
-            // it used to live inside this same 3D scene.
-            perspective: 180,
+            // it used to live inside this same 3D scene. Scaled down from
+            // 180 along with CUBE_SIZE (48/58) to keep the same relative
+            // foreshortening at the smaller size.
+            perspective: 150,
           }}
         >
           <div
