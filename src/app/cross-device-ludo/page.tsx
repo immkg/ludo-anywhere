@@ -72,7 +72,7 @@ export default function CrossDeviceLudoPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-bold text-ink">What you need</h2>
         <p className="text-sm text-ink-muted sm:text-base">
-          A browser. That&apos;s it — no app to install, on any phone, tablet,
+          A browser. That&apos;s it — nothing to install, on any phone, tablet,
           or computer. One player creates a room and shares the link or room
           code; everyone else opens it in their own browser and joins. See{" "}
           <Link href="/how-to-play" className="text-accent hover:underline">

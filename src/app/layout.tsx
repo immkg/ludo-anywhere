@@ -14,9 +14,9 @@ const NO_FLASH_THEME_SCRIPT = `(function(){try{var s=localStorage.getItem("ludo:
 
 const SITE_URL = "https://www.myludo.life";
 const SITE_NAME = "MyLudo";
-const TITLE = "MyLudo — Play Ludo Online, No App, No Ads";
+const TITLE = "MyLudo — Play Ludo Online, No Install, No Ads";
 const DESCRIPTION =
-  "Create a room and play Ludo with 2–4 players across any mix of phones, tablets, and computers. No download, no ads, ever — just a link and a game.";
+  "Create a room and play Ludo with 2–4 players across any mix of phones, tablets, and computers. No install required, no ads, ever — just a link and a game.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

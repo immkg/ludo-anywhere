@@ -19,9 +19,9 @@ const FAQS = [
       "No. MyLudo has no ads and never will. The only monetization is a free daily allowance plus optional paid Game Packs and subscriptions for unlimited play.",
   },
   {
-    question: "Do I need to download an app?",
+    question: "Do I need to install anything to play?",
     answer:
-      "No. MyLudo runs entirely in your browser, on any phone, tablet, or computer.",
+      "No. MyLudo runs entirely in your browser, on any phone, tablet, or computer. If you'd like a home-screen icon, your browser can install it as an app — but that's completely optional.",
   },
   {
     question: "Do I need an account to play?",
