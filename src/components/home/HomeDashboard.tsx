@@ -3,6 +3,7 @@ import { IconArrowRight } from "@/components/home/icons";
 import { IconTrophy } from "@/components/lobby/icons";
 import TopPlayersList from "@/components/home/TopPlayersList";
 import type { TopPlayer } from "@/lib/leaderboard";
+import type { TrophyTier } from "@/lib/trophies";
 
 // Fixed brand colors used elsewhere already (src/components/brand/Wordmark.tsx,
 // src/game/board.js's colorForArm) — reused here rather than adding new
@@ -11,25 +12,32 @@ import type { TopPlayer } from "@/lib/leaderboard";
 const BLUE = "#1565E8";
 const GREEN = "#1F9E4C";
 const VIOLET = "#8b5cf6";
+const GOLD = "var(--color-accent-2)";
+const ACCENT = "var(--color-accent)";
 
 export type DashboardStats = {
   gamesPlayed: number;
   gamesWon: number;
   winRatePercent: number | null;
   roomsCreated: number;
+  friendsCount: number;
+  playTimeHours: number;
 };
 
 type HomeDashboardProps = {
   displayName: string;
   topPlayers: TopPlayer[];
   stats: DashboardStats;
+  trophy: TrophyTier;
+  nextTrophy: TrophyTier | null;
+  xp: number;
 };
 
 // Identity/notifications/credits/account-nav now live in AuthenticatedNav
 // (src/app/page.tsx wraps this component with it) — this is just the
 // page's own dashboard content.
-export default function HomeDashboard({ displayName, topPlayers, stats }: HomeDashboardProps) {
-  const hasStats = stats.gamesPlayed > 0 || stats.roomsCreated > 0;
+export default function HomeDashboard({ displayName, topPlayers, stats, trophy, nextTrophy, xp }: HomeDashboardProps) {
+  const hasStats = stats.gamesPlayed > 0 || stats.roomsCreated > 0 || stats.friendsCount > 0;
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pb-8 pt-4 sm:px-6 sm:pt-6 lg:gap-6 lg:px-8 lg:pt-8">
@@ -113,6 +121,8 @@ export default function HomeDashboard({ displayName, topPlayers, stats }: HomeDa
             <img src="/brand/star-red.png" alt="" aria-hidden className="absolute bottom-4 right-0 h-5 w-5 opacity-80" />
           </div>
 
+          {hasStats && <TrophyCard trophy={trophy} nextTrophy={nextTrophy} xp={xp} />}
+
           {hasStats && (
             <section className="rounded-2xl border border-line bg-surface p-3 sm:p-4">
               <h2 className="text-sm font-bold text-ink-muted">Your Stats</h2>
@@ -123,6 +133,8 @@ export default function HomeDashboard({ displayName, topPlayers, stats }: HomeDa
                   <StatTile value={`${stats.winRatePercent}%`} label="Win Rate" color={VIOLET} />
                 )}
                 <StatTile value={stats.roomsCreated} label="Rooms Created" color={BLUE} />
+                <StatTile value={stats.friendsCount} label="Friends" color={GOLD} />
+                <StatTile value={`${stats.playTimeHours}h`} label="Play Time" color={ACCENT} />
               </div>
             </section>
           )}
@@ -143,6 +155,34 @@ export default function HomeDashboard({ displayName, topPlayers, stats }: HomeDa
         </div>
       </div>
     </main>
+  );
+}
+
+// XP is a derived, ever-increasing number (see src/lib/trophies.ts) — the
+// bar shows progress within the *current* tier only, not total XP, so it
+// always reads as "almost there" rather than an intimidating raw count.
+function TrophyCard({ trophy, nextTrophy, xp }: { trophy: TrophyTier; nextTrophy: TrophyTier | null; xp: number }) {
+  const progressPct = nextTrophy
+    ? Math.min(100, Math.max(0, ((xp - trophy.minXp) / (nextTrophy.minXp - trophy.minXp)) * 100))
+    : 100;
+
+  return (
+    <section className="rounded-2xl border border-line bg-surface p-3 sm:p-4">
+      <div className="flex items-center gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={trophy.image} alt="" aria-hidden className="h-16 w-16 shrink-0 object-contain sm:h-20 sm:w-20" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold text-ink-muted">LEVEL {trophy.level}</p>
+          <p className="truncate text-base font-extrabold text-ink sm:text-lg">{trophy.name}</p>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+            <div className="h-full rounded-full transition-[width]" style={{ width: `${progressPct}%`, backgroundColor: GOLD }} />
+          </div>
+          <p className="mt-1 truncate text-[11px] text-ink-muted">
+            {nextTrophy ? `${xp - trophy.minXp} / ${nextTrophy.minXp - trophy.minXp} XP to ${nextTrophy.name}` : "Top rank reached!"}
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 
