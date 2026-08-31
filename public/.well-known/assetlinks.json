@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "life.myludo.twa",
+    "sha256_cert_fingerprints": ["A8:05:87:C7:2E:F6:A2:AC:D9:A3:5A:28:A3:96:CA:D2:CA:8F:5D:49:A0:C5:7B:51:D5:4E:84:07:6F:4E:9E:D4"]
+  }
+}]
