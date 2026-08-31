@@ -82,7 +82,7 @@ export default function FriendSearch({
                 setResult(undefined);
                 setError(null);
               }}
-              className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 py-3 pl-4 pr-12 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
+              className="min-h-12 w-full rounded-2xl border border-line bg-surface-2 py-3 pl-4 pr-12 text-base text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent sm:text-sm"
             />
             <button
               type="submit"

@@ -79,7 +79,10 @@ export default function FeedbackPrompt({
         placeholder="Any suggestions? (optional)"
         rows={1}
         className={cn(
-          "w-full resize-none rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-ink",
+          // iOS Safari auto-zooms on focus for any field under 16px —
+          // text-base (16px) here avoids that; sm:text-sm shrinks back
+          // down once zoom-on-focus isn't a concern (tablet/desktop).
+          "w-full resize-none rounded-xl border border-line bg-surface-2 px-3 py-2 text-base text-ink sm:text-sm",
           "placeholder:text-ink-muted"
         )}
       />
