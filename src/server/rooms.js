@@ -105,7 +105,7 @@ export function hostUserId(room) {
 // a partially-filled board blanks out symmetrically rather than depending
 // on which color a player happens to pick.
 // Returns { room, seats, error }.
-export function addSeats(room, requests, { socketId, deviceId, userId }) {
+export function addSeats(room, requests, { socketId, deviceId, userId, bot } = {}) {
   if (!room) return { error: "Room not found" };
   if (room.status !== "lobby") return { error: "Game already started" };
   if (room.seats.length + requests.length > room.maxPlayers) {
@@ -134,6 +134,7 @@ export function addSeats(room, requests, { socketId, deviceId, userId }) {
     userId: userId || null,
     socketId,
     connected: true,
+    ...(bot ? { bot: true } : {}),
   }));
 
   room.seats.push(...newSeats);

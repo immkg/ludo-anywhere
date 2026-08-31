@@ -99,6 +99,47 @@ export default function GameView({ room }: { room: Room }) {
   // below needs to recompute on every change, not just on resize.
   const currentArm = currentSeat?.armIndex ?? null;
 
+  // A roll can end the turn in the very same state update it happened in
+  // (no legal move, three sixes, or a lone move auto-played — see
+  // rollDice/moveToken in src/game/engine.js): the roller and the new
+  // current seat arrive together in one game:update, with no separate
+  // render in between. Without this, `diceArm` below would jump straight
+  // to the new seat and the single shared <Dice/> instance would unmount
+  // from the roller's corner and remount in the next player's before its
+  // spin ever gets to play — "click dice, nothing rolls, turn just passes"
+  // (see Dice.tsx's rollSeq-keyed animation effect, which only fires while
+  // the instance stays mounted across the update). So: whenever rollSeq
+  // changes, keep the die anchored at whoever just rolled for long enough
+  // to show the roll, then let it hop to the real current seat.
+  //
+  // `lastSeenRoll` remembers, as of the last render that saw a given
+  // rollSeq, which arm was about to roll next — i.e. exactly the roller for
+  // whatever roll shows up with the next rollSeq. State (not a ref) so this
+  // comparison-with-the-previous-render can safely happen during render
+  // itself, matching React's documented pattern for deriving state from a
+  // prop change without an extra round-trip through an effect (which would
+  // let one render slip through with the die already in the new corner).
+  const [lastSeenRoll, setLastSeenRoll] = useState<{ rollSeq: number; nextRollerArm: number } | null>(null);
+  const [diceHoldArm, setDiceHoldArm] = useState<number | null>(null);
+  if (game && (!lastSeenRoll || lastSeenRoll.rollSeq !== game.rollSeq)) {
+    if (lastSeenRoll) setDiceHoldArm(lastSeenRoll.nextRollerArm);
+    setLastSeenRoll({ rollSeq: game.rollSeq, nextRollerArm: currentSeat?.armIndex ?? 0 });
+  }
+  useEffect(() => {
+    if (diceHoldArm == null) return;
+    // Long enough past Dice.tsx's own spin/throw durations (650-1050ms) for
+    // the roll to have visibly landed before the die hops corners, but kept
+    // under BOT_ROLL_DELAY_MS (server.js, 1800ms — how soon a bot re-rolls
+    // after the previous turn ends): a hold that outlives that gap is still
+    // "holding" the die at the previous roller's corner when the *next*
+    // bot's roll arrives, forcing a genuine remount right as that roll
+    // needs to animate — silently swallowing it, same bug as above but one
+    // seat later in a chain of back-to-back forfeits.
+    const timer = setTimeout(() => setDiceHoldArm(null), 1500);
+    return () => clearTimeout(timer);
+  }, [diceHoldArm, game?.rollSeq]);
+  const diceArm = diceHoldArm ?? currentArm;
+
   useLayoutEffect(() => {
     const areaEl = boardAreaRef.current;
     const topRowEl = topRowRef.current;
@@ -146,11 +187,12 @@ export default function GameView({ room }: { room: Room }) {
     // effect finds every ref unmounted and bails out; without this
     // dependency it would never run again once the real layout exists,
     // leaving boardSize/diceGeometry permanently null. Also re-attempts on
-    // every `currentArm` change: the dice moves to a different row/side
-    // each turn (see the render below), which shifts diceWrapRef's own
-    // position without necessarily changing any observed element's size,
-    // so the ResizeObserver alone wouldn't catch it.
-  }, [hasGame, currentArm]);
+    // every `diceArm` change: the dice moves to a different row/side each
+    // time it relocates (see the render below and diceArm above), which
+    // shifts diceWrapRef's own position without necessarily changing any
+    // observed element's size, so the ResizeObserver alone wouldn't catch
+    // it.
+  }, [hasGame, diceArm]);
 
   const showReaction = (reaction: Reaction) => {
     setActiveReaction(reaction);
@@ -316,11 +358,12 @@ export default function GameView({ room }: { room: Room }) {
     emitRollDice(room.code, currentSeat.id, style);
   };
 
-  // Mounted once, next to whichever corner currently has the turn (see
-  // currentArm above and the row JSX below) — not in a fixed spot anymore,
-  // so this same single Dice instance just relocates as the turn passes
-  // instead of a separate copy living in each corner.
-  const diceMount = currentArm != null && (
+  // Mounted once, next to whichever corner currently holds the die (see
+  // diceArm above and the row JSX below) — not in a fixed spot anymore, so
+  // this same single Dice instance just relocates as the turn passes
+  // instead of a separate copy living in each corner. Deliberately keyed
+  // off diceArm rather than currentArm — see the note above diceArm.
+  const diceMount = diceArm != null && (
     <div ref={diceWrapRef}>
       <Dice
         lastRoll={game.lastRoll}
@@ -397,7 +440,7 @@ export default function GameView({ room }: { room: Room }) {
             onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
             rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 0 && canMove}
-            dice={currentArm === 0 ? diceMount : undefined}
+            dice={diceArm === 0 ? diceMount : undefined}
           />
           <PlayerCorner
             seat={seatByArm.get(1) ?? null}
@@ -407,7 +450,7 @@ export default function GameView({ room }: { room: Room }) {
             onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
             rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 1 && canMove}
-            dice={currentArm === 1 ? diceMount : undefined}
+            dice={diceArm === 1 ? diceMount : undefined}
             diceFirst
           />
         </div>
@@ -468,7 +511,7 @@ export default function GameView({ room }: { room: Room }) {
             onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
             rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 3 && canMove}
-            dice={currentArm === 3 ? diceMount : undefined}
+            dice={diceArm === 3 ? diceMount : undefined}
           />
           <PlayerCorner
             seat={seatByArm.get(2) ?? null}
@@ -478,7 +521,7 @@ export default function GameView({ room }: { room: Room }) {
             onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
             rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 2 && canMove}
-            dice={currentArm === 2 ? diceMount : undefined}
+            dice={diceArm === 2 ? diceMount : undefined}
             diceFirst
           />
         </div>

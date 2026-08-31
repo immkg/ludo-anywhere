@@ -50,6 +50,25 @@ export default function TestModeView() {
 
   const currentSeat = game.seats[game.currentSeatIndex] ?? null;
   const currentArm = currentSeat?.armIndex ?? null;
+
+  // Mirrors GameView.tsx's diceArm fix: a roll can end the turn in the same
+  // update it happened in (no legal move, three sixes, a lone auto-played
+  // move), so `currentArm` alone would relocate the single shared <Dice/>
+  // before its spin ever gets to play. See GameView.tsx for the full
+  // rationale.
+  const [lastSeenRoll, setLastSeenRoll] = useState<{ rollSeq: number; nextRollerArm: number } | null>(null);
+  const [diceHoldArm, setDiceHoldArm] = useState<number | null>(null);
+  if (!lastSeenRoll || lastSeenRoll.rollSeq !== game.rollSeq) {
+    if (lastSeenRoll) setDiceHoldArm(lastSeenRoll.nextRollerArm);
+    setLastSeenRoll({ rollSeq: game.rollSeq, nextRollerArm: currentArm ?? 0 });
+  }
+  useEffect(() => {
+    if (diceHoldArm == null) return;
+    const timer = setTimeout(() => setDiceHoldArm(null), 1500);
+    return () => clearTimeout(timer);
+  }, [diceHoldArm, game.rollSeq]);
+  const diceArm = diceHoldArm ?? currentArm;
+
   const validMoves = currentSeat ? getValidMoves(game, currentSeat.id) : [];
   const canRoll = game.status === "playing" && game.diceValue == null;
   const canMove = game.status === "playing" && game.diceValue != null && validMoves.length > 0;
@@ -72,8 +91,9 @@ export default function TestModeView() {
 
   // Mirrors GameView.tsx's own diceMount: a single Dice instance that
   // relocates next to whichever corner currently has the turn instead of
-  // sitting in one fixed spot.
-  const diceMount = currentArm != null && (
+  // sitting in one fixed spot. Keyed off diceArm, not currentArm — see
+  // diceArm above.
+  const diceMount = diceArm != null && (
     <Dice
       lastRoll={game.lastRoll}
       rollSeq={game.rollSeq}
@@ -194,7 +214,7 @@ export default function TestModeView() {
             placement={placementForArm(seatByArm.get(0))}
             rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 0 && canMove}
-            dice={currentArm === 0 ? diceMount : undefined}
+            dice={diceArm === 0 ? diceMount : undefined}
           />
           <PlayerCorner
             seat={seatByArm.get(1) ?? null}
@@ -202,7 +222,7 @@ export default function TestModeView() {
             placement={placementForArm(seatByArm.get(1))}
             rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 1 && canMove}
-            dice={currentArm === 1 ? diceMount : undefined}
+            dice={diceArm === 1 ? diceMount : undefined}
             diceFirst
           />
         </div>
@@ -224,7 +244,7 @@ export default function TestModeView() {
             placement={placementForArm(seatByArm.get(3))}
             rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 3 && canMove}
-            dice={currentArm === 3 ? diceMount : undefined}
+            dice={diceArm === 3 ? diceMount : undefined}
           />
           <PlayerCorner
             seat={seatByArm.get(2) ?? null}
@@ -232,7 +252,7 @@ export default function TestModeView() {
             placement={placementForArm(seatByArm.get(2))}
             rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 2 && canMove}
-            dice={currentArm === 2 ? diceMount : undefined}
+            dice={diceArm === 2 ? diceMount : undefined}
             diceFirst
           />
         </div>

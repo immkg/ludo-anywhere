@@ -92,19 +92,35 @@ app.prepare().then(() => {
     const rolling = room.game.diceValue == null;
     room.botTimer = setTimeout(() => {
       room.botTimer = null;
-      if (getRoom(room.code) !== room) return;
-      const stillBotSeat = currentBotSeat(room);
-      if (!stillBotSeat || stillBotSeat.id !== botSeat.id) return scheduleBotTurn(room);
-
-      if (rolling) {
-        room.game = rollDice(room.game);
-      } else {
-        const tokenIndex = pickAutoMoveToken(room.game, botSeat.id);
-        if (tokenIndex != null) room.game = moveToken(room.game, botSeat.id, tokenIndex);
+      if (getRoom(room.code) !== room) {
+        // The one way this chain can die forever: the room this timer was
+        // armed for is no longer the live one under its code (deleted, or
+        // replaced) — nothing re-arms it after this. Should be rare; log it
+        // so a real freeze report can be matched against server logs.
+        console.error("Bot turn chain stopped: room no longer live", room.code, botSeat.name);
+        return;
       }
-      broadcastGame(room);
-      finishRoomIfNeeded(room);
-      scheduleBotTurn(room);
+      // Always reschedule, even if something below throws — otherwise a
+      // single unexpected error permanently kills this room's bot chain
+      // (nothing else ever re-arms it), which looks like the bot froze and
+      // the whole game got stuck.
+      try {
+        const stillBotSeat = currentBotSeat(room);
+        if (!stillBotSeat || stillBotSeat.id !== botSeat.id) return;
+
+        if (rolling) {
+          room.game = rollDice(room.game);
+        } else {
+          const tokenIndex = pickAutoMoveToken(room.game, botSeat.id);
+          if (tokenIndex != null) room.game = moveToken(room.game, botSeat.id, tokenIndex);
+        }
+        broadcastGame(room);
+        finishRoomIfNeeded(room);
+      } catch (err) {
+        console.error("Bot turn failed, rescheduling", room.code, err);
+      } finally {
+        scheduleBotTurn(room);
+      }
     }, rolling ? BOT_ROLL_DELAY_MS : BOT_MOVE_DELAY_MS);
   }
 
@@ -970,7 +986,7 @@ app.prepare().then(() => {
           const { error: seatError, seats: addedSeats } = addSeats(
             newRoom,
             [{ name: seat.name, profileId: seat.profileId }],
-            { socketId: null, deviceId: seat.deviceId, userId: seat.userId }
+            { socketId: null, deviceId: seat.deviceId, userId: seat.userId, bot: seat.bot }
           );
           if (seatError) {
             deleteRoom(newRoom.code);
