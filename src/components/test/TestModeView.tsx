@@ -4,7 +4,15 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useMotionValue } from "framer-motion";
-import { createGame, rollDice, moveToken, getValidMoves, pickAutoMoveToken, placementFor } from "@/game/engine";
+import {
+  createGame,
+  rollDice,
+  moveToken,
+  getValidMoves,
+  pickAutoMoveToken,
+  placementFor,
+  DICE_HOLD_MS,
+} from "@/game/engine";
 import { armForSeatIndex, colorForArm, YARD, finished as finishLine, trackSteps } from "@/game/board";
 import { cn } from "@/lib/utils";
 import Dice from "@/components/game/Dice";
@@ -64,7 +72,7 @@ export default function TestModeView() {
   }
   useEffect(() => {
     if (diceHoldArm == null) return;
-    const timer = setTimeout(() => setDiceHoldArm(null), 1500);
+    const timer = setTimeout(() => setDiceHoldArm(null), DICE_HOLD_MS);
     return () => clearTimeout(timer);
   }, [diceHoldArm, game.rollSeq]);
   const diceArm = diceHoldArm ?? currentArm;

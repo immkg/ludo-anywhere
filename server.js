@@ -27,7 +27,7 @@ import {
   isGuestKey,
 } from "./src/server/rooms.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
-import { rollDice, moveToken, pickAutoMoveToken } from "./src/game/engine.js";
+import { rollDice, moveToken, pickAutoMoveToken, DICE_HOLD_MS } from "./src/game/engine.js";
 import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
 import { resolveSeatProfiles, resolveGuestSeats } from "./src/server/profiles.js";
@@ -61,7 +61,14 @@ app.prepare().then(() => {
     io.to(room.code).emit("game:update", serializeGame(room));
   }
 
-  const BOT_ROLL_DELAY_MS = 1800;
+  // Derived from DICE_HOLD_MS (src/game/engine.js), with margin, rather than
+  // an independent guess: a bot must never roll again before every client's
+  // dice-hold from its *previous* roll has released, or that next roll's
+  // spin gets silently swallowed by a forced remount mid-hold (same bug as
+  // an un-held auto-forfeit, one seat later in a chain of back-to-back
+  // forfeits). Keeping this tied to DICE_HOLD_MS means the two can never
+  // drift out of sync again.
+  const BOT_ROLL_DELAY_MS = DICE_HOLD_MS + 300;
   const BOT_MOVE_DELAY_MS = 1400;
 
   // Whichever seat currently owed a turn, if that seat is a bot — null once

@@ -59,23 +59,35 @@ export default function ReactionBar({
         </AnimatePresence>
       </div>
 
-      <div className="relative">
-        <button
-          onClick={() => setOpenPicker(openPicker === "confirm" ? null : "confirm")}
-          aria-label={isHost ? "End game" : "Leave game"}
-          aria-expanded={openPicker === "confirm"}
-          className="flex min-h-11 items-center justify-center rounded-xl px-2.5 text-sm font-bold text-accent transition hover:bg-accent/10"
-        >
-          {isHost ? "End" : "Leave"}
-        </button>
-        <AnimatePresence>
-          {openPicker === "confirm" && (
+      <button
+        onClick={() => setOpenPicker(openPicker === "confirm" ? null : "confirm")}
+        aria-label={isHost ? "End game" : "Leave game"}
+        aria-expanded={openPicker === "confirm"}
+        className="flex min-h-11 items-center justify-center rounded-xl px-2.5 text-sm font-bold text-accent transition hover:bg-accent/10"
+      >
+        {isHost ? "End" : "Leave"}
+      </button>
+      {/* A real viewport-centered modal (matching GameMenu.tsx/
+          PlayerActionsModal), not an anchored dropdown off this button —
+          the button sits off-center in this bar, so `absolute`-anchoring
+          the confirm here landed it left-of-center on narrow screens
+          instead of actually centering it. */}
+      <AnimatePresence>
+        {openPicker === "confirm" && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-20 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+            onClick={() => setOpenPicker(null)}
+          >
             <motion.div
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.96 }}
-              transition={{ duration: 0.15 }}
-              className="absolute right-0 top-full z-20 mt-2 w-60 rounded-2xl border border-line bg-surface p-3 shadow-lg"
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}
+              transition={{ duration: 0.18 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-2xl border border-line bg-surface p-4 shadow-lg"
               role="menu"
             >
               <p className="text-sm text-ink-muted">
@@ -83,7 +95,7 @@ export default function ReactionBar({
                   ? "Play stops for everyone right away."
                   : "You'll be paused — the host can let you back in."}
               </p>
-              <div className="mt-2.5 flex gap-2">
+              <div className="mt-3 flex gap-2">
                 <button
                   onClick={() => setOpenPicker(null)}
                   className="flex-1 rounded-xl border border-line py-2 text-sm font-semibold text-ink-muted transition hover:bg-surface-2"
@@ -102,9 +114,9 @@ export default function ReactionBar({
                 </button>
               </div>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <button
         onClick={onMore}

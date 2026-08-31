@@ -1,5 +1,6 @@
 import type { GameState } from "@/types/game";
 
+export const DICE_HOLD_MS: number;
 export function createGame(seats: { id: string; armIndex: number }[]): GameState;
 export function getCurrentSeat(state: GameState): GameState["seats"][number] | null;
 export function getValidMoves(state: GameState, seatId: string): number[];

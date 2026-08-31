@@ -23,7 +23,7 @@ import {
 import { clearOwnedSeats } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { colorForArm } from "@/game/board";
-import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor } from "@/game/engine";
+import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor, DICE_HOLD_MS } from "@/game/engine";
 import Dice, { type ThrowStyle } from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import ReactionBar from "@/components/game/ReactionBar";
@@ -127,15 +127,12 @@ export default function GameView({ room }: { room: Room }) {
   }
   useEffect(() => {
     if (diceHoldArm == null) return;
-    // Long enough past Dice.tsx's own spin/throw durations (650-1050ms) for
-    // the roll to have visibly landed before the die hops corners, but kept
-    // under BOT_ROLL_DELAY_MS (server.js, 1800ms — how soon a bot re-rolls
-    // after the previous turn ends): a hold that outlives that gap is still
-    // "holding" the die at the previous roller's corner when the *next*
-    // bot's roll arrives, forcing a genuine remount right as that roll
-    // needs to animate — silently swallowing it, same bug as above but one
-    // seat later in a chain of back-to-back forfeits.
-    const timer = setTimeout(() => setDiceHoldArm(null), 1500);
+    // DICE_HOLD_MS (src/game/engine.js) — long enough past Dice.tsx's own
+    // spin/throw durations (650-1050ms) for the roll to have visibly landed
+    // before the die hops corners. server.js derives its bot re-roll delay
+    // from this same constant so a bot can never roll again before this
+    // hold has released — see the comment there.
+    const timer = setTimeout(() => setDiceHoldArm(null), DICE_HOLD_MS);
     return () => clearTimeout(timer);
   }, [diceHoldArm, game?.rollSeq]);
   const diceArm = diceHoldArm ?? currentArm;
@@ -192,7 +189,22 @@ export default function GameView({ room }: { room: Room }) {
     // shifts diceWrapRef's own position without necessarily changing any
     // observed element's size, so the ResizeObserver alone wouldn't catch
     // it.
-  }, [hasGame, diceArm]);
+    //
+    // Also keyed on `room.code` and `game.status`: a "Play again" rematch
+    // swaps this whole subtree out (the `game.status === "finished"` branch
+    // above renders none of these refs at all) and back in, but GameView
+    // itself isn't guaranteed to remount across that — Next's router
+    // doesn't force a remount just because the room's dynamic route segment
+    // changed. If `hasGame` and `diceArm` both happen to hold their
+    // pre-rematch values (common: a fresh game always starts at seat index
+    // 0, which often carries the same arm as whatever was showing when the
+    // last game ended), this effect would never re-run at all, leaving its
+    // ResizeObserver attached to the old game's now-unmounted nodes and the
+    // new board permanently unmeasured (invisible) until something else
+    // happens to change diceArm, e.g. the first roll of the new game.
+    // `room.code` always changes on rematch (a new room is created), so
+    // it's a reliable trigger even when the others coincidentally aren't.
+  }, [hasGame, diceArm, room.code, game?.status]);
 
   const showReaction = (reaction: Reaction) => {
     setActiveReaction(reaction);

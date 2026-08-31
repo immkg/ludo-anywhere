@@ -7,6 +7,17 @@ import {
   isSafeRelativeCell,
 } from "./board.js";
 
+// How long a client visually holds the die at the seat that just rolled
+// before letting it hop to the next player's corner (see GameView.tsx's
+// diceHoldArm) — a roll that also ends the turn (no legal move, three
+// sixes, or a lone auto-played move) would otherwise unmount/remount the
+// single shared <Dice/> before its spin ever plays. Shared here (rather
+// than duplicated as a magic number in both GameView.tsx and server.js) so
+// the server's bot scheduler can guarantee it never rolls again before this
+// hold has released — otherwise the *next* bot's roll arrives mid-hold,
+// forcing a remount right as it needs to animate, silently swallowing it.
+export const DICE_HOLD_MS = 2000;
+
 // seats: [{ id, armIndex }] — display info (name/color/connection) lives in
 // the room, not the game state.
 export function createGame(seats) {
