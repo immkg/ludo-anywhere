@@ -10,7 +10,9 @@
 // Replaces the previous Umami integration (git history has it) — switched
 // because Umami Cloud gates its query API behind a paid plan, while
 // PostHog's free tier (1M events/mo) includes full API access.
-const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com";
+// Defaults to our managed reverse proxy (t.myludo.life) so capture goes
+// first-party instead of us.i.posthog.com directly.
+const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://t.myludo.life";
 const POSTHOG_PROJECT_TOKEN = process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN;
 
 // Gated to production, same as the browser tracker script in
