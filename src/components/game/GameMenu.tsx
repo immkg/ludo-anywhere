@@ -7,6 +7,7 @@ import { shareRoomLink, roomJoinUrl } from "@/lib/share";
 import { colorForArm } from "@/game/board";
 import Button from "@/components/ui/Button";
 import ThemeToggle from "@/components/ThemeToggle";
+import FeedbackPrompt from "@/components/game/FeedbackPrompt";
 import type { Seat } from "@/types/room";
 
 // Room-wide controls, opened from the "more" button in ReactionBar — also
@@ -42,6 +43,7 @@ export default function GameMenu({
   const [endGameLoading, setEndGameLoading] = useState(false);
   const [endGameError, setEndGameError] = useState<string | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [showLeaveFeedback, setShowLeaveFeedback] = useState(false);
   const reduceMotion = useReducedMotion();
 
   const handleInvite = async () => {
@@ -101,7 +103,9 @@ export default function GameMenu({
             <ThemeToggle />
           </div>
 
-          {confirmingEnd ? (
+          {showLeaveFeedback ? (
+            <FeedbackPrompt context="LEFT_EARLY" gameId={roomCode} onDone={onLeaveGame} />
+          ) : confirmingEnd ? (
             <>
               <p className="text-sm text-ink-muted">
                 {canEndGame
@@ -113,7 +117,10 @@ export default function GameMenu({
                 <Button variant="secondary" onClick={() => setConfirmingEnd(false)} disabled={endGameLoading}>
                   Cancel
                 </Button>
-                <Button onClick={canEndGame ? handleEndGame : onLeaveGame} disabled={endGameLoading}>
+                <Button
+                  onClick={canEndGame ? handleEndGame : () => setShowLeaveFeedback(true)}
+                  disabled={endGameLoading}
+                >
                   {canEndGame ? (endGameLoading ? "Ending…" : "End game") : "Leave"}
                 </Button>
               </div>

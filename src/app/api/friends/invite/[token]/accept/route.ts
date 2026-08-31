@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { issueCoupon } from "@/lib/coupons";
 
 // Visiting someone's private invite link and confirming *is* the mutual
 // consent, so this creates an already-accepted friendship directly, unlike
@@ -41,6 +42,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
         respondedAt: new Date(),
       },
     });
+  }
+
+  // The first invite link anyone ever accepts is their referral moment —
+  // no dependency on account age or a callbackUrl-carried code. One
+  // Referral per referee ever, enforced by Referral.refereeId's uniqueness.
+  const alreadyReferred = await prisma.referral.findUnique({ where: { refereeId: session.user.id } });
+  if (!alreadyReferred) {
+    const referral = await prisma.referral.create({
+      data: { referrerId: owner.id, refereeId: session.user.id, code: token },
+    });
+    await issueCoupon(session.user.id, "referral", { role: "REFEREE_WELCOME", referralId: referral.id });
   }
 
   return NextResponse.json({ friend: { userId: owner.id, name: owner.name } });

@@ -2,6 +2,7 @@ import type { Payment } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOrder } from "@/lib/uropai";
 import { getPricingConfig, logEvent } from "@/lib/entitlements";
+import { issueCoupon } from "@/lib/coupons";
 import { trackPosthog } from "@/server/posthog.js";
 
 // Uropai's webhook delivery is best-effort/advisory, not the source of
@@ -75,6 +76,29 @@ async function grantPayment(payment: Payment) {
         data: { expiresAt: now },
       });
     }
+
+    // If this payment redeemed a coupon (see order/route.ts), settle it in
+    // the same transaction as the payment itself. A REFEREE_WELCOME coupon
+    // redeemed here is exactly the "referee's first payment used the
+    // referral coupon" moment the referrer's reward is contingent on — see
+    // the Referral/Coupon schema comment in prisma/schema.prisma. If the
+    // referee instead paid with a different coupon (or none), nothing here
+    // touches their Referral row and it simply stays PENDING forever — the
+    // referrer's reward was never earned.
+    if (payment.couponId) {
+      const coupon = await tx.coupon.update({
+        where: { id: payment.couponId },
+        data: { status: "REDEEMED", redeemedAt: now, redeemedPaymentId: payment.id },
+      });
+      if (coupon.role === "REFEREE_WELCOME" && coupon.referralId) {
+        const referral = await tx.referral.update({
+          where: { id: coupon.referralId },
+          data: { status: "REWARDED", resolvedAt: now },
+        });
+        await issueCoupon(referral.referrerId, "referral", { role: "REFERRER_REWARD" }, tx);
+      }
+    }
+
     return true;
   });
 

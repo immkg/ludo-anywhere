@@ -5,6 +5,7 @@ import Link from "next/link";
 import AppIconMark from "@/components/brand/AppIconMark";
 import Wordmark from "@/components/brand/Wordmark";
 import AccountSheet from "@/components/nav/AccountSheet";
+import ShareInviteButton from "@/components/nav/ShareInviteButton";
 import { IconBell, IconPerson } from "@/components/home/icons";
 
 type AppHeaderProps = {
@@ -28,6 +29,7 @@ export default function AppHeader({ displayName, email, userImage, pendingReques
           <Wordmark className="text-base" />
         </Link>
         <div className="flex shrink-0 items-center gap-1">
+          <ShareInviteButton source="nav" variant="compact" />
           <Link
             href="/friends"
             aria-label={pendingRequestCount > 0 ? `Notifications, ${pendingRequestCount} pending` : "Notifications"}

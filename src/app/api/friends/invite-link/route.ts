@@ -24,5 +24,12 @@ export async function GET() {
   }
 
   const url = `${process.env.AUTH_URL}/friends/invite/${user.inviteToken}`;
-  return NextResponse.json({ token: user.inviteToken, url });
+
+  // Surfaced so share copy reflects whatever the live "referral" Campaign
+  // discount is (see prisma/seed-campaigns.mjs) rather than being hardcoded
+  // on the client.
+  const referralCampaign = await prisma.campaign.findUnique({ where: { key: "referral" } });
+  const referralDiscountPercent = referralCampaign?.active ? referralCampaign.discountPercent : null;
+
+  return NextResponse.json({ token: user.inviteToken, url, referralDiscountPercent });
 }

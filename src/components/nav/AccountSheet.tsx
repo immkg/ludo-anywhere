@@ -5,6 +5,8 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { signOut } from "next-auth/react";
 import CreditBalance from "@/components/nav/CreditBalance";
 import NavigationItem from "@/components/nav/NavigationItem";
+import ShareInviteButton from "@/components/nav/ShareInviteButton";
+import FeedbackButton from "@/components/nav/FeedbackButton";
 import { NAV_ITEMS, IconExit } from "@/components/nav/navItems";
 import { IconAppearance } from "@/components/nav/icons";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -94,6 +96,9 @@ export default function AccountSheet({ open, onClose, displayName, email, userIm
             </div>
 
             <CreditBalance />
+
+            <ShareInviteButton source="nav" />
+            <FeedbackButton />
 
             <nav className="flex flex-col gap-1">
               {NAV_ITEMS.map((item) => (

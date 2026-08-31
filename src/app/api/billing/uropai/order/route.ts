@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { createOrder } from "@/lib/uropai";
 import { getPricingConfig, getEntitlementStatus } from "@/lib/entitlements";
 import { getAnnualUpgradeOffer } from "@/lib/pricing";
+import { getActiveCoupon } from "@/lib/coupons";
 import type { BillingPurpose, UropaiOrderResponse } from "@/types/billing";
 
 const VALID_PURPOSES: BillingPurpose[] = ["PACK", "MONTHLY", "ANNUAL"];
@@ -27,12 +28,27 @@ export async function POST(request: Request) {
   const config = await getPricingConfig();
   let amountInr = purpose === "PACK" ? config.gamePack.priceInr : purpose === "MONTHLY" ? config.monthly.priceInr : config.annual.priceInr;
   let discountInr = 0;
+  let couponId: string | null = null;
 
-  // The only case the price isn't the flat listed one: an active Monthly
-  // subscriber buying ANNUAL gets the day-based upgrade credit — computed
-  // here from their real, current entitlement, never from anything the
-  // client sends.
-  if (purpose === "ANNUAL") {
+  // A coupon is only ever applied by the client's own explicit choice
+  // (never auto-applied) — see src/lib/coupons.ts. Mutually exclusive with
+  // the annual-upgrade auto-discount below: only one offer applies per
+  // purchase, same "single active slot" rule the coupon wallet itself
+  // enforces.
+  if (body?.applyCoupon) {
+    const coupon = await getActiveCoupon(session.user.id);
+    if (coupon && coupon.campaign.active) {
+      discountInr = Math.round((amountInr * coupon.campaign.discountPercent) / 100);
+      amountInr = Math.max(0, amountInr - discountInr);
+      couponId = coupon.id;
+    }
+  }
+
+  // The only other case the price isn't the flat listed one: an active
+  // Monthly subscriber buying ANNUAL gets the day-based upgrade credit —
+  // computed here from their real, current entitlement, never from
+  // anything the client sends.
+  if (purpose === "ANNUAL" && !couponId) {
     const status = await getEntitlementStatus(session.user.id);
     const offer = getAnnualUpgradeOffer(status.entitlement, config);
     if (offer) {
@@ -66,6 +82,7 @@ export async function POST(request: Request) {
       purpose,
       amountInr,
       discountInr,
+      couponId,
       uropaiOrderId: order.id,
       tenantOrderRef,
       status: "CREATED",
