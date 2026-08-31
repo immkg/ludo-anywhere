@@ -4,6 +4,7 @@ import SocketProvider from "@/components/SocketProvider";
 import AuthProvider from "@/components/AuthProvider";
 import ThemeProvider from "@/components/ThemeProvider";
 import PosthogProvider from "@/components/PosthogProvider";
+import RouteTracker from "@/components/RouteTracker";
 import JsonLd from "@/components/seo/JsonLd";
 
 // Runs before hydration so the `.dark` class (and thus every --color-* var)
@@ -87,6 +88,7 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <PosthogProvider>
+            <RouteTracker />
             <AuthProvider>
               <SocketProvider>{children}</SocketProvider>
             </AuthProvider>

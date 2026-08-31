@@ -29,6 +29,11 @@ model User {
   coupons             Coupon[]
   referralsMade       Referral[]    @relation("ReferralsMade")
   referralsReceived   Referral[]    @relation("ReferralsReceived")
+  // Set the first (and only) time the flash-discount splash is shown to
+  // this user — see src/app/api/splash/eligibility/route.ts. Durable and
+  // cross-device, unlike the guest-side localStorage flag used before
+  // sign-in.
+  upgradeSplashShownAt DateTime?
 }
 
 model Account {
@@ -267,6 +272,18 @@ model Campaign {
   key             String    @unique // e.g. "referral", "diwali2026" — also the code typed in for a CAMPAIGN coupon
   kind            String // REFERRAL | PROMO
   discountPercent Int
+  // Fixed-amount override, used by the flash-discount splash's two
+  // campaigns (see prisma/seed-campaigns.mjs) instead of discountPercent —
+  // the target prices (₹49->₹33, ₹149->₹99) don't share a clean integer
+  // percent, so a fixed ₹ amount is used when set. Null preserves the
+  // existing percent-based behavior for every other campaign.
+  discountInr     Int?
+  // Restricts this campaign's coupons to one BillingPurpose (see
+  // src/app/api/billing/uropai/order/route.ts) — required for the flash
+  // campaigns since their fixed discountInr is only correct against the
+  // one plan it was computed for. Null (the default for existing
+  // campaigns) means unrestricted, matching today's behavior.
+  restrictToPurpose String?
   active          Boolean   @default(true)
   startsAt        DateTime?
   endsAt          DateTime?
@@ -279,9 +296,13 @@ model Coupon {
   code              String    @unique
   campaignId        String
   ownerUserId       String
-  role              String // CAMPAIGN | REFEREE_WELCOME | REFERRER_REWARD
+  role              String // CAMPAIGN | REFEREE_WELCOME | REFERRER_REWARD | FLASH_OFFER
   status            String    @default("ACTIVE") // ACTIVE | REDEEMED | VOIDED
   referralId        String?
+  // Only set for FLASH_OFFER coupons — a real, per-issuance deadline (see
+  // issueCoupon/getActiveCoupon in src/lib/coupons.ts). Null means no
+  // expiry, same as every other coupon role today.
+  expiresAt         DateTime?
   createdAt         DateTime  @default(now())
   redeemedAt        DateTime?
   redeemedPaymentId String?   @unique

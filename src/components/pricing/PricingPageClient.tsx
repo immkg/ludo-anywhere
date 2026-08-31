@@ -37,13 +37,30 @@ async function fetchStatus(): Promise<EntitlementStatus | null> {
   return res.json();
 }
 
-type ActiveCoupon = { id: string; campaign: { discountPercent: number; kind: string } };
+type ActiveCoupon = {
+  id: string;
+  expiresAt: string | null;
+  campaign: { discountPercent: number; discountInr: number | null; restrictToPurpose: string | null; kind: string };
+};
 
 async function fetchActiveCoupon(): Promise<ActiveCoupon | null> {
   const res = await fetch("/api/coupons/active");
   if (!res.ok) return null;
   const data = await res.json();
   return data.coupon ?? null;
+}
+
+function couponAppliesTo(coupon: ActiveCoupon, purpose: BillingPurpose): boolean {
+  return !coupon.campaign.restrictToPurpose || coupon.campaign.restrictToPurpose === purpose;
+}
+
+// Mirrors the order route's own discount math (see
+// src/app/api/billing/uropai/order/route.ts) purely for display — the
+// server always recomputes this itself from the coupon it looks up, never
+// trusting anything the client sends.
+function previewDiscountedPrice(basePriceInr: number, coupon: ActiveCoupon): number {
+  const discountInr = coupon.campaign.discountInr ?? Math.round((basePriceInr * coupon.campaign.discountPercent) / 100);
+  return Math.max(0, basePriceInr - discountInr);
 }
 
 export default function PricingPageClient() {
@@ -57,15 +74,42 @@ export default function PricingPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [confirmDelayed, setConfirmDelayed] = useState(false);
 
-  // Never auto-applied — the checkbox in CouponBar starts unchecked even
-  // when a coupon is available, so using it is always the user's own
-  // explicit choice (see src/lib/coupons.ts).
+  // See CouponBar's comment below for when this starts checked vs.
+  // unchecked.
   const [coupon, setCoupon] = useState<ActiveCoupon | null>(null);
   const [applyCoupon, setApplyCoupon] = useState(false);
 
+  // ?promo=flash arrives from DiscountSplash (src/components/game/DiscountSplash.tsx)
+  // — a signed-in claim already issued the coupon before redirecting here,
+  // so it just needs picking up and pre-checking. ?claim=1&plan=... is the
+  // guest path: they signed in from the splash without a coupon yet (guests
+  // can't own one), so it's claimed here instead, the moment they're
+  // identified — see the plan doc's "Guest flow".
   useEffect(() => {
     fetchStatus().then(setStatus);
-    fetchActiveCoupon().then(setCoupon);
+    const promo = searchParams.get("promo");
+    const claimPlan = searchParams.get("claim") === "1" ? searchParams.get("plan") : null;
+    if (promo === "flash" && claimPlan) {
+      fetch("/api/coupons/claim-flash-offer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: claimPlan }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { coupon?: ActiveCoupon } | null) => {
+          if (data?.coupon) {
+            setCoupon(data.coupon);
+            setApplyCoupon(true);
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+    fetchActiveCoupon().then((c) => {
+      setCoupon(c);
+      if (promo === "flash" && c) setApplyCoupon(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount against the URL params present at load, same as the effect this replaces
   }, []);
 
   // While "processing", the user has been redirected back from Uropai's
@@ -125,6 +169,18 @@ export default function PricingPageClient() {
 
   const planType = status?.entitlement?.type ?? null;
   const hasPack = (status?.creditsRemaining ?? 0) > 0;
+
+  // Flash-coupon preview prices for the Game Pack / Game Pass cards below —
+  // undefined unless the checkbox is checked and the active coupon is
+  // actually usable against that plan (see couponAppliesTo above).
+  const flashPackPriceInr =
+    status && applyCoupon && coupon && couponAppliesTo(coupon, "PACK")
+      ? previewDiscountedPrice(status.pricing.gamePack.priceInr, coupon)
+      : undefined;
+  const flashMonthlyPriceInr =
+    status && applyCoupon && coupon && couponAppliesTo(coupon, "MONTHLY")
+      ? previewDiscountedPrice(status.pricing.monthly.priceInr, coupon)
+      : undefined;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-6xl flex-col gap-6 px-4 pb-10 pt-6 sm:gap-7 sm:px-6 sm:pt-8 lg:px-10 lg:pt-10">
@@ -204,6 +260,7 @@ export default function PricingPageClient() {
               price={`₹${status.pricing.gamePack.priceInr}`}
               original={status.pricing.gamePack.originalPriceInr}
               percentOff={status.pricing.gamePack.percentOff}
+              discountedPriceInr={flashPackPriceInr}
               benefits={[`${status.pricing.gamePack.credits} games`, "Any player count", `Valid for ${status.pricing.gamePack.days} days`]}
               ctaLabel="Buy Another Pack"
               loading={buying === "PACK"}
@@ -233,6 +290,7 @@ export default function PricingPageClient() {
               price={`₹${status.pricing.monthly.priceInr}`}
               original={status.pricing.monthly.originalPriceInr}
               percentOff={status.pricing.monthly.percentOff}
+              discountedPriceInr={flashMonthlyPriceInr}
               benefits={["Unlimited games", "Any player count", "Play with friends", `Valid for ${status.pricing.monthly.days} days`]}
               ctaLabel="Buy Game Pass"
               loading={buying === "MONTHLY"}
@@ -252,6 +310,7 @@ export default function PricingPageClient() {
               price={`₹${status.pricing.gamePack.priceInr}`}
               original={status.pricing.gamePack.originalPriceInr}
               percentOff={status.pricing.gamePack.percentOff}
+              discountedPriceInr={flashPackPriceInr}
               benefits={[`${status.pricing.gamePack.credits} games`, "Any player count", `Valid for ${status.pricing.gamePack.days} days`]}
               ctaLabel="Buy Game Pack"
               loading={buying === "PACK"}
@@ -281,6 +340,7 @@ export default function PricingPageClient() {
               price={`₹${status.pricing.monthly.priceInr}`}
               original={status.pricing.monthly.originalPriceInr}
               percentOff={status.pricing.monthly.percentOff}
+              discountedPriceInr={flashMonthlyPriceInr}
               benefits={["Unlimited games", "Any player count", "Play with friends", `Valid for ${status.pricing.monthly.days} days`]}
               ctaLabel="Buy Game Pass"
               loading={buying === "MONTHLY"}
@@ -313,12 +373,15 @@ function HostBenefitBanner() {
   );
 }
 
-// Never auto-applies a coupon — even one the user already holds starts
-// unchecked, and redeeming a new code doesn't check it either. Applying a
-// coupon is always a separate, deliberate tap. See src/lib/coupons.ts for
-// why: a referred user picking a *different* coupon here is exactly what
-// forfeits their referrer's reward, so it can't be something that just
-// happens by default.
+// Never auto-applies an organically-redeemed coupon — even one the user
+// already holds starts unchecked, and redeeming a new code doesn't check
+// it either. See src/lib/coupons.ts for why: a referred user picking a
+// *different* coupon here is exactly what forfeits their referrer's
+// reward, so it can't be something that just happens by default. The one
+// exception is arriving via ?promo=flash from DiscountSplash — the user
+// already made an explicit choice by tapping a specific plan there, so
+// the checkbox starts pre-checked (still visible and toggleable) instead
+// of asking them to repeat that choice.
 function CouponBar({
   coupon,
   applyCoupon,
@@ -358,9 +421,12 @@ function CouponBar({
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
       {coupon ? (
-        <label className="flex min-h-11 items-center gap-3 text-sm">
+        <label className="flex min-h-11 flex-wrap items-center gap-3 text-sm">
           <input type="checkbox" checked={applyCoupon} onChange={(e) => onToggle(e.target.checked)} className="h-4 w-4 shrink-0" />
-          <span className="font-semibold text-ink">Apply your {coupon.campaign.discountPercent}% off coupon</span>
+          <span className="font-semibold text-ink">
+            Apply your {coupon.campaign.discountInr != null ? `₹${coupon.campaign.discountInr} off` : `${coupon.campaign.discountPercent}% off`} coupon
+          </span>
+          {coupon.expiresAt && <CouponCountdown expiresAt={coupon.expiresAt} />}
         </label>
       ) : (
         <p className="text-sm text-ink-muted">Have a coupon code?</p>
@@ -382,6 +448,30 @@ function CouponBar({
       </div>
       {redeemError && <p className="text-xs text-accent sm:basis-full">{redeemError}</p>}
     </div>
+  );
+}
+
+// A real, server-backed deadline (Coupon.expiresAt) — ticks down correctly
+// even across a page reload, unlike a client-only timer that would just
+// restart. Once it hits 0, /api/coupons/active stops returning this coupon
+// on the next fetch (see getActiveCoupon in src/lib/coupons.ts); this just
+// renders "Expired" in the meantime rather than racing a refetch.
+function CouponCountdown({ expiresAt }: { expiresAt: string }) {
+  const [msLeft, setMsLeft] = useState(() => new Date(expiresAt).getTime() - Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setMsLeft(new Date(expiresAt).getTime() - Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [expiresAt]);
+
+  if (msLeft <= 0) return <span className="text-xs font-bold text-accent">Expired</span>;
+  const totalSeconds = Math.floor(msLeft / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return (
+    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-bold tabular-nums text-accent">
+      {minutes}:{String(seconds).padStart(2, "0")}
+    </span>
   );
 }
 
@@ -456,6 +546,7 @@ function PlanCard({
   price,
   original,
   percentOff,
+  discountedPriceInr,
   note = "One-time purchase",
   benefits,
   ctaLabel,
@@ -468,6 +559,11 @@ function PlanCard({
   price: string;
   original?: number;
   percentOff?: number;
+  // A flash coupon's preview price (see previewDiscountedPrice above) — a
+  // further drop *on top of* `price`, so both `original` and `price` get
+  // struck through and this becomes the live number, instead of the usual
+  // single strikethrough + percentOff badge.
+  discountedPriceInr?: number;
   note?: string;
   benefits: string[];
   ctaLabel: string;
@@ -504,18 +600,26 @@ function PlanCard({
         </p>
       </div>
       <p className="text-sm font-semibold text-ink-muted">{subtitle}</p>
-      <div className="flex flex-wrap items-baseline gap-2">
-        {!!original && <span className="text-sm font-semibold text-ink-muted line-through">₹{original}</span>}
-        <span className="text-2xl font-extrabold text-ink">{price}</span>
-        {!!percentOff && percentOff > 0 && (
-          <span
-            className="rounded-full px-2 py-0.5 text-xs font-bold"
-            style={{ background: `${meta.color}1a`, color: meta.color }}
-          >
-            {percentOff}% off
-          </span>
-        )}
-      </div>
+      {discountedPriceInr != null ? (
+        <div className="flex flex-wrap items-baseline gap-1.5">
+          {!!original && <span className="text-xs text-ink-muted line-through opacity-60">₹{original}</span>}
+          <span className="text-sm font-semibold text-ink-muted line-through">{price}</span>
+          <span className="text-2xl font-extrabold text-accent">₹{discountedPriceInr}</span>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-baseline gap-2">
+          {!!original && <span className="text-sm font-semibold text-ink-muted line-through">₹{original}</span>}
+          <span className="text-2xl font-extrabold text-ink">{price}</span>
+          {!!percentOff && percentOff > 0 && (
+            <span
+              className="rounded-full px-2 py-0.5 text-xs font-bold"
+              style={{ background: `${meta.color}1a`, color: meta.color }}
+            >
+              {percentOff}% off
+            </span>
+          )}
+        </div>
+      )}
       <p className="text-xs font-semibold text-ink-muted">{note}</p>
       <button
         onClick={onBuy}

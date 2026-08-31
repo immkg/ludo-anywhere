@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 // referrer's reward coupon atomically with the payment it was earned by.
 type Db = typeof prisma | Prisma.TransactionClient;
 
-export type CouponRole = "CAMPAIGN" | "REFEREE_WELCOME" | "REFERRER_REWARD";
+export type CouponRole = "CAMPAIGN" | "REFEREE_WELCOME" | "REFERRER_REWARD" | "FLASH_OFFER";
 
 function campaignIsLive(campaign: { active: boolean; startsAt: Date | null; endsAt: Date | null }, now: Date) {
   if (!campaign.active) return false;
@@ -23,7 +23,7 @@ function campaignIsLive(campaign: { active: boolean; startsAt: Date | null; ends
 export async function issueCoupon(
   userId: string,
   campaignKey: string,
-  opts: { role: CouponRole; referralId?: string },
+  opts: { role: CouponRole; referralId?: string; expiresAt?: Date },
   db: Db = prisma
 ) {
   const campaign = await db.campaign.findUnique({ where: { key: campaignKey } });
@@ -42,14 +42,24 @@ export async function issueCoupon(
       ownerUserId: userId,
       role: opts.role,
       referralId: opts.referralId,
+      expiresAt: opts.expiresAt,
     },
     include: { campaign: true },
   });
 }
 
+// Excludes coupons past their expiresAt (only ever set on FLASH_OFFER
+// coupons — see issueCoupon) without needing a cron to flip their status;
+// an expired-but-still-"ACTIVE" row just stops being returned here, which
+// is also the only place callers (the pricing page, the order route)
+// actually look up a user's coupon.
 export function getActiveCoupon(userId: string, db: Db = prisma) {
   return db.coupon.findFirst({
-    where: { ownerUserId: userId, status: "ACTIVE" },
+    where: {
+      ownerUserId: userId,
+      status: "ACTIVE",
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
     include: { campaign: true },
   });
 }
