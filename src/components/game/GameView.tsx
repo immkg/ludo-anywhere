@@ -715,7 +715,7 @@ function PlayerActionsModal({
             <>
               <p className="text-sm text-ink-muted">
                 {canEndGame
-                  ? "Play stops for everyone right away. It’s saved to history but doesn’t count as a win or loss for anyone who hasn’t already finished."
+                  ? "Play stops for everyone right away. If the game's gone on long enough, results are saved as a real win/loss for everyone based on the board right now — otherwise it's saved as unresolved for anyone who hasn't already finished."
                   : "You'll leave the game — it continues for the other players."}
               </p>
               {endGameError && <p className="text-sm text-accent">{endGameError}</p>}

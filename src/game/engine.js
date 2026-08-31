@@ -285,17 +285,69 @@ export function removeSeatFromGame(state, seatId) {
   return state.seats[state.currentSeatIndex]?.id === seatId ? endTurn(next) : next;
 }
 
-// Host-triggered early end: stops the round outright without resolving it
-// as a win or loss for anyone still unfinished — status becomes "finished"
-// (so play stops and the room's normal finish/history flow runs) but
-// `placements` is left exactly as it was, winnerSeatId stays null, and
-// `endedEarly` tells placementFor to return null rather than "last place"
-// for whoever hadn't finished yet. Anyone who *had* already finished
-// keeps their real placement — this only neutralizes the seats the game
-// never actually resolved.
-export function endGame(state) {
+// How far one token has traveled: 0 while still in the yard, otherwise its
+// relative position + 1 (so leaving the yard for cell 0 already counts as
+// a step) — a simple monotonic 0..finished()+1 scale, not the actual
+// number of squares still ahead.
+function tokenProgress(pos) {
+  return pos === YARD ? 0 : pos + 1;
+}
+
+// A seat's overall "how far along" measure for the ranking below — the sum
+// across all its tokens, so a seat with several tokens moving is ranked
+// above one with a single token lucky enough to be furthest along but the
+// rest still stuck in the yard.
+function seatProgress(seat) {
+  return seat.tokens.reduce((sum, pos) => sum + tokenProgress(pos), 0);
+}
+
+// Host-triggered early end. Two shapes, chosen by the caller (see
+// room:endGame in server.js, which only sets `declareWinner` once the game
+// has run long enough — a moves-and-duration threshold, not decided here):
+//
+// - `declareWinner: false` (short game): stops the round outright without
+//   resolving it as a win or loss for anyone still unfinished — `placements`
+//   is left exactly as it was, winnerSeatId stays null, and `endedEarly`
+//   tells placementFor to return null rather than "last place" for whoever
+//   hadn't finished yet.
+// - `declareWinner: true` (long enough game): ranks every seat that hadn't
+//   already finished by seatProgress (furthest along first) and appends
+//   them to `placements` — except whichever seat(s) tie for the very
+//   lowest progress, left unplaced, same as the one implicit loser a
+//   natural finish leaves out (or the tied group a mid-game removal can
+//   leave — see removeSeatFromGame above). Anyone who *had* already
+//   finished keeps their real, earlier placement ahead of this new group.
+//   `endedEarly` is cleared once this actually resolves someone, so
+//   placementFor's normal "resolved game" fallback ranks the excluded
+//   tied-lowest group last (seats.length) instead of leaving them null —
+//   this is meant to count as a real result, not stay unresolved. The one
+//   exception: every remaining seat tied exactly (nothing to rank apart),
+//   which just falls back to the same unresolved shape as a short early
+//   end rather than guessing.
+export function endGame(state, { declareWinner = false } = {}) {
   if (state.status !== "playing") return state;
-  return { ...state, status: "finished", winnerSeatId: null, endedEarly: true, diceValue: null };
+  if (!declareWinner) {
+    return { ...state, status: "finished", winnerSeatId: null, endedEarly: true, diceValue: null };
+  }
+
+  const alreadyFinished = new Set(state.placements);
+  const remaining = state.seats.filter((s) => !alreadyFinished.has(s.id));
+  const ranked = remaining
+    .map((s) => ({ id: s.id, progress: seatProgress(s) }))
+    .sort((a, b) => b.progress - a.progress);
+  const lowest = ranked[ranked.length - 1]?.progress;
+  const newlyPlaced = ranked.filter((r) => r.progress > lowest).map((r) => r.id);
+  const placements = [...state.placements, ...newlyPlaced];
+  const resolved = newlyPlaced.length > 0 || remaining.length === 0;
+
+  return {
+    ...state,
+    status: "finished",
+    winnerSeatId: resolved ? placements[0] ?? null : null,
+    endedEarly: !resolved,
+    diceValue: null,
+    placements,
+  };
 }
 
 // Makes a seat playable again — the opposite of removeSeatFromGame's

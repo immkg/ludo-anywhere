@@ -52,7 +52,13 @@ export default function GameHistoryCard({
         </div>
         <div className="flex flex-wrap justify-start gap-x-2 gap-y-3 sm:gap-x-6 sm:gap-y-4">
           {players.map((p) => {
-            const label = endedEarly ? "Ended early" : p.rankLabel;
+            // A game can end early and still resolve a real rank for
+            // everyone (the room ran long enough — see
+            // MIN_DURATION_FOR_EARLY_RESULT_MS/MIN_ROLLS_FOR_EARLY_RESULT
+            // in rooms.js), so `endedEarly` alone isn't "no result" —
+            // rankLabel is only null for a seat that genuinely never got
+            // one (a short early end).
+            const label = p.rankLabel ?? (endedEarly ? "Ended early" : null);
             return (
               <div key={p.id} className="flex w-14 flex-col items-center gap-1">
                 <PlayerAvatar name={p.name} email={p.email} image={p.image} size="sm" />
@@ -60,7 +66,7 @@ export default function GameHistoryCard({
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-center text-[11px] font-bold",
-                      endedEarly ? "bg-surface-2 text-ink-muted" : rankBadgeClasses(p.rank)
+                      p.rankLabel ? rankBadgeClasses(p.rank) : "bg-surface-2 text-ink-muted"
                     )}
                   >
                     {label}
@@ -85,7 +91,7 @@ export default function GameHistoryCard({
               <p className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-muted">Results</p>
               <ul className="flex flex-col gap-1">
                 {players.map((p, i) => {
-                  const label = endedEarly ? "Ended early" : p.rankLabel;
+                  const label = p.rankLabel ?? (endedEarly ? "Ended early" : null);
                   return (
                     <li key={p.id} className="flex items-center gap-3 rounded-xl px-2 py-2">
                       <span className="w-4 shrink-0 text-sm font-semibold text-ink-muted">{i + 1}</span>
@@ -95,7 +101,7 @@ export default function GameHistoryCard({
                         <span
                           className={cn(
                             "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold",
-                            endedEarly ? "bg-surface-2 text-ink-muted" : rankBadgeClasses(p.rank)
+                            p.rankLabel ? rankBadgeClasses(p.rank) : "bg-surface-2 text-ink-muted"
                           )}
                         >
                           {label}

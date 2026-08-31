@@ -68,10 +68,17 @@ export default async function LeaderboardPage({
   for (const p of players) {
     if (!p.profile) continue;
     if (scope === "mine" && !myProfileIds.has(p.profileId as string)) continue;
-    // A game the host ended early never resolved for whoever hadn't
-    // already finished — no win, no loss, so it doesn't count as a game
-    // played for them either (see engine.js's endGame).
-    if (p.game.endedEarly && !p.isWinner) continue;
+    // A game the host ended early before it had run long enough (see
+    // MIN_DURATION_FOR_EARLY_RESULT_MS/MIN_ROLLS_FOR_EARLY_RESULT in
+    // rooms.js) never resolved for whoever hadn't already finished — no
+    // placement was recorded, so it doesn't count as a game played for
+    // them either (see engine.js's endGame). A long-enough early end
+    // instead ranks everyone from the board state, so every seat gets a
+    // real placement and counts normally here — `placement == null` is
+    // what actually distinguishes "no result" from "lost", not
+    // `endedEarly` itself (a natural finish's one loser has a real
+    // placement despite never explicitly finishing).
+    if (p.placement == null) continue;
 
     const row = byProfile.get(p.profileId as string) ?? {
       id: p.profileId as string,

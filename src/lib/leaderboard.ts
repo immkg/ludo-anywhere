@@ -24,10 +24,11 @@ export async function getTopPlayers(limit: number): Promise<TopPlayer[]> {
   const byProfile = new Map<string, { id: string; name: string; email: string; wins: number; losses: number }>();
   for (const p of players) {
     if (!p.profile) continue;
-    // A game the host ended early never resolved for whoever hadn't
-    // already finished — same "doesn't count as a game played" rule as
-    // the full leaderboard page (see engine.js's endGame).
-    if (p.game.endedEarly && !p.isWinner) continue;
+    // No placement recorded means no result for this seat — same
+    // "doesn't count as a game played" rule as the full leaderboard page
+    // (see engine.js's endGame and rooms.js's MIN_DURATION_FOR_EARLY_RESULT_MS/
+    // MIN_ROLLS_FOR_EARLY_RESULT).
+    if (p.placement == null) continue;
 
     const row = byProfile.get(p.profileId as string) ?? {
       id: p.profileId as string,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createGame, moveToken, placementFor, suspendSeat, removeSeatFromGame, reactivateSeat } from "./engine.js";
+import { createGame, moveToken, placementFor, suspendSeat, removeSeatFromGame, reactivateSeat, endGame } from "./engine.js";
 import { finished, tokenPixelPosition, buildBoardLayout } from "./board.js";
 
 function seats(n) {
@@ -195,5 +195,66 @@ describe("suspend / remove / reactivate", () => {
     expect(state.seats[1].finished).toBe(false);
     expect(state.seats[1].suspended).toBe(false);
     expect(state.seats[1].tokens).toEqual([-1, -1, -1, -1]); // still at yard from the removal
+  });
+});
+
+describe("endGame", () => {
+  it("without declareWinner, leaves everyone unfinished unresolved", () => {
+    let state = createGame(seats(4));
+    state.seats[0].tokens = [10, 10, 10, 10];
+    state = endGame(state);
+
+    expect(state.status).toBe("finished");
+    expect(state.endedEarly).toBe(true);
+    expect(state.winnerSeatId).toBeNull();
+    expect(state.placements).toEqual([]);
+    expect(placementFor(state, "seat-0")).toBeNull();
+  });
+
+  it("declareWinner ranks unfinished seats by total token progress, excluding the tied-lowest", () => {
+    let state = createGame(seats(4));
+    state.seats[0].tokens = [10, 10, 10, 10]; // progress 44 — furthest along
+    state.seats[1].tokens = [-1, -1, -1, -1]; // progress 0 — never left the yard
+    state.seats[2].tokens = [20, -1, -1, -1]; // progress 21
+    state.seats[3].tokens = [5, 5, -1, -1]; // progress 12
+    state = endGame(state, { declareWinner: true });
+
+    expect(state.status).toBe("finished");
+    expect(state.endedEarly).toBe(false); // this resolved a real result
+    expect(state.winnerSeatId).toBe("seat-0");
+    expect(state.placements).toEqual(["seat-0", "seat-2", "seat-3"]);
+    expect(placementFor(state, "seat-0")).toBe(1);
+    expect(placementFor(state, "seat-2")).toBe(2);
+    expect(placementFor(state, "seat-3")).toBe(3);
+    // The lowest-progress seat is excluded from placements, same shape as
+    // a natural finish's one implicit loser — placementFor still ranks it
+    // last since the game resolved (endedEarly is false).
+    expect(state.placements).not.toContain("seat-1");
+    expect(placementFor(state, "seat-1")).toBe(4);
+  });
+
+  it("declareWinner keeps an already-finished seat's real placement ahead of the newly-ranked group", () => {
+    let state = createGame(seats(3));
+    state = { ...state, placements: ["seat-0"] }; // seat-0 already finished naturally
+    state.seats[1].tokens = [15, -1, -1, -1];
+    state.seats[2].tokens = [3, -1, -1, -1];
+    state = endGame(state, { declareWinner: true });
+
+    expect(state.placements).toEqual(["seat-0", "seat-1"]);
+    expect(state.winnerSeatId).toBe("seat-0");
+    expect(placementFor(state, "seat-2")).toBe(3);
+  });
+
+  it("declareWinner with every remaining seat exactly tied stays unresolved for them", () => {
+    let state = createGame(seats(2));
+    state.seats[0].tokens = [7, -1, -1, -1];
+    state.seats[1].tokens = [7, -1, -1, -1];
+    state = endGame(state, { declareWinner: true });
+
+    expect(state.endedEarly).toBe(true);
+    expect(state.winnerSeatId).toBeNull();
+    expect(state.placements).toEqual([]);
+    expect(placementFor(state, "seat-0")).toBeNull();
+    expect(placementFor(state, "seat-1")).toBeNull();
   });
 });

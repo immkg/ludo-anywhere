@@ -11,6 +11,14 @@ import {
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
 const DISCONNECT_GRACE_MS = 2 * 60 * 1000;
 
+// How far along a host's early end (see midGameEndGame) needs to be before
+// it declares a real winner/loser from the current board instead of
+// leaving it unresolved — both must hold, not just one, so neither a
+// long-idle game with barely any rolls nor a very fast bot-heavy game
+// qualifies on a single signal.
+const MIN_DURATION_FOR_EARLY_RESULT_MS = 10 * 60 * 1000;
+const MIN_ROLLS_FOR_EARLY_RESULT = 40;
+
 // First names for simulated matchmaking bots (see addSimulatedBot) — picked
 // to read as ordinary players to this app's Indian user base, not as
 // obviously-generated filler like "Bot 1".
@@ -328,14 +336,20 @@ export function midGameRemoveSeat(room, seatId) {
   return { room };
 }
 
-// Host-only: stops the game outright without declaring a winner or a
-// loser — see engine.js's endGame. Unlike midGameRemoveSeat, this doesn't
-// require narrowing down to one seat first; the host can call it any time
-// mid-game, and whoever hadn't already finished just gets a neutral,
-// unresolved result recorded (see history.js/leaderboard).
+// Host-only: stops the game outright — see engine.js's endGame. Unlike
+// midGameRemoveSeat, this doesn't require narrowing down to one seat
+// first; the host can call it any time mid-game. Once the room has been
+// playing long enough (see MIN_DURATION_FOR_EARLY_RESULT_MS/
+// MIN_ROLLS_FOR_EARLY_RESULT), whoever hadn't already finished gets ranked
+// by their current board progress instead of left unresolved — a game
+// that's barely started still just gets the old neutral, no-result-
+// recorded ending (see history.js/leaderboard).
 export function midGameEndGame(room) {
   if (!room?.game || room.status !== "playing") return { error: "Game not in progress" };
-  room.game = endGameInProgress(room.game);
+  const elapsedMs = room.startedAt ? Date.now() - room.startedAt.getTime() : 0;
+  const declareWinner =
+    elapsedMs >= MIN_DURATION_FOR_EARLY_RESULT_MS && room.game.rollSeq >= MIN_ROLLS_FOR_EARLY_RESULT;
+  room.game = endGameInProgress(room.game, { declareWinner });
   return { room };
 }
 
