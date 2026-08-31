@@ -91,10 +91,6 @@ type PlayerCornerProps = {
   // Their tokens stay on the board (and stay capturable); they just get
   // no turns and read as dimmed here, same as a disconnected seat.
   suspended?: boolean;
-  // Set (host only — see GameView.tsx) to make this seat tappable, opening
-  // that player's manage-player actions instead of a dedicated separate
-  // "Players" control.
-  onClick?: () => void;
   // The same pausable 0..1 motion value Dice.tsx's own auto-roll countdown
   // drives — passed through only for whichever corner is currently the
   // active roller (see GameView.tsx), so this card's border traces the
@@ -134,7 +130,6 @@ export default function PlayerCorner({
   isTurn,
   placement,
   suspended,
-  onClick,
   rollProgress,
   canMove,
   dice,
@@ -147,21 +142,10 @@ export default function PlayerCorner({
   if (!seat) return <div style={{ width: CARD_WIDTH, height: CARD_HEIGHT }} />;
 
   const color = colorForArm(seat.armIndex);
-  // The click target (host's "manage this player") is the name and the
-  // avatar — not the whole card, and not the die (which renders its own
-  // interactive <button> — see Dice.tsx — so nesting it inside another
-  // button would be invalid HTML). Name and avatar sit in separate rows
-  // now (see the layout below), so each gets its own InnerWrapper sharing
-  // this same handler instead of one wrapper spanning both.
-  const InnerWrapper = onClick ? "button" : "div";
   const showTrace = isTurn && (rollProgress || canMove);
 
   const avatar = (
-    <InnerWrapper
-      onClick={onClick}
-      aria-label={onClick ? `Manage ${seat.name}` : undefined}
-      className={cn("relative shrink-0", onClick && "cursor-pointer")}
-    >
+    <div className="relative shrink-0">
       <span
         className="flex items-center justify-center rounded-full border-2 text-2xl leading-none shadow-sm"
         style={{
@@ -181,7 +165,7 @@ export default function PlayerCorner({
       </span>
       {placement && placement <= 3 && <PlacementCrown placement={placement} />}
       {suspended && <SuspendedBadge />}
-    </InnerWrapper>
+    </div>
   );
 
   // Always-reserved footprint for the die, so a corner's box never resizes
@@ -201,8 +185,8 @@ export default function PlayerCorner({
         onClick={() => setStickerPickerOpen((v) => !v)}
         aria-label={`Send a sticker to ${seat.name}`}
         aria-expanded={stickerPickerOpen}
-        className="flex items-center justify-center rounded-xl border border-dashed text-ink-muted transition hover:bg-surface-2"
-        style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE, borderColor: `${color.hex}40` }}
+        className="flex items-center justify-center rounded-xl transition hover:opacity-70"
+        style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE, color: color.hex }}
       >
         <IconPalette className="h-5 w-5" />
       </button>
@@ -279,23 +263,21 @@ export default function PlayerCorner({
       )}
 
       {/* Row 1: name, full card width, aligned to the same edge as the
-          avatar below it (see `diceFirst`) rather than centered. */}
-      <InnerWrapper
-        onClick={onClick}
-        aria-label={onClick ? `Manage ${seat.name}` : undefined}
-        className={cn("block w-full shrink-0", onClick && "cursor-pointer")}
+          avatar below it (see `diceFirst`) rather than centered. Not
+          clickable — managing a player now happens from the game bar's
+          "more" menu (see GameMenu.tsx's Players list) instead of tapping
+          the card directly, which was catching mistaps meant for the die
+          right next to it. */}
+      <span
+        className={cn(
+          "block w-full shrink-0 truncate text-sm font-bold leading-tight",
+          diceFirst ? "text-right" : "text-left",
+        )}
+        style={{ color: color.hex }}
+        title={seat.name}
       >
-        <span
-          className={cn(
-            "block w-full truncate text-sm font-bold leading-tight",
-            diceFirst ? "text-right" : "text-left",
-          )}
-          style={{ color: color.hex }}
-          title={seat.name}
-        >
-          {seat.name}
-        </span>
-      </InnerWrapper>
+        {seat.name}
+      </span>
 
       {/* Row 2: avatar and the (always-reserved) dice slot, side by side. */}
       <div className="flex shrink-0 items-center gap-1">

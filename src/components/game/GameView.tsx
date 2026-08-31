@@ -332,6 +332,15 @@ export default function GameView({ room }: { room: Room }) {
     router.push(session?.user ? "/" : "/play");
   };
 
+  // From GameMenu's host-only Players list — opens PlayerActionsModal for
+  // the tapped seat, same as tapping a player's card used to before that
+  // was disabled (it sat right next to the dice slot and was catching
+  // mistaps meant for the die — see PlayerCorner.tsx).
+  const handleManagePlayer = (seatId: string) => {
+    setGameMenuOpen(false);
+    setSelectedSeatId(seatId);
+  };
+
   // If a player doesn't tap a token in time, move one for them: prefer a
   // capture, then a move that lands safe, then the token furthest along
   // (closest to home). Resets whenever the game state actually changes
@@ -476,8 +485,10 @@ export default function GameView({ room }: { room: Room }) {
           roomCode={room.code}
           isHost={isHost}
           hostSeatId={room.hostSeatId}
+          seats={room.seats}
           canEndGame={canEndGame}
           onLeaveGame={handleLeaveGame}
+          onManagePlayer={handleManagePlayer}
           onClose={() => setGameMenuOpen(false)}
         />
       )}
@@ -510,7 +521,6 @@ export default function GameView({ room }: { room: Room }) {
             isTurn={seatByArm.get(0)?.id === currentSeat?.id}
             placement={placementForArm(seatByArm.get(0))}
             suspended={suspendedForArm(seatByArm.get(0))}
-            onClick={isHost && seatByArm.get(0) ? () => setSelectedSeatId(seatByArm.get(0)!.id) : undefined}
             rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 0 && canMove}
             dice={diceArm === 0 ? diceMount : undefined}
@@ -521,7 +531,6 @@ export default function GameView({ room }: { room: Room }) {
             isTurn={seatByArm.get(1)?.id === currentSeat?.id}
             placement={placementForArm(seatByArm.get(1))}
             suspended={suspendedForArm(seatByArm.get(1))}
-            onClick={isHost && seatByArm.get(1) ? () => setSelectedSeatId(seatByArm.get(1)!.id) : undefined}
             rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 1 && canMove}
             dice={diceArm === 1 ? diceMount : undefined}
@@ -618,7 +627,6 @@ export default function GameView({ room }: { room: Room }) {
             isTurn={seatByArm.get(3)?.id === currentSeat?.id}
             placement={placementForArm(seatByArm.get(3))}
             suspended={suspendedForArm(seatByArm.get(3))}
-            onClick={isHost && seatByArm.get(3) ? () => setSelectedSeatId(seatByArm.get(3)!.id) : undefined}
             rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 3 && canMove}
             dice={diceArm === 3 ? diceMount : undefined}
@@ -630,7 +638,6 @@ export default function GameView({ room }: { room: Room }) {
             isTurn={seatByArm.get(2)?.id === currentSeat?.id}
             placement={placementForArm(seatByArm.get(2))}
             suspended={suspendedForArm(seatByArm.get(2))}
-            onClick={isHost && seatByArm.get(2) ? () => setSelectedSeatId(seatByArm.get(2)!.id) : undefined}
             rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 2 && canMove}
             dice={diceArm === 2 ? diceMount : undefined}
