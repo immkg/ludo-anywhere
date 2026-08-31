@@ -7,6 +7,7 @@ import { signIn } from "next-auth/react";
 import AppIconMark from "@/components/brand/AppIconMark";
 import Wordmark from "@/components/brand/Wordmark";
 import NavigationItem from "@/components/nav/NavigationItem";
+import ShareInviteButton from "@/components/nav/ShareInviteButton";
 import { NAV_ITEMS } from "@/components/nav/navItems";
 import { IconAppearance } from "@/components/nav/icons";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -32,14 +33,17 @@ export default function GuestNav({ children }: { children: ReactNode }) {
           <AppIconMark className="h-6 w-6" />
           <Wordmark className="text-base" />
         </Link>
-        <button
-          onClick={() => signIn("google", { callbackUrl })}
-          className="flex h-9 items-center gap-1.5 rounded-full bg-accent text-white shadow-lg shadow-accent/30 px-3 text-xs font-semibold"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/icon-google.png" alt="" className="h-4 w-4" />
-          Sign in
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <ShareInviteButton source="nav" variant="compact" />
+          <button
+            onClick={() => signIn("google", { callbackUrl })}
+            className="flex h-9 items-center gap-1.5 rounded-full bg-accent text-white shadow-lg shadow-accent/30 px-3 text-xs font-semibold"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/icon-google.png" alt="" className="h-4 w-4" />
+            Sign in
+          </button>
+        </div>
       </header>
 
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col gap-5 overflow-y-auto border-r border-line bg-surface px-4 py-5 md:flex lg:w-72">
@@ -47,6 +51,8 @@ export default function GuestNav({ children }: { children: ReactNode }) {
           <AppIconMark className="h-7 w-7" />
           <Wordmark className="text-xl" />
         </Link>
+
+        <ShareInviteButton source="nav" variant="row" />
 
         <button
           onClick={() => signIn("google", { callbackUrl })}

@@ -9,6 +9,9 @@ import Chip from "@/components/ui/Chip";
 import AppIconMark from "@/components/brand/AppIconMark";
 import Wordmark from "@/components/brand/Wordmark";
 import MarketingFooter from "@/components/marketing/MarketingFooter";
+import { IconChat } from "@/components/friends/icons";
+import { shareWithImage } from "@/lib/share";
+import { trackShare } from "@/lib/socketActions";
 
 const FEATURES = [
   {
@@ -124,6 +127,21 @@ export default function LandingHero() {
               />
             </div>
             <Chip
+              label="Share MyLudo"
+              icon={<IconChat className="h-full w-full" />}
+              onClick={() => {
+                // Guest — no personal referral link exists yet, so this
+                // just shares the plain app link (same as GuestNav's
+                // ShareInviteButton once useInviteLink's 401 fallback
+                // kicks in), but there's no session here to even attempt
+                // that fetch against, so it's simpler to build it directly.
+                const url = window.location.origin;
+                trackShare("invite_link_shared", { source: "landing_nav" });
+                shareWithImage(`Play Ludo with me on MyLudo! ${url}`, `${url}/opengraph-image`);
+              }}
+              className="ml-auto"
+            />
+            <Chip
               label="Sign in"
               icon={
                 // eslint-disable-next-line @next/next/no-img-element
@@ -134,7 +152,6 @@ export default function LandingHero() {
                 />
               }
               onClick={() => signIn("google")}
-              className="ml-auto"
             />
           </div>
 

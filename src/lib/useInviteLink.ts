@@ -10,8 +10,16 @@ export function useInviteLink() {
 
   useEffect(() => {
     fetch("/api/friends/invite-link")
-      .then((res) => res.json())
-      .then((data) => {
+      .then(async (res) => {
+        // Signed-out visitor — there's no personal referral link, but
+        // "Share MyLudo" should still work (GuestNav, LandingHero): fall
+        // back to the plain app link instead of leaving this null forever.
+        if (res.status === 401) {
+          const origin = typeof window !== "undefined" ? window.location.origin : "";
+          setInvite({ url: origin, referralDiscountPercent: null });
+          return;
+        }
+        const data = await res.json();
         if (data.url) setInvite({ url: data.url, referralDiscountPercent: data.referralDiscountPercent ?? null });
       })
       .catch(() => {});
