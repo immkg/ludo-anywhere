@@ -23,6 +23,7 @@ import {
   deleteRoom,
   rematchEligibleSeats,
   fillWithBots,
+  addSimulatedBot,
   guestKeyFor,
   isGuestKey,
 } from "./src/server/rooms.js";
@@ -129,6 +130,53 @@ app.prepare().then(() => {
         scheduleBotTurn(room);
       }
     }, rolling ? BOT_ROLL_DELAY_MS : BOT_MOVE_DELAY_MS);
+  }
+
+  // A lone host in a freshly-created matchmaking room has nothing to do but
+  // wait, so this trickles bot seats in one at a time on a randomized,
+  // human-arrival-like schedule instead of leaving them stuck — see
+  // addSimulatedBot in rooms.js for how those seats are disguised as
+  // ordinary players. Each stage's delay is picked fresh so the gaps aren't
+  // clockwork: ~8-11s for the first bot (giving a real match every chance
+  // to land first), then ~3-6s, then ~6-9s for the rest, unless the room
+  // fills or stops being an empty lobby first.
+  const MATCHMAKING_BOT_DELAY_STAGES_MS = [
+    [8000, 11000],
+    [3000, 6000],
+    [6000, 9000],
+  ];
+
+  function randomBetween(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  // Re-checks everything right before acting (at fire time, not schedule
+  // time) so a manual action taken while a delay is pending — the host
+  // starting early, filling bots themselves, or a second real player
+  // actually joining — is enough to stop the chain cold on its very next
+  // tick. No stored timer handle/guard needed: this is only ever kicked off
+  // once per room (see matchmaking:join), and each stage only re-arms
+  // itself from inside the previous stage's own callback.
+  function scheduleMatchmakingBotFill(room, stage) {
+    const [min, max] = MATCHMAKING_BOT_DELAY_STAGES_MS[stage] ?? MATCHMAKING_BOT_DELAY_STAGES_MS.at(-1);
+    setTimeout(async () => {
+      if (getRoom(room.code) !== room) return;
+      if (!room.matchmaking || room.status !== "lobby") return;
+      if (room.seats.length >= room.maxPlayers) return;
+      // More than just the host has actually shown up — let real people
+      // decide from here (manual Start/Fill-bots), not simulated traffic.
+      if (room.seats.filter((s) => !s.bot).length > 1) return;
+
+      const { error } = addSimulatedBot(room);
+      if (error) return;
+      broadcastRoom(room);
+
+      if (room.seats.length >= room.maxPlayers) {
+        await attemptGameStart(room, (e) => io.to(room.code).emit("error", e));
+      } else if (stage + 1 < MATCHMAKING_BOT_DELAY_STAGES_MS.length) {
+        scheduleMatchmakingBotFill(room, stage + 1);
+      }
+    }, randomBetween(min, max));
   }
 
   // Called after anything that might have just ended a round (a move that
@@ -513,6 +561,7 @@ app.prepare().then(() => {
         socket.join(room.code);
         if (created) markOpen(room.code);
         if (room.seats.length >= room.maxPlayers) markClosed(room.code);
+        if (created && room.seats.length < room.maxPlayers) scheduleMatchmakingBotFill(room, 0);
 
         ack?.({
           roomCode: room.code,

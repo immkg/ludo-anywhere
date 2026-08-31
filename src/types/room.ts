@@ -11,6 +11,11 @@ export type Seat = {
   // deviceId/profileId/userId behind it, and plays itself server-side
   // (see scheduleBotTurn in server.js).
   bot?: boolean;
+  // A `bot` seat added automatically by matchmaking (see
+  // scheduleMatchmakingBotFill in server.js) rather than an explicit host
+  // "Fill with Bot" action — UI shows it exactly like a real player (no
+  // robot icon/"Bot" label), see PlayerSeatCard/PlayerCorner.
+  simulated?: boolean;
 };
 
 export type Room = {

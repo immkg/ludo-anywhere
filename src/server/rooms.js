@@ -11,6 +11,23 @@ import {
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
 const DISCONNECT_GRACE_MS = 2 * 60 * 1000;
 
+// First names for simulated matchmaking bots (see addSimulatedBot) — picked
+// to read as ordinary players to this app's Indian user base, not as
+// obviously-generated filler like "Bot 1".
+const SIMULATED_BOT_NAMES = [
+  "Aarav", "Vivaan", "Aditya", "Vihaan", "Arjun", "Reyansh", "Ishaan", "Kabir",
+  "Rohan", "Karan", "Yash", "Dev", "Siddharth", "Rahul", "Vikram", "Aryan",
+  "Ananya", "Diya", "Ishita", "Kavya", "Meera", "Neha", "Pooja", "Priya",
+  "Riya", "Simran", "Sneha", "Tanvi", "Anjali", "Shreya",
+];
+
+function pickSimulatedBotName(room) {
+  const used = new Set(room.seats.map((s) => s.name));
+  const available = SIMULATED_BOT_NAMES.filter((n) => !used.has(n));
+  const pool = available.length > 0 ? available : SIMULATED_BOT_NAMES;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 const rooms = new Map();
 
 // A guest (no signed-in account) is identified by device rather than by a
@@ -181,6 +198,41 @@ export function fillWithBots(room) {
   if (!room.hostSeatId) room.hostSeatId = newSeats[0].id;
 
   return { room, seats: newSeats };
+}
+
+// Matchmaking-only: adds a single bot seat, one at a time, made to look like
+// an ordinary player joining rather than a bot-fill — a random name from
+// SIMULATED_BOT_NAMES, and `simulated: true` so PlayerSeatCard/PlayerCorner
+// skip the robot badge/label for it (see their `bot && !simulated` checks).
+// Still `bot: true` underneath, so it plays itself once seated (see
+// scheduleBotTurn in server.js) and is never charged (checkGameStart only
+// charges seats with a userId). Called by scheduleMatchmakingBotFill in
+// server.js on a randomized delay while a matchmaking room's host is
+// waiting alone, so an empty room doesn't just sit there with nothing the
+// host can do.
+export function addSimulatedBot(room) {
+  if (!room) return { error: "Room not found" };
+  if (room.status !== "lobby") return { error: "Game already started" };
+  if (room.seats.length >= room.maxPlayers) return { error: "Room is full" };
+
+  const seat = {
+    id: randomToken(),
+    token: randomToken(),
+    name: pickSimulatedBotName(room),
+    armIndex: armForSeatIndex(room.seats.length, room.maxPlayers),
+    deviceId: null,
+    profileId: null,
+    userId: null,
+    socketId: null,
+    connected: true,
+    bot: true,
+    simulated: true,
+  };
+
+  room.seats.push(seat);
+  if (!room.hostSeatId) room.hostSeatId = seat.id;
+
+  return { room, seat };
 }
 
 // Lobby-only: drops one seat to free up the slot. Who's allowed to remove
@@ -430,6 +482,7 @@ export function serializeRoom(room) {
       connected: s.connected,
       profileId: s.profileId ?? null,
       bot: !!s.bot,
+      simulated: !!s.simulated,
     })),
   };
 }

@@ -47,7 +47,7 @@ export function OccupiedSeatCard({
         style={{ backgroundColor: color.hex }}
         aria-hidden
       >
-        {seat.bot ? <IconRobot className="h-6 w-6 sm:h-7 sm:w-7" /> : initial(seat.name)}
+        {seat.bot && !seat.simulated ? <IconRobot className="h-6 w-6 sm:h-7 sm:w-7" /> : initial(seat.name)}
       </span>
       <p className="w-full truncate text-sm font-bold text-ink sm:text-base" title={seat.name}>
         {seat.name}
@@ -57,7 +57,7 @@ export function OccupiedSeatCard({
           <>
             <IconCrown className="h-3 w-3" /> Host
           </>
-        ) : seat.bot ? (
+        ) : seat.bot && !seat.simulated ? (
           <>
             <IconRobot className="h-3 w-3" /> Bot
           </>

@@ -153,7 +153,7 @@ export default function PlayerCorner({
           className="flex h-9 w-9 items-center justify-center rounded-full border-2 text-lg leading-none shadow-sm"
           style={{ borderColor: color.hex, backgroundColor: `${color.hex}2E` }}
         >
-          {seat.bot ? (
+          {seat.bot && !seat.simulated ? (
             <span style={{ color: color.hex }}>
               <IconRobot className="h-5 w-5" />
             </span>
