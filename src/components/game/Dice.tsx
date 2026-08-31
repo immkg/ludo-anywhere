@@ -15,6 +15,7 @@ import {
 } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { playDiceRoll } from "@/lib/sound";
+import { timeoutsForLevel } from "@/game/engine";
 
 const MIN_SPIN_MS = 650;
 const SPIN_LOOP_SECONDS = 0.5;
@@ -24,7 +25,11 @@ const CUBE_SIZE = 48; // px — shrunk from 58 to land on the same size as Playe
 // (now-enlarged) avatar circle, so the die and the avatar read as one
 // consistent scale — matches the button's h-[48px] w-[48px] below.
 const HALF = CUBE_SIZE / 2;
-const AUTO_ROLL_MS = 5000;
+// Fallback only for a caller that doesn't pass autoRollMs (e.g. the dev
+// test harness) — real play always passes the seat's actual decayed
+// deadline (see GameView.tsx), level 0's roll timeout from engine.js's
+// INACTIVITY_TIMEOUTS_MS.
+const DEFAULT_AUTO_ROLL_MS = timeoutsForLevel(0)[0];
 // Pointer down->up shorter than this is a plain tap (today's simple
 // in-place roll); at or past it counts as a deliberate hold-and-release,
 // which throws the die onto the board instead — see startRoll below.
@@ -240,6 +245,14 @@ type DiceProps = {
   // below); the die itself (face/pips) stays a plain neutral cream/black
   // regardless of whose turn it is.
   glowColor: string;
+  // How long the countdown ring takes to drain before this seat's turn
+  // would time out — the seat's own decayed deadline (see
+  // INACTIVITY_TIMEOUTS_MS in src/game/engine.js), passed down by
+  // GameView.tsx. This is purely visual: the actual auto-roll only ever
+  // happens server-side (see server.js's sweepTurnTimeouts) once the real
+  // deadline passes, so this ring reflects that deadline without ever
+  // triggering the roll itself.
+  autoRollMs?: number;
 };
 
 function randomBetween(min: number, max: number) {
@@ -258,6 +271,7 @@ export default function Dice({
   throwStyle,
   rollProgress,
   glowColor,
+  autoRollMs = DEFAULT_AUTO_ROLL_MS,
 }: DiceProps) {
   const [isRolling, setIsRolling] = useState(false);
   const [orientation, setOrientation] = useState(() =>
@@ -427,24 +441,20 @@ export default function Dice({
     onRollingChange?.(isRolling);
   }, [isRolling, onRollingChange]);
 
-  // Ref so the auto-roll timer doesn't restart on every re-render — the
-  // parent passes a fresh onRoll closure each time it renders.
-  const onRollRef = useRef(onRoll);
-  useEffect(() => {
-    onRollRef.current = onRoll;
-  }, [onRoll]);
-
-  // Drives both the visual countdown ring and the actual auto-roll
-  // trigger from one pausable animation, instead of a plain setTimeout —
-  // see handlePointerDown/handlePointerLeave below, which pause this while
-  // the die is being touched and penalize it on an abandoned gesture.
+  // Drives the visual countdown ring toward this seat's real deadline —
+  // pausable so handlePointerDown/handlePointerLeave below can pause it
+  // while the die is being touched and penalize an abandoned gesture. This
+  // is purely visual: the actual auto-roll only ever happens server-side
+  // (server.js's sweepTurnTimeouts), once the real deadline elapses there
+  // — not from this animation completing. Keeping the auto-trigger
+  // client-side too used to race the server's own enforcement (both could
+  // fire for the same turn), which is exactly the kind of duplicate action
+  // this split avoids.
   function startAutoRollCountdown(durationMs: number) {
     rollAnimRef.current?.stop();
     rollAnimRef.current = animateValue(rollProgressMV, 1, {
       duration: durationMs / 1000,
       ease: "linear",
-      // An unattended auto-roll is never a deliberate flick — keep it quiet.
-      onComplete: () => onRollRef.current("tap"),
     });
   }
 
@@ -454,12 +464,12 @@ export default function Dice({
       rollProgressMV.set(0);
       return;
     }
-    startAutoRollCountdown(AUTO_ROLL_MS);
+    startAutoRollCountdown(autoRollMs);
     return () => {
       rollAnimRef.current?.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canRoll, isRolling]);
+  }, [canRoll, isRolling, autoRollMs]);
 
   // The roll actually triggers here, via pointerdown/up (covers mouse and
   // touch directly) — the click handler below only exists to catch
@@ -486,11 +496,12 @@ export default function Dice({
       holdTimerRef.current = null;
     }
     if (!canRoll || isRolling || rolledThisPressRef.current) return;
-    const naturalRemainingMs = (1 - rollProgressMV.get()) * AUTO_ROLL_MS;
+    const naturalRemainingMs = (1 - rollProgressMV.get()) * autoRollMs;
     const penalizedMs = naturalRemainingMs - ABANDON_PENALTY_MS;
     if (penalizedMs <= 0) {
+      // Ring reads as "done" — the server's own deadline (already at or
+      // past this point too, same clock) is what actually rolls, not this.
       rollProgressMV.set(1);
-      onRollRef.current("tap");
     } else {
       startAutoRollCountdown(penalizedMs);
     }

@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { createGame, moveToken, placementFor, suspendSeat, removeSeatFromGame, reactivateSeat, endGame } from "./engine.js";
+import {
+  createGame,
+  moveToken,
+  placementFor,
+  suspendSeat,
+  removeSeatFromGame,
+  reactivateSeat,
+  endGame,
+  timeoutsForLevel,
+  INACTIVITY_TIMEOUTS_MS,
+  resetInactivity,
+  advanceInactivity,
+} from "./engine.js";
 import { finished, tokenPixelPosition, buildBoardLayout } from "./board.js";
 
 function seats(n) {
@@ -256,5 +268,49 @@ describe("endGame", () => {
     expect(state.placements).toEqual([]);
     expect(placementFor(state, "seat-0")).toBeNull();
     expect(placementFor(state, "seat-1")).toBeNull();
+  });
+});
+
+describe("inactivity decay", () => {
+  it("createGame starts every seat at level 0", () => {
+    const state = createGame(seats(4));
+    state.seats.forEach((s) => expect(s.inactivityLevel).toBe(0));
+  });
+
+  it("timeoutsForLevel returns the table entry and clamps at the floor", () => {
+    expect(timeoutsForLevel(0)).toEqual([10000, 15000]);
+    expect(timeoutsForLevel(1)).toEqual([8000, 12000]);
+    expect(timeoutsForLevel(2)).toEqual([6000, 9000]);
+    expect(timeoutsForLevel(3)).toEqual([5000, 6000]);
+    expect(timeoutsForLevel(10)).toEqual([5000, 6000]); // floors, doesn't decay forever
+    expect(timeoutsForLevel(undefined)).toEqual([10000, 15000]); // treated as level 0
+  });
+
+  it("advanceInactivity increments one seat's level, clamped at the table's last index", () => {
+    let state = createGame(seats(2));
+    state = advanceInactivity(state, "seat-0");
+    expect(state.seats[0].inactivityLevel).toBe(1);
+    expect(state.seats[1].inactivityLevel).toBe(0); // untouched
+
+    for (let i = 0; i < 10; i++) state = advanceInactivity(state, "seat-0");
+    expect(state.seats[0].inactivityLevel).toBe(INACTIVITY_TIMEOUTS_MS.length - 1);
+  });
+
+  it("resetInactivity brings a seat back to level 0", () => {
+    let state = createGame(seats(2));
+    state = advanceInactivity(state, "seat-0");
+    state = advanceInactivity(state, "seat-0");
+    expect(state.seats[0].inactivityLevel).toBe(2);
+
+    state = resetInactivity(state, "seat-0");
+    expect(state.seats[0].inactivityLevel).toBe(0);
+  });
+
+  it("reactivateSeat also resets inactivityLevel — a new occupant shouldn't inherit a decayed deadline", () => {
+    let state = createGame(seats(2));
+    state = advanceInactivity(state, "seat-0");
+    state = advanceInactivity(state, "seat-0");
+    state = reactivateSeat(state, "seat-0");
+    expect(state.seats[0].inactivityLevel).toBe(0);
   });
 });

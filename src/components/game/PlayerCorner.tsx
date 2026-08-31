@@ -11,11 +11,15 @@ import type { Seat } from "@/types/room";
 
 const GOLD = "#FFD400";
 const GOLD_DARK = "#C99A00";
+// A clearly distinct accent from GOLD, the 4 arm colors, and ink-muted grey
+// — flags a seat currently being auto-played because it's disconnected
+// (see DisconnectedBadge below), never used for anything else.
+const AWAY = "#F59E0B";
 
-// Same 15s clock GameView's real auto-move timer runs on (see AUTO_MOVE_MS
-// there) — duplicated here rather than imported since this is purely the
-// cosmetic countdown trace, not the source of truth for the actual timeout.
-const AUTO_MOVE_MS = 15000;
+// Fallback only for a caller that doesn't pass moveTimeoutMs (e.g. the dev
+// test harness) — real play always passes the seat's actual decayed
+// deadline (see GameView.tsx).
+const DEFAULT_MOVE_TIMEOUT_MS = 15000;
 
 // The avatar circle's diameter — sized to match Dice.tsx's CUBE_SIZE
 // exactly, so the avatar and the die read as the same object scale
@@ -81,6 +85,32 @@ function SuspendedBadge() {
   );
 }
 
+// Same corner/size as SuspendedBadge, but a distinct amber (AWAY) — a
+// disconnected seat is being auto-played like a bot right now (see
+// server.js's sweepTurnTimeouts/currentAutoTarget), which is a different,
+// more urgent state than a host-paused seat, so it gets its own color
+// rather than reusing the grey pause badge.
+function DisconnectedBadge() {
+  return (
+    <span
+      className="absolute -bottom-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full text-white shadow"
+      style={{ backgroundColor: AWAY }}
+      aria-label="Disconnected — playing itself until they're back"
+    >
+      <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden>
+        <path
+          d="M4 1.5v3l2 1.2"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="4" cy="4" r="3.3" stroke="currentColor" strokeWidth="0.9" />
+      </svg>
+    </span>
+  );
+}
+
 type PlayerCornerProps = {
   seat: Seat | null;
   isTurn: boolean;
@@ -96,10 +126,15 @@ type PlayerCornerProps = {
   // active roller (see GameView.tsx), so this card's border traces the
   // exact same countdown that used to run around the die itself.
   rollProgress?: MotionValue<number> | null;
-  // True only for the active mover's own corner, for the AUTO_MOVE_MS
+  // True only for the active mover's own corner, for the moveTimeoutMs
   // window — a plain declarative trace since (unlike the roll countdown)
   // it's never paused/resumed by touching anything.
   canMove?: boolean;
+  // How long that trace takes to fill — the seat's own decayed move
+  // deadline (see INACTIVITY_TIMEOUTS_MS in src/game/engine.js), passed
+  // down by GameView.tsx. Purely visual, same as Dice.tsx's autoRollMs:
+  // the actual auto-move only ever happens server-side.
+  moveTimeoutMs?: number;
   // The <Dice/> for whichever corner currently has the turn (see
   // GameView.tsx) — mounted into this card's own reserved dice slot (see
   // DICE_SLOT_SIZE), which every corner keeps blank-but-present even when
@@ -132,6 +167,7 @@ export default function PlayerCorner({
   suspended,
   rollProgress,
   canMove,
+  moveTimeoutMs = DEFAULT_MOVE_TIMEOUT_MS,
   dice,
   diceFirst,
   bottomRow,
@@ -164,7 +200,10 @@ export default function PlayerCorner({
         )}
       </span>
       {placement && placement <= 3 && <PlacementCrown placement={placement} />}
-      {suspended && <SuspendedBadge />}
+      {/* Disconnected takes priority when somehow both are true — it's the
+          more urgent state (this seat is actively being auto-played right
+          now, not just paused). */}
+      {!seat.connected ? <DisconnectedBadge /> : suspended && <SuspendedBadge />}
     </div>
   );
 
@@ -256,7 +295,7 @@ export default function PlayerCorner({
               strokeLinecap="round"
               initial={{ pathLength: 0 }}
               animate={{ pathLength: 1 }}
-              transition={{ duration: AUTO_MOVE_MS / 1000, ease: "linear" }}
+              transition={{ duration: moveTimeoutMs / 1000, ease: "linear" }}
             />
           )}
         </svg>

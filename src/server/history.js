@@ -24,6 +24,14 @@ export async function saveGameHistory(room) {
           profileId: seat.profileId || null,
           isWinner: game.placements.includes(seat.id),
           placement: placementFor(game, seat.id),
+          // Cumulative time this seat spent disconnected over the whole
+          // game (see rooms.js's handleSocketDisconnect/reconnectSeats) —
+          // includes a stretch still in progress right at game-end, if the
+          // seat never reconnected before the round finished. Read at the
+          // leaderboard (src/app/leaderboard/page.tsx, src/lib/leaderboard.ts)
+          // to exclude anyone away 5+ minutes total from rating either way.
+          disconnectedMs:
+            (seat.totalDisconnectedMs || 0) + (seat.connected ? 0 : seat.disconnectedAt ? Date.now() - seat.disconnectedAt : 0),
         })),
       },
     },

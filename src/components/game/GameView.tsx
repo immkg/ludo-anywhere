@@ -23,7 +23,7 @@ import {
 import { clearOwnedSeats } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { colorForArm, buildBoardLayout } from "@/game/board";
-import { pickAutoMoveToken, moveToken as applyMoveToken, placementFor, DICE_HOLD_MS } from "@/game/engine";
+import { moveToken as applyMoveToken, placementFor, DICE_HOLD_MS, timeoutsForLevel } from "@/game/engine";
 import Dice, { type ThrowStyle } from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import ReactionBar from "@/components/game/ReactionBar";
@@ -40,7 +40,6 @@ const Board = dynamic(() => import("@/components/game/Board"), {
   loading: () => <div className="h-full w-full" />,
 });
 
-const AUTO_MOVE_MS = 15000;
 const REACTION_DISPLAY_MS = 1600;
 
 // Where a per-player sticker (see homeReactions below) lands: the center
@@ -341,23 +340,6 @@ export default function GameView({ room }: { room: Room }) {
     setSelectedSeatId(seatId);
   };
 
-  // If a player doesn't tap a token in time, move one for them: prefer a
-  // capture, then a move that lands safe, then the token furthest along
-  // (closest to home). Resets whenever the game state actually changes
-  // (a roll, a move) so it only ever fires after 15s of real inactivity.
-  useEffect(() => {
-    if (!isMyTurn || !currentSeat || !game || game.diceValue == null || validMoves.length === 0) {
-      return;
-    }
-    const seatId = currentSeat.id;
-    const roomCode = room.code;
-    const timer = setTimeout(() => {
-      const tokenIndex = pickAutoMoveToken(game, seatId);
-      if (tokenIndex != null) emitMoveToken(roomCode, seatId, tokenIndex);
-    }, AUTO_MOVE_MS);
-    return () => clearTimeout(timer);
-  }, [isMyTurn, currentSeat, game, validMoves, room.code]);
-
   if (!game) {
     return <div className="flex min-h-dvh items-center justify-center text-ink-muted">Loading game…</div>;
   }
@@ -428,6 +410,12 @@ export default function GameView({ room }: { room: Room }) {
 
   const canRoll = isMyTurn && game.diceValue == null;
   const canMove = isMyTurn && game.diceValue != null && validMoves.length > 0;
+  // The current seat's own decaying deadline (see INACTIVITY_TIMEOUTS_MS in
+  // src/game/engine.js) — purely for the visual countdowns below (Dice's
+  // ring, PlayerCorner's border trace). The actual auto-roll/auto-move only
+  // ever happens server-side, once server.js's sweepTurnTimeouts decides
+  // this seat's real deadline has passed, so these just mirror that.
+  const [autoRollMs, autoMoveMs] = timeoutsForLevel(currentSeat?.inactivityLevel);
 
   const handleRoll = (style: ThrowStyle) => {
     if (!currentSeat || !canRoll) return;
@@ -453,6 +441,7 @@ export default function GameView({ room }: { room: Room }) {
         throwStyle={lastThrowStyle}
         rollProgress={rollProgressMV}
         glowColor={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+        autoRollMs={autoRollMs}
       />
     </div>
   );
@@ -523,6 +512,7 @@ export default function GameView({ room }: { room: Room }) {
             suspended={suspendedForArm(seatByArm.get(0))}
             rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 0 && canMove}
+            moveTimeoutMs={autoMoveMs}
             dice={diceArm === 0 ? diceMount : undefined}
             onSendSticker={handleSendPlayerSticker}
           />
@@ -533,6 +523,7 @@ export default function GameView({ room }: { room: Room }) {
             suspended={suspendedForArm(seatByArm.get(1))}
             rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 1 && canMove}
+            moveTimeoutMs={autoMoveMs}
             dice={diceArm === 1 ? diceMount : undefined}
             diceFirst
             onSendSticker={handleSendPlayerSticker}
@@ -629,6 +620,7 @@ export default function GameView({ room }: { room: Room }) {
             suspended={suspendedForArm(seatByArm.get(3))}
             rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 3 && canMove}
+            moveTimeoutMs={autoMoveMs}
             dice={diceArm === 3 ? diceMount : undefined}
             bottomRow
             onSendSticker={handleSendPlayerSticker}
@@ -640,6 +632,7 @@ export default function GameView({ room }: { room: Room }) {
             suspended={suspendedForArm(seatByArm.get(2))}
             rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 2 && canMove}
+            moveTimeoutMs={autoMoveMs}
             dice={diceArm === 2 ? diceMount : undefined}
             diceFirst
             bottomRow

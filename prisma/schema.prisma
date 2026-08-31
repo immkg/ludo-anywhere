@@ -145,6 +145,12 @@ model GamePlayer {
   // game.placements / placementFor() in src/game/engine.js. Nullable only
   // for rows saved before this field existed.
   placement Int?
+  // Cumulative milliseconds this seat spent disconnected over the whole
+  // game (see rooms.js's handleSocketDisconnect/reconnectSeats). The
+  // leaderboard excludes a seat with 5+ minutes of this from rating for
+  // that game, win or loss, regardless of placement — see
+  // src/app/leaderboard/page.tsx / src/lib/leaderboard.ts.
+  disconnectedMs Int         @default(0)
   profileId String?
   game      Game           @relation(fields: [gameId], references: [id], onDelete: Cascade)
   profile   PlayerProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)

@@ -7,6 +7,13 @@ export type GameSeat = {
   // capturable. Distinct from `finished`: a suspended seat can resume and
   // keep playing normally (see suspendSeat/resumeSeat in engine.js).
   suspended: boolean;
+  // How many turns in a row this seat has let the server auto-play for it
+  // instead of rolling/moving itself — indexes INACTIVITY_TIMEOUTS_MS in
+  // engine.js, which the server's turn-timeout sweep (server.js) uses to
+  // decide how long to wait before auto-playing again. Resets to 0 on any
+  // real roll/move; only advances for a connected seat (a bot or
+  // disconnected seat is auto-played immediately regardless of this).
+  inactivityLevel: number;
 };
 
 export type GameStatus = "playing" | "finished";

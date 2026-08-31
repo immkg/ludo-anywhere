@@ -18,6 +18,22 @@ import {
 // forcing a remount right as it needs to animate, silently swallowing it.
 export const DICE_HOLD_MS = 2000;
 
+// [autoRollMs, autoMoveMs] per inactivity level — see resetInactivity/
+// advanceInactivity below. A connected seat that lets the server auto-play
+// its own turn (see server.js's sweepTurnTimeouts) advances one level for
+// next time; any real roll/move it makes itself resets it back to 0.
+// Floors at the last entry rather than decaying indefinitely.
+export const INACTIVITY_TIMEOUTS_MS = [
+  [10000, 15000],
+  [8000, 12000],
+  [6000, 9000],
+  [5000, 6000],
+];
+
+export function timeoutsForLevel(level) {
+  return INACTIVITY_TIMEOUTS_MS[Math.min(level ?? 0, INACTIVITY_TIMEOUTS_MS.length - 1)];
+}
+
 // seats: [{ id, armIndex }] — display info (name/color/connection) lives in
 // the room, not the game state.
 export function createGame(seats) {
@@ -28,6 +44,7 @@ export function createGame(seats) {
       tokens: Array(TOKENS_PER_SEAT).fill(YARD),
       finished: false,
       suspended: false,
+      inactivityLevel: 0,
     })),
     currentSeatIndex: 0,
     diceValue: null,
@@ -356,7 +373,36 @@ export function endGame(state, { declareWinner = false } = {}) {
 // (see rooms.js's reconnectSeats/claimSeat). Tokens are left exactly as
 // they are: already at the yard if this seat had been removed, or
 // wherever they were sitting if it had only been suspended.
+// inactivityLevel resets too — a new occupant claiming the seat (see
+// claimSeat) must not inherit whoever had it before's decayed deadline,
+// and giving the same occupant a clean slate on resume is a reasonable
+// simplification (the level was frozen, not advancing, the whole time
+// they were suspended anyway).
 export function reactivateSeat(state, seatId) {
-  const seats = state.seats.map((s) => (s.id === seatId ? { ...s, finished: false, suspended: false } : s));
+  const seats = state.seats.map((s) =>
+    s.id === seatId ? { ...s, finished: false, suspended: false, inactivityLevel: 0 } : s
+  );
   return { ...state, seats };
+}
+
+// Reset to level 0 — call after a seat's own genuine roll/move (see
+// server.js's game:rollDice/game:moveToken handlers, gated on the call
+// actually having changed state, not just been addressed to this seat —
+// a stale/no-op call must not undo a timeout that already advanced it).
+export function resetInactivity(state, seatId) {
+  return { ...state, seats: state.seats.map((s) => (s.id === seatId ? { ...s, inactivityLevel: 0 } : s)) };
+}
+
+// Advance one level (clamped) — call when the server's own turn-timeout
+// sweep is what actually rolled/moved for a *connected* seat (see
+// server.js's sweepTurnTimeouts), never for a bot or disconnected seat's
+// own auto-play, which isn't a human being penalized for inactivity.
+export function advanceInactivity(state, seatId) {
+  const max = INACTIVITY_TIMEOUTS_MS.length - 1;
+  return {
+    ...state,
+    seats: state.seats.map((s) =>
+      s.id === seatId ? { ...s, inactivityLevel: Math.min((s.inactivityLevel ?? 0) + 1, max) } : s
+    ),
+  };
 }

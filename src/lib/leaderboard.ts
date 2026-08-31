@@ -29,6 +29,9 @@ export async function getTopPlayers(limit: number): Promise<TopPlayer[]> {
     // (see engine.js's endGame and rooms.js's MIN_DURATION_FOR_EARLY_RESULT_MS/
     // MIN_ROLLS_FOR_EARLY_RESULT).
     if (p.placement == null) continue;
+    // Away 5+ minutes total during this game — same exclusion rule as the
+    // full leaderboard page.
+    if (p.disconnectedMs >= 5 * 60 * 1000) continue;
 
     const row = byProfile.get(p.profileId as string) ?? {
       id: p.profileId as string,

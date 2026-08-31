@@ -97,6 +97,13 @@ export function getRoom(code) {
   return rooms.get((code || "").toUpperCase());
 }
 
+// Every live room — used only by server.js's sweepTurnTimeouts, which
+// needs to check every "playing" room's turn deadline each tick rather
+// than relying on each individual mutation to remember to reschedule one.
+export function allRooms() {
+  return rooms.values();
+}
+
 // For rolling back a rematch room that failed to actually start (e.g. an
 // entitlement check blocked a seat) — nobody should be left in a room
 // that never became a real game.
@@ -279,6 +286,14 @@ export function reconnectSeats(room, tokens, socketId, userId) {
     if (tokens.includes(seat.token) || (userId && seat.userId === userId)) {
       seat.socketId = socketId;
       seat.connected = true;
+      // Cumulative disconnected time for this game, for the leaderboard's
+      // 5-minute exclusion rule (see history.js) — a seat can disconnect
+      // and reconnect more than once in one game, so this accumulates
+      // across every stretch rather than only tracking the most recent one.
+      if (seat.disconnectedAt) {
+        seat.totalDisconnectedMs = (seat.totalDisconnectedMs || 0) + (Date.now() - seat.disconnectedAt);
+        seat.disconnectedAt = null;
+      }
       clearDisconnectTimer(room, seat.id);
       if (room.game?.seats.find((s) => s.id === seat.id)?.suspended) {
         room.game = reactivateSeat(room.game, seat.id);
@@ -452,11 +467,25 @@ export function handleSocketDisconnect(room, socketId, onChange) {
 
   affected.forEach((seat) => {
     seat.connected = false;
+    // Start (or, if somehow already running, leave alone) the clock for
+    // the leaderboard's cumulative-disconnect rule — see reconnectSeats,
+    // which stops it and folds the elapsed time into totalDisconnectedMs.
+    // While this is set, the seat is auto-played like a bot (see
+    // server.js's sweepTurnTimeouts) rather than stalling the round.
+    if (!seat.disconnectedAt) seat.disconnectedAt = Date.now();
     clearDisconnectTimer(room, seat.id);
     const timer = setTimeout(() => {
       room.seats = room.seats.filter((s) => s.id !== seat.id);
       room.disconnectTimers.delete(seat.id);
       if (room.seats.every((s) => !s.connected)) rooms.delete(room.code);
+      // The seat is gone from room.seats now, but room.game doesn't know
+      // that — if it's still their turn, nothing could ever resolve it
+      // again (the seat lookup in currentAutoTarget would just keep
+      // failing), freezing the round forever. Resolve their game turn the
+      // same way a host's manual removal already does.
+      if (room.game && room.status === "playing") {
+        room.game = removeSeatFromGame(room.game, seat.id);
+      }
       onChange();
     }, DISCONNECT_GRACE_MS);
     room.disconnectTimers.set(seat.id, timer);

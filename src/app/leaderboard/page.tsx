@@ -79,6 +79,10 @@ export default async function LeaderboardPage({
     // `endedEarly` itself (a natural finish's one loser has a real
     // placement despite never explicitly finishing).
     if (p.placement == null) continue;
+    // Away 5+ minutes total during this game (see rooms.js's
+    // handleSocketDisconnect/reconnectSeats) — doesn't count as a game
+    // played for them either way, win or loss.
+    if (p.disconnectedMs >= 5 * 60 * 1000) continue;
 
     const row = byProfile.get(p.profileId as string) ?? {
       id: p.profileId as string,

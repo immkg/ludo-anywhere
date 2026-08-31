@@ -26,9 +26,18 @@ import {
   addSimulatedBot,
   guestKeyFor,
   isGuestKey,
+  allRooms,
 } from "./src/server/rooms.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
-import { rollDice, moveToken, pickAutoMoveToken, DICE_HOLD_MS } from "./src/game/engine.js";
+import {
+  rollDice,
+  moveToken,
+  pickAutoMoveToken,
+  DICE_HOLD_MS,
+  timeoutsForLevel,
+  resetInactivity,
+  advanceInactivity,
+} from "./src/game/engine.js";
 import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
 import { resolveSeatProfiles, resolveGuestSeats } from "./src/server/profiles.js";
@@ -72,65 +81,86 @@ app.prepare().then(() => {
   const BOT_ROLL_DELAY_MS = DICE_HOLD_MS + 300;
   const BOT_MOVE_DELAY_MS = 1400;
 
-  // Whichever seat currently owed a turn, if that seat is a bot — null once
-  // the round isn't playing, or the current seat isn't one.
-  function currentBotSeat(room) {
+  // Whoever currently owes the next roll/move, and how the server should
+  // treat them: a bot or a disconnected human both get the fast bot-speed
+  // cadence (BOT_ROLL_DELAY_MS/BOT_MOVE_DELAY_MS — "treated like a bot
+  // until reconnect"); a connected human gets their own decaying deadline
+  // (see INACTIVITY_TIMEOUTS_MS in engine.js), which only advances when
+  // *this* mechanism is what ends up acting for them (see
+  // sweepTurnTimeouts' isHumanTimeout branch) — a genuine roll/move they
+  // make themselves resets it back to 0 instead (see the reset hook in the
+  // game:rollDice/game:moveToken handlers below). Null once the round
+  // isn't playing or there's no current seat to act for.
+  function currentAutoTarget(room) {
     if (!room?.game || room.status !== "playing") return null;
     const gameSeat = room.game.seats[room.game.currentSeatIndex];
     if (!gameSeat) return null;
     const seat = room.seats.find((s) => s.id === gameSeat.id);
-    return seat?.bot ? seat : null;
+    if (!seat) return null;
+    const rolling = room.game.diceValue == null;
+    if (seat.bot || !seat.connected) {
+      return { seatId: seat.id, rolling, delayMs: rolling ? BOT_ROLL_DELAY_MS : BOT_MOVE_DELAY_MS, isHumanTimeout: false };
+    }
+    const [rollMs, moveMs] = timeoutsForLevel(gameSeat.inactivityLevel);
+    return { seatId: seat.id, rolling, delayMs: rolling ? rollMs : moveMs, isHumanTimeout: true };
   }
 
-  // Bots never wait on a human tap: once it's a bot seat's turn, this rolls
-  // for it after a short "thinking" pause, then — if the roll leaves a
-  // choice — moves for it after another pause, reusing the same auto-move
-  // heuristic already used for an idle human (pickAutoMoveToken in
-  // src/game/engine.js). Each step re-validates it's still that bot's turn
-  // right before acting, since the seat could've been paused/removed, or the
-  // round could've ended, while it was waiting — and always reschedules
-  // itself afterward, in case the next turn (or a bonus turn for the same
-  // seat) is a bot's too. `room.botTimer` guards against ever having two of
-  // these chains running for the same room at once.
-  function scheduleBotTurn(room) {
-    if (room.botTimer) return;
-    const botSeat = currentBotSeat(room);
-    if (!botSeat) return;
+  // One periodic sweep, ticking every SWEEP_INTERVAL_MS across every live
+  // room, drives every auto-played turn — bot, disconnected-human, and
+  // decayed-inactive-human alike. Deliberately not a per-room recursive
+  // setTimeout chain (an earlier draft was, and a design review found real
+  // bugs in that shape: an unrelated event on the room could reset an
+  // in-flight seat's deadline back to full length, and every future
+  // mutation call site would need to remember to reschedule). Instead each
+  // room just remembers the seat/action it's currently waiting on
+  // (`turnTarget`) and an absolute deadline (`turnDeadlineAt`) — recomputed
+  // fresh from scratch every tick, so nothing anywhere else in the codebase
+  // ever needs to call this: a disconnect, reconnect, suspend, resume,
+  // removal, or a plain turn change are all just picked up on the very
+  // next tick automatically.
+  const SWEEP_INTERVAL_MS = 500;
 
-    const rolling = room.game.diceValue == null;
-    room.botTimer = setTimeout(() => {
-      room.botTimer = null;
-      if (getRoom(room.code) !== room) {
-        // The one way this chain can die forever: the room this timer was
-        // armed for is no longer the live one under its code (deleted, or
-        // replaced) — nothing re-arms it after this. Should be rare; log it
-        // so a real freeze report can be matched against server logs.
-        console.error("Bot turn chain stopped: room no longer live", room.code, botSeat.name);
-        return;
+  function sweepTurnTimeouts() {
+    for (const room of allRooms()) {
+      const target = currentAutoTarget(room);
+      if (!target) {
+        room.turnTarget = null;
+        room.turnDeadlineAt = null;
+        continue;
       }
-      // Always reschedule, even if something below throws — otherwise a
-      // single unexpected error permanently kills this room's bot chain
-      // (nothing else ever re-arms it), which looks like the bot froze and
-      // the whole game got stuck.
-      try {
-        const stillBotSeat = currentBotSeat(room);
-        if (!stillBotSeat || stillBotSeat.id !== botSeat.id) return;
+      const sameTarget =
+        room.turnTarget && room.turnTarget.seatId === target.seatId && room.turnTarget.rolling === target.rolling;
+      if (!sameTarget) {
+        // The target just changed (a new turn, a reconnect, etc.) — arm a
+        // fresh deadline for it, but don't act on the very same tick.
+        room.turnTarget = { seatId: target.seatId, rolling: target.rolling };
+        room.turnDeadlineAt = Date.now() + target.delayMs;
+        continue;
+      }
+      if (Date.now() < room.turnDeadlineAt) continue;
 
-        if (rolling) {
+      try {
+        if (target.rolling) {
           room.game = rollDice(room.game);
         } else {
-          const tokenIndex = pickAutoMoveToken(room.game, botSeat.id);
-          if (tokenIndex != null) room.game = moveToken(room.game, botSeat.id, tokenIndex);
+          const tokenIndex = pickAutoMoveToken(room.game, target.seatId);
+          if (tokenIndex != null) room.game = moveToken(room.game, target.seatId, tokenIndex);
         }
+        if (target.isHumanTimeout) room.game = advanceInactivity(room.game, target.seatId);
         broadcastGame(room);
         finishRoomIfNeeded(room);
       } catch (err) {
-        console.error("Bot turn failed, rescheduling", room.code, err);
+        console.error("Turn auto-play failed", room.code, err);
       } finally {
-        scheduleBotTurn(room);
+        // Force a completely fresh read next tick rather than trying to
+        // reason here about what the target should be now.
+        room.turnTarget = null;
+        room.turnDeadlineAt = null;
       }
-    }, rolling ? BOT_ROLL_DELAY_MS : BOT_MOVE_DELAY_MS);
+    }
   }
+
+  setInterval(sweepTurnTimeouts, SWEEP_INTERVAL_MS);
 
   // A lone host in a freshly-created matchmaking room has nothing to do but
   // wait, so this trickles bot seats in one at a time on a randomized,
@@ -246,7 +276,6 @@ app.prepare().then(() => {
 
     broadcastRoom(room);
     broadcastGame(room);
-    scheduleBotTurn(room);
     const startProps = {
       roomCode: room.code,
       playerCount: room.seats.length,
@@ -752,10 +781,16 @@ app.prepare().then(() => {
       // roll. Sent ahead of the game:update below so it's more likely to
       // land before the matching rollSeq bump. Never affects the actual roll.
       socket.to(roomCode).emit("game:diceThrow", { style: style === "flick" ? "flick" : "tap" });
+      const beforeRoll = room.game;
       room.game = rollDice(room.game);
+      // Only reset the inactivity clock if this call actually changed
+      // something — rollDice/moveToken are no-op guards that return the
+      // exact same object reference for a stale call (e.g. a duplicate
+      // message racing a bonus-turn edge), and resetting on a no-op would
+      // let a client undo a timeout the server's own sweep just applied.
+      if (room.game !== beforeRoll) room.game = resetInactivity(room.game, seatId);
       broadcastGame(room);
       finishRoomIfNeeded(room);
-      scheduleBotTurn(room);
     });
 
     socket.on("game:moveToken", ({ roomCode, seatId, tokenIndex }) => {
@@ -765,10 +800,11 @@ app.prepare().then(() => {
       if (current?.id !== seatId) {
         return socket.emit("error", { message: "Not your turn" });
       }
+      const beforeMove = room.game;
       room.game = moveToken(room.game, seatId, tokenIndex);
+      if (room.game !== beforeMove) room.game = resetInactivity(room.game, seatId);
       broadcastGame(room);
       finishRoomIfNeeded(room);
-      scheduleBotTurn(room);
     });
 
     // Ephemeral emoji/sticker reaction — fire-and-forget, no game-state
@@ -904,7 +940,6 @@ app.prepare().then(() => {
         broadcastRoom(room);
         broadcastGame(room);
         finishRoomIfNeeded(room);
-        scheduleBotTurn(room);
         ack?.({});
       })
     );
@@ -924,7 +959,6 @@ app.prepare().then(() => {
         if (error) return ack?.({ error });
 
         broadcastGame(room);
-        scheduleBotTurn(room);
         ack?.({});
       })
     );
@@ -1090,7 +1124,6 @@ app.prepare().then(() => {
           deleteRoom(newRoom.code);
           return ack?.({ error: startError });
         }
-        scheduleBotTurn(newRoom);
 
         const rematchProps = {
           roomCode: newRoom.code,
@@ -1142,7 +1175,17 @@ app.prepare().then(() => {
       if (!room) return;
       const seat = findSeatBySocket(room, socket.id);
       const wasLobby = room.status === "lobby";
-      handleSocketDisconnect(room, socket.id, () => broadcastRoom(room));
+      // Also covers the mid-game branch's own game-state changes (a
+      // disconnected seat is now auto-played like a bot — see
+      // sweepTurnTimeouts — and the eventual grace-period prune resolves
+      // their turn via removeSeatFromGame, see handleSocketDisconnect)
+      // — safe to call unconditionally even for a lobby leave, where
+      // there's no room.game yet and both are no-ops.
+      handleSocketDisconnect(room, socket.id, () => {
+        broadcastRoom(room);
+        broadcastGame(room);
+        finishRoomIfNeeded(room);
+      });
       socket.leave(roomCode);
       if (wasLobby && seat?.userId) {
         clearUserRoom(seat.userId, room.code);
@@ -1159,7 +1202,11 @@ app.prepare().then(() => {
         const seat = room && findSeatBySocket(room, socket.id);
         if (!room || !seat) continue;
         const wasLobby = room.status === "lobby";
-        handleSocketDisconnect(room, socket.id, () => broadcastRoom(room));
+        handleSocketDisconnect(room, socket.id, () => {
+          broadcastRoom(room);
+          broadcastGame(room);
+          finishRoomIfNeeded(room);
+        });
         if (wasLobby && seat.userId) {
           clearUserRoom(seat.userId, room.code);
           broadcastPresence(seat.userId).catch(logPresenceError("disconnect presence update"));
