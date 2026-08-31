@@ -16,7 +16,7 @@ const GRAPH = {
       operatingSystem: "Any (web browser)",
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       description:
-        "Play Ludo online with 2 to 4 players across any mix of devices — no app to install, no ads.",
+        "Play Ludo online with 2 to 4 players across any mix of devices — no install required, no ads.",
     },
     {
       "@type": "Organization",

@@ -5,7 +5,7 @@ import MarketingShell from "@/components/marketing/MarketingShell";
 export const metadata: Metadata = {
   title: "About",
   description:
-    "MyLudo is a browser-based Ludo game built by one developer for playing with friends and family — no app, no ads, ever.",
+    "MyLudo is a browser-based Ludo game built by one developer for playing with friends and family — no install required, no ads, ever.",
   alternates: { canonical: "/about" },
 };
 

@@ -97,7 +97,7 @@ export function OgCard() {
               maxWidth: 620,
             }}
           >
-            Play Ludo online with friends — any device, no app needed.
+            Play Ludo online with friends — any device, no install needed.
           </div>
           <div
             style={{

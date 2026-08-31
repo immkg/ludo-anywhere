@@ -43,7 +43,7 @@ const FEATURES = [
 ];
 
 const PRODUCT_FACTS = [
-  { label: "Browser-based", detail: "No app to install, on any device." },
+  { label: "Browser-based", detail: "Nothing to install, on any device." },
   { label: "2–4 players", detail: "Every room supports up to four players." },
   {
     label: "Any mix of devices",
@@ -153,7 +153,7 @@ export default function LandingHero() {
                 </h1>
                 <p className="mt-2 max-w-[38ch] text-sm text-ink-muted sm:text-base">
                   Play with friends and family — on the same device or from
-                  anywhere, no download or ads.
+                  anywhere, no install required, no ads.
                 </p>
               </div>
 
