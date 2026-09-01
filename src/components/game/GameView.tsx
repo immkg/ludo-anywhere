@@ -22,8 +22,15 @@ import {
 } from "@/lib/socketActions";
 import { clearOwnedSeats } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
+import { cn } from "@/lib/utils";
 import { colorForArm, buildBoardLayout } from "@/game/board";
-import { moveToken as applyMoveToken, placementFor, DICE_HOLD_MS, timeoutsForLevel } from "@/game/engine";
+import {
+  moveToken as applyMoveToken,
+  placementFor,
+  claimableSeatCount,
+  DICE_HOLD_MS,
+  timeoutsForLevel,
+} from "@/game/engine";
 import { computeGameXp } from "@/lib/trophies";
 import { playVictoryFanfare } from "@/lib/sound";
 import Dice, { type ThrowStyle } from "@/components/game/Dice";
@@ -100,6 +107,59 @@ function myPlacementRank(game: GameState, mySeatIds: string[]): number | null {
   return null;
 }
 
+// Unlike an emoji/sticker (anonymous — nobody needs to know who tapped
+// 🔥), a quick-chat phrase reads as somebody actually saying something, so
+// it's worth attributing — `fromName` is carried alongside the wire
+// `Reaction` only for display (see the `fromName` plumbing in
+// handleReact/the game:reaction listener below), never part of the
+// Reaction type itself.
+type DisplayReaction = Reaction & { fromName?: string };
+
+// Renders whichever reaction kind is currently showing, sized for either
+// the center-screen pop (emoji/sticker/chosen quick-chat, `size="center"`)
+// or a per-seat home pop (`size="home"`, see homeReactions below) — same
+// three kinds, same transport (game:reaction), just two on-screen scales.
+function ReactionVisual({ reaction, size }: { reaction: DisplayReaction; size: "center" | "home" }) {
+  if (reaction.kind === "emoji") {
+    return (
+      <span
+        className={cn(
+          "leading-none drop-shadow-lg",
+          size === "center" ? "text-[60cqmin]" : "text-[32cqmin]",
+        )}
+      >
+        {reaction.value}
+      </span>
+    );
+  }
+  if (reaction.kind === "sticker") {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={reaction.src}
+        alt={reaction.alt}
+        className={cn(
+          "object-contain drop-shadow-lg",
+          size === "center" ? "h-[60cqmin] w-[60cqmin]" : "h-[32cqmin] w-[32cqmin]",
+        )}
+      />
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "max-w-[70cqmin] rounded-2xl border border-line bg-surface px-3 py-1.5 text-center shadow-lg",
+        size === "home" && "max-w-[40cqmin]",
+      )}
+    >
+      {reaction.fromName && (
+        <p className="truncate text-[10px] font-semibold text-ink-muted">{reaction.fromName}</p>
+      )}
+      <p className={cn("font-bold text-ink", size === "center" ? "text-base" : "text-xs")}>{reaction.text}</p>
+    </div>
+  );
+}
+
 export default function GameView({ room }: { room: Room }) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -143,12 +203,12 @@ export default function GameView({ room }: { room: Room }) {
   useEffect(() => {
     gameStartRef.current = Date.now();
   }, []);
-  const [activeReaction, setActiveReaction] = useState<Reaction | null>(null);
+  const [activeReaction, setActiveReaction] = useState<DisplayReaction | null>(null);
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Per-seat stickers sent via a player card's own sticker button (see
   // PlayerCorner.tsx) — shown at that seat's home on the board instead of
   // center-screen, keyed by seatId so more than one can be up at once.
-  const [homeReactions, setHomeReactions] = useState<Record<string, Reaction>>({});
+  const [homeReactions, setHomeReactions] = useState<Record<string, DisplayReaction>>({});
   const homeReactionTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // A center-screen "Your turn"/"<Player>'s turn" callout — an unmistakable,
   // independent turn-clarity signal alongside the single relocating die
@@ -308,17 +368,23 @@ export default function GameView({ room }: { room: Room }) {
     // it's a reliable trigger even when the others coincidentally aren't.
   }, [hasGame, diceArm, room.code, game?.status]);
 
-  const showReaction = (reaction: Reaction) => {
+  const showReaction = (reaction: DisplayReaction) => {
     setActiveReaction(reaction);
     if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
     reactionTimerRef.current = setTimeout(() => setActiveReaction(null), REACTION_DISPLAY_MS);
   };
   const handleReact = (reaction: Reaction) => {
-    showReaction(reaction);
-    sendReaction(room.code, reaction);
+    // Unlike an emoji/sticker, a quick-chat phrase reads as somebody
+    // actually saying something, so it's worth attributing to whichever
+    // seat this device plays as — a device that owns more than one seat
+    // (local pass-and-play) just attributes to the first, same
+    // simplification as elsewhere ("myName" isn't tracked per-seat).
+    const fromName = reaction.kind === "chat" ? (mySeats[0]?.name ?? "A player") : undefined;
+    showReaction(fromName ? { ...reaction, fromName } : reaction);
+    sendReaction(room.code, reaction, undefined, fromName);
   };
 
-  const showHomeReaction = (seatId: string, reaction: Reaction) => {
+  const showHomeReaction = (seatId: string, reaction: DisplayReaction) => {
     setHomeReactions((prev) => ({ ...prev, [seatId]: reaction }));
     if (homeReactionTimersRef.current[seatId]) clearTimeout(homeReactionTimersRef.current[seatId]);
     homeReactionTimersRef.current[seatId] = setTimeout(() => {
@@ -329,6 +395,8 @@ export default function GameView({ room }: { room: Room }) {
       });
     }, REACTION_DISPLAY_MS);
   };
+  // Only ever called with a sticker (see PlayerCorner.tsx's own picker,
+  // which is always mode="sticker") — never quick-chat, so no fromName.
   const handleSendPlayerSticker = (seatId: string, reaction: Reaction) => {
     showHomeReaction(seatId, reaction);
     sendReaction(room.code, reaction, seatId);
@@ -362,16 +430,18 @@ export default function GameView({ room }: { room: Room }) {
   // above, so this only ever fires for reactions someone else sent (see
   // game:reaction in server.js, which relays to everyone but the sender).
   // A targetSeatId (a per-player sticker — see PlayerCorner.tsx) routes it
-  // to that seat's home instead of the usual center-screen pop.
+  // to that seat's home instead of the usual center-screen pop. `fromName`
+  // is only ever set for a quick-chat phrase (see handleReact above).
   useEffect(() => {
     const socket = getSocket();
-    const onIncoming = (payload: Reaction & { targetSeatId?: string }) => {
-      const { targetSeatId, ...reaction } = payload;
+    const onIncoming = (payload: Reaction & { targetSeatId?: string; fromName?: string }) => {
+      const { targetSeatId, fromName, ...reaction } = payload;
+      const displayed: DisplayReaction = { ...(reaction as Reaction), fromName };
       if (targetSeatId) {
-        showHomeReaction(targetSeatId, reaction as Reaction);
+        showHomeReaction(targetSeatId, displayed);
         return;
       }
-      setActiveReaction(reaction as Reaction);
+      setActiveReaction(displayed);
       if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
       reactionTimerRef.current = setTimeout(() => setActiveReaction(null), REACTION_DISPLAY_MS);
     };
@@ -672,6 +742,12 @@ export default function GameView({ room }: { room: Room }) {
   const suspendedForArm = (seat: Seat | undefined) =>
     !!seat && !!game.seats.find((s) => s.id === seat.id)?.suspended;
 
+  // Paused or removed-and-unclaimed seats a friend could actually join
+  // right now (see claimableSeatCount in src/game/engine.js) — passed to
+  // GameMenu so its in-game "Invite a friend" list only shows once
+  // there's really a seat to put them in (Issue #24).
+  const openSeatCount = claimableSeatCount(game);
+
   const canRoll = isMyTurn && game.diceValue == null;
   const canMove = isMyTurn && game.diceValue != null && validMoves.length > 0;
   // The current seat's own decaying deadline (see INACTIVITY_TIMEOUTS_MS in
@@ -740,6 +816,7 @@ export default function GameView({ room }: { room: Room }) {
           hostSeatId={room.hostSeatId}
           seats={room.seats}
           canEndGame={canEndGame}
+          openSeatCount={openSeatCount}
           onLeaveGame={handleLeaveGame}
           onManagePlayer={handleManagePlayer}
           onClose={() => setGameMenuOpen(false)}
@@ -839,16 +916,7 @@ export default function GameView({ room }: { room: Room }) {
                 transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
                 className="pointer-events-none absolute inset-0 flex items-center justify-center"
               >
-                {activeReaction.kind === "emoji" ? (
-                  <span className="text-[60cqmin] leading-none drop-shadow-lg">{activeReaction.value}</span>
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={activeReaction.src}
-                    alt={activeReaction.alt}
-                    className="h-[60cqmin] w-[60cqmin] object-contain drop-shadow-lg"
-                  />
-                )}
+                <ReactionVisual reaction={activeReaction} size="center" />
               </motion.div>
             )}
             {Object.entries(homeReactions).map(([seatId, reaction]) => {
@@ -872,16 +940,7 @@ export default function GameView({ room }: { room: Room }) {
                   // uncentered.
                   style={{ left: `${pos.left}%`, top: `${pos.top}%`, x: "-50%", y: "-50%" }}
                 >
-                  {reaction.kind === "emoji" ? (
-                    <span className="text-[32cqmin] leading-none drop-shadow-lg">{reaction.value}</span>
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={reaction.src}
-                      alt={reaction.alt}
-                      className="h-[32cqmin] w-[32cqmin] object-contain drop-shadow-lg"
-                    />
-                  )}
+                  <ReactionVisual reaction={reaction} size="home" />
                 </motion.div>
               );
             })}

@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { IconSmiley, IconPalette, IconKebab } from "@/components/game/gameIcons";
+import { IconChat } from "@/components/friends/icons";
 import ReactionPicker, { type Reaction } from "@/components/game/ReactionPicker";
 
 // A small floating bar of game-wide controls (not tied to any player seat):
-// the two reaction triggers, an End/Leave shortcut (one click + a confirm,
-// instead of burying the most-reached-for action in the "more" menu), and
-// "more" for the room-wide Game Menu (see GameMenu.tsx, opened by GameView).
+// the three reaction triggers (emoji, sticker, quick-chat phrase), an
+// End/Leave shortcut (one click + a confirm, instead of burying the
+// most-reached-for action in the "more" menu), and "more" for the
+// room-wide Game Menu (see GameMenu.tsx, opened by GameView).
 export default function ReactionBar({
   onReact,
   onMore,
@@ -28,7 +30,7 @@ export default function ReactionBar({
   onEndGame: () => void;
   onLeaveGame: () => void;
 }) {
-  const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | "confirm" | null>(null);
+  const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | "chat" | "confirm" | null>(null);
   const reduceMotion = useReducedMotion();
   const showEnd = isHost && canEndGame;
 
@@ -62,6 +64,22 @@ export default function ReactionBar({
         <AnimatePresence>
           {openPicker === "sticker" && (
             <ReactionPicker mode="sticker" onSelect={onReact} onClose={() => setOpenPicker(null)} />
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="relative">
+        <button
+          onClick={() => setOpenPicker(openPicker === "chat" ? null : "chat")}
+          aria-label="Quick chat"
+          aria-expanded={openPicker === "chat"}
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-ink-muted transition hover:bg-surface-2 hover:text-ink"
+        >
+          <IconChat className="h-5 w-5" />
+        </button>
+        <AnimatePresence>
+          {openPicker === "chat" && (
+            <ReactionPicker mode="chat" onSelect={onReact} onClose={() => setOpenPicker(null)} />
           )}
         </AnimatePresence>
       </div>
