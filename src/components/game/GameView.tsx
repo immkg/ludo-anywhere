@@ -52,6 +52,16 @@ const Board = dynamic(() => import("@/components/game/Board"), {
 
 const REACTION_DISPLAY_MS = 1600;
 
+// How long the "Your turn"/"<Player>'s turn" callout stays up (see
+// turnToast below) — a stopgap independent of the single relocating die
+// (diceArm/diceMount), which reads as ambiguous whose-turn-it-is across
+// multi-device sessions since it's just one small object hopping between
+// four corners. Ahead of actually animating the handoff itself (a separate,
+// bigger piece of work), this gives an unmistakable signal every time the
+// turn changes. Close to REACTION_DISPLAY_MS — long enough to register,
+// short enough to not linger over the board.
+const TURN_TOAST_MS = 1800;
+
 // Where a per-player sticker (see homeReactions below) lands: the center
 // of that arm's "cage" — the same board-space rect Board.tsx draws the
 // yard on — expressed as a 0..100 percentage of the board's own square
@@ -71,7 +81,7 @@ function homePositionPercent(armIndex: number) {
 export default function GameView({ room }: { room: Room }) {
   const router = useRouter();
   const { data: session } = useSession();
-  const { game, currentSeat, isMyTurn, validMoves } = useGame();
+  const { game, currentSeat, currentRoomSeat, isMyTurn, validMoves } = useGame();
   const setGame = useGameStore((s) => s.setGame);
   const mySeats = useRoomStore((s) => s.mySeats);
   const resetRoomStore = useRoomStore((s) => s.reset);
@@ -118,6 +128,15 @@ export default function GameView({ room }: { room: Room }) {
   // center-screen, keyed by seatId so more than one can be up at once.
   const [homeReactions, setHomeReactions] = useState<Record<string, Reaction>>({});
   const homeReactionTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // A center-screen "Your turn"/"<Player>'s turn" callout — an unmistakable,
+  // independent turn-clarity signal alongside the single relocating die
+  // (diceArm below), which across multi-device sessions can otherwise read
+  // as ambiguous whose-turn-it-is. `key` forces AnimatePresence to replay
+  // the pop-in even if the same text repeats (e.g. back to a 2-player game's
+  // other seat).
+  const [turnToast, setTurnToast] = useState<{ key: string; text: string; color: string } | null>(null);
+  const turnToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const announcedSeatIdRef = useRef<string | null>(null);
   const reduceMotion = useReducedMotion();
 
   // Geometry for the board square and the dice's "flick" throw (see
@@ -297,9 +316,24 @@ export default function GameView({ room }: { room: Room }) {
     () => () => {
       if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
       Object.values(homeReactionTimersRef.current).forEach(clearTimeout);
+      if (turnToastTimerRef.current) clearTimeout(turnToastTimerRef.current);
     },
     [],
   );
+
+  // Fires the turn-clarity toast once per actual turn change (not per
+  // render) — keyed off the current seat's id rather than diceArm/rollSeq,
+  // since it's meant to announce whose turn it *actually* is right away,
+  // independent of the die's own held/relocate animation (see diceArm
+  // below).
+  useEffect(() => {
+    if (!currentSeat || currentSeat.id === announcedSeatIdRef.current) return;
+    announcedSeatIdRef.current = currentSeat.id;
+    const text = isMyTurn ? "Your turn" : `${currentRoomSeat?.name ?? "Opponent"}'s turn`;
+    setTurnToast({ key: `${currentSeat.id}-${Date.now()}`, text, color: colorForArm(currentSeat.armIndex).hex });
+    if (turnToastTimerRef.current) clearTimeout(turnToastTimerRef.current);
+    turnToastTimerRef.current = setTimeout(() => setTurnToast(null), TURN_TOAST_MS);
+  }, [currentSeat, isMyTurn, currentRoomSeat?.name]);
 
   // Reactions broadcast from other seats/spectators in the same room — the
   // sender already shows theirs locally via handleReact/handleSendPlayerSticker
@@ -620,7 +654,26 @@ export default function GameView({ room }: { room: Room }) {
         </div>
       )}
 
-      <div ref={boardAreaRef} className="flex min-h-0 flex-1 flex-col items-center justify-center">
+      <div ref={boardAreaRef} className="relative flex min-h-0 flex-1 flex-col items-center justify-center">
+        {/* A stopgap, independent-of-the-die turn-clarity signal (see
+            turnToast above) — the actual handoff animation for the single
+            relocating die is a separate piece of work (issue #21). */}
+        <AnimatePresence>
+          {turnToast && (
+            <motion.div
+              key={turnToast.key}
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="pointer-events-none absolute left-1/2 top-1 z-10 -translate-x-1/2 rounded-full border border-line bg-surface px-4 py-1.5 text-sm font-bold shadow-lg"
+              style={{ color: turnToast.color }}
+            >
+              {turnToast.text}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div ref={topRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pb-2 sm:px-4">
           <PlayerCorner
             seat={seatByArm.get(0) ?? null}
