@@ -21,9 +21,15 @@ type Ack = {
   claimableSeats?: ClaimableSeat[];
 };
 
+const ACK_TIMEOUT_MS = 12_000;
+
 function emitWithAck(event: string, payload: unknown): Promise<Ack> {
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out waiting for a response to "${event}". Please try again.`));
+    }, ACK_TIMEOUT_MS);
     getSocket().emit(event, payload, (ack: Ack) => {
+      clearTimeout(timer);
       if (ack?.error) reject(new Error(ack.error));
       else resolve(ack);
     });
