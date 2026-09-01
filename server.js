@@ -27,6 +27,7 @@ import {
   guestKeyFor,
   isGuestKey,
   allRooms,
+  midGameAddBot,
   addSpectator,
   reconnectSpectator,
   setSpectatePolicy,
@@ -998,6 +999,27 @@ app.prepare().then(() => {
         if (error) return ack?.({ error });
 
         broadcastRoom(room);
+        ack?.({});
+      })
+    );
+
+    // Host-only, mid-game: fills a paused/removed/disconnected/fully-vacated
+    // seat with a bot (see midGameAddBot in rooms.js) — pulling it back out
+    // later is just the existing room:removeSeat, no separate event needed.
+    socket.on(
+      "room:addBot",
+      withAck(async ({ roomCode, seatId, callerSeatId }, ack) => {
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!room.hostSeatId || room.hostSeatId !== callerSeatId) {
+          return ack?.({ error: "Only the host can add a bot" });
+        }
+
+        const { error } = midGameAddBot(room, seatId);
+        if (error) return ack?.({ error });
+
+        broadcastRoom(room);
+        broadcastGame(room);
         ack?.({});
       })
     );

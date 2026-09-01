@@ -19,6 +19,7 @@ import {
   leaveRoom,
   rematch,
   sendReaction,
+  addBotToSeat,
 } from "@/lib/socketActions";
 import { clearOwnedSeats, clearSpectatorToken } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
@@ -594,6 +595,7 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
           isHost={isHost}
           hostSeatId={room.hostSeatId}
           seats={room.seats}
+          vacatedSeats={room.vacatedSeats}
           canEndGame={canEndGame}
           onLeaveGame={handleLeaveGame}
           onManagePlayer={handleManagePlayer}
@@ -800,6 +802,12 @@ function PlayerActionsModal({
   const suspended = !!gameSeat?.suspended;
   const isHostSeat = seatId === room.hostSeatId;
   const color = gameSeat ? colorForArm(gameSeat.armIndex) : null;
+  // A seat mid-disconnect-grace (see handleSocketDisconnect in rooms.js) is
+  // already being auto-played like a bot, but its seat object is still
+  // here (not yet pruned) — the host can convert it to a real bot outright
+  // rather than waiting the grace period out (see midGameAddBot).
+  const disconnectedVacant = !seat.connected && !suspended && !removed && !won;
+  const canAddBot = !seat.bot && (suspended || removed || disconnectedVacant);
 
   const handleEndGame = async () => {
     setEndGameLoading(true);
@@ -857,7 +865,19 @@ function PlayerActionsModal({
         ) : (
           <>
             {won && <p className="text-sm text-ink-muted">Already finished — nothing to manage.</p>}
-            {removed && <p className="text-sm text-ink-muted">Removed from this game.</p>}
+            {removed && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm text-ink-muted">Removed from this game.</p>
+                {canAddBot && (
+                  <button
+                    onClick={() => addBotToSeat(room.code, seatId, room.hostSeatId!).catch(() => {})}
+                    className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+                  >
+                    Add bot
+                  </button>
+                )}
+              </div>
+            )}
             {!won && !removed && (
               <div className="flex flex-wrap gap-2">
                 <button
@@ -866,6 +886,14 @@ function PlayerActionsModal({
                 >
                   {suspended ? "Resume" : "Pause"}
                 </button>
+                {canAddBot && (
+                  <button
+                    onClick={() => addBotToSeat(room.code, seatId, room.hostSeatId!).catch(() => {})}
+                    className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+                  >
+                    Add bot
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     removeSeat(room.code, seatId, room.hostSeatId!).catch(() => {});
@@ -873,9 +901,9 @@ function PlayerActionsModal({
                   }}
                   className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
                 >
-                  Remove
+                  {seat.bot ? "Remove bot" : "Remove"}
                 </button>
-                {seat.connected && !suspended && (
+                {seat.connected && !suspended && !seat.bot && (
                   <button
                     onClick={() => transferHost(room.code, seatId, room.hostSeatId!).catch(() => {})}
                     className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-ink-muted"

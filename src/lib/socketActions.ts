@@ -125,6 +125,14 @@ export function claimSeat(roomCode: string, seatId: string, profileId: string) {
   return emitWithAck("room:claimSeat", { roomCode, seatId, profileId });
 }
 
+// Host-only, mid-game: fills a paused/removed/disconnected/fully-vacated
+// seat with a bot (see room:addBot in server.js) — `seatId` can be one of
+// `Room.vacatedSeats`' ids as well as a normal seat's. Pulling the bot back
+// out later is just removeSeat() above, same as removing any other seat.
+export function addBotToSeat(roomCode: string, seatId: string, hostSeatId: string) {
+  return emitWithAck("room:addBot", { roomCode, seatId, callerSeatId: hostSeatId });
+}
+
 // Joins as a spectator — no seat, just a live viewer. Resolves once this
 // device is either watching outright (`spectator` set, a "public" room or a
 // successful reconnect) or waiting on host approval (`pending`, a "private"

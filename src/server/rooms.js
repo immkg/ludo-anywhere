@@ -195,13 +195,23 @@ export function addSeats(room, requests, { socketId, deviceId, userId, bot } = {
   return { room, seats: newSeats };
 }
 
-// Host-only, lobby-only: fills every remaining open seat with a bot,
-// numbered after whatever bots (if any) are already seated so a second fill
-// (e.g. after removing one) doesn't repeat a name. A bot seat has no
-// deviceId/profileId/userId/socketId behind it — it's never reconnected to,
-// never charged (see checkGameStart, which only charges seats with a
-// userId), and plays itself server-side once it's its turn (see
-// scheduleBotTurn in server.js).
+// Shared by fillWithBots (lobby, possibly several at once) and
+// midGameAddBot (mid-game, always one) — numbered after whatever bots (if
+// any) are already seated so a second fill (e.g. after removing one)
+// doesn't repeat a name.
+function nextBotNumber(room) {
+  const existingBotNumbers = room.seats
+    .filter((s) => s.bot)
+    .map((s) => Number(s.name.replace("Bot ", "")))
+    .filter((n) => Number.isFinite(n));
+  return existingBotNumbers.length > 0 ? Math.max(...existingBotNumbers) + 1 : 1;
+}
+
+// Host-only, lobby-only: fills every remaining open seat with a bot. A bot
+// seat has no deviceId/profileId/userId/socketId behind it — it's never
+// reconnected to, never charged (see checkGameStart, which only charges
+// seats with a userId), and plays itself server-side once it's its turn
+// (see scheduleBotTurn in server.js).
 export function fillWithBots(room) {
   if (!room) return { error: "Room not found" };
   if (room.status !== "lobby") return { error: "Game already started" };
@@ -209,17 +219,12 @@ export function fillWithBots(room) {
   const openSlots = room.maxPlayers - room.seats.length;
   if (openSlots <= 0) return { error: "Room is full" };
 
-  const existingBotNumbers = room.seats
-    .filter((s) => s.bot)
-    .map((s) => Number(s.name.replace("Bot ", "")))
-    .filter((n) => Number.isFinite(n));
-  let nextBotNumber = existingBotNumbers.length > 0 ? Math.max(...existingBotNumbers) + 1 : 1;
-
+  const startingNumber = nextBotNumber(room);
   const startIndex = room.seats.length;
   const newSeats = Array.from({ length: openSlots }, (_, i) => ({
     id: randomToken(),
     token: randomToken(),
-    name: `Bot ${nextBotNumber + i}`,
+    name: `Bot ${startingNumber + i}`,
     armIndex: armForSeatIndex(startIndex + i, room.maxPlayers),
     deviceId: null,
     profileId: null,
@@ -371,6 +376,90 @@ export function midGameRemoveSeat(room, seatId) {
   return { room };
 }
 
+// Mid-game seats with no living owner at all: their game.seats entry
+// survives (finished, never placed) but the seat itself already dropped out
+// of room.seats via handleSocketDisconnect's grace-period prune — the arm
+// just sits empty on the board with nothing left for the usual
+// pause/remove/claim UI (which all key off room.seats) to target. Exposed
+// on serializeRoom so the host can still fill one with a bot (see
+// midGameAddBot).
+export function vacatedSeats(room) {
+  if (!room?.game) return [];
+  const seatedIds = new Set(room.seats.map((s) => s.id));
+  return room.game.seats
+    .filter((s) => s.finished && !room.game.placements.includes(s.id) && !seatedIds.has(s.id))
+    .map((s) => ({ id: s.id, armIndex: s.armIndex }));
+}
+
+// Host-only, mid-game: fills a currently-unoccupied seat with a bot — one
+// that's paused, host-removed-and-unclaimed, still mid-disconnect-grace
+// (connected: false, not yet pruned), or fully vacated (see vacatedSeats
+// above). Reuses reactivateSeat (src/game/engine.js) the same way
+// claimSeat/resumeSeat do — bot-filling isn't a new resolution kind, just a
+// new *occupant* for an already-supported one, so turn order/whose-turn
+// logic there needs no changes. Pulling the bot back out later is just the
+// existing room:removeSeat/midGameRemoveSeat path (see server.js) — no
+// different from removing a human seat — which leaves the seat claimable
+// again for a human via claimSeat (see room:claimSeat), same as any other
+// removed seat.
+export function midGameAddBot(room, seatId) {
+  if (!room?.game || room.status !== "playing") return { error: "Game not in progress" };
+
+  const seat = room.seats.find((s) => s.id === seatId);
+  const gameSeat = room.game.seats.find((s) => s.id === seatId);
+
+  if (seat) {
+    if (!gameSeat) return { error: "Player not found" };
+    const removedUnclaimed = gameSeat.finished && !room.game.placements.includes(seatId);
+    // A connected, still-in-play seat isn't up for grabs — the host has to
+    // pause or remove it first (see midGameSuspendSeat/midGameRemoveSeat),
+    // same as claimableSeats requires for a human to take it over.
+    const vacant = gameSeat.suspended || removedUnclaimed || (!seat.connected && !gameSeat.finished);
+    if (!vacant) return { error: "That seat is occupied" };
+
+    // The seat's identity is being replaced by a bot — a pending
+    // disconnect-grace timer for it must not fire later and prune what is
+    // now a bot seat out from under it (see handleSocketDisconnect).
+    clearDisconnectTimer(room, seatId);
+    Object.assign(seat, {
+      name: `Bot ${nextBotNumber(room)}`,
+      token: randomToken(),
+      deviceId: null,
+      profileId: null,
+      userId: null,
+      socketId: null,
+      connected: true,
+      bot: true,
+      simulated: false,
+    });
+    room.game = reactivateSeat(room.game, seatId);
+    return { room, seat };
+  }
+
+  // Not in room.seats at all — fully vacated. Reconstruct a seat around the
+  // same id so reactivateSeat's change actually attaches to something real
+  // again (see vacatedSeats above).
+  if (!gameSeat || !gameSeat.finished || room.game.placements.includes(seatId)) {
+    return { error: "Seat not found" };
+  }
+
+  const newSeat = {
+    id: seatId,
+    token: randomToken(),
+    name: `Bot ${nextBotNumber(room)}`,
+    armIndex: gameSeat.armIndex,
+    deviceId: null,
+    profileId: null,
+    userId: null,
+    socketId: null,
+    connected: true,
+    bot: true,
+  };
+  room.seats.push(newSeat);
+  room.game = reactivateSeat(room.game, seatId);
+  return { room, seat: newSeat };
+}
+
 // Host-only: stops the game outright — see engine.js's endGame. Unlike
 // midGameRemoveSeat, this doesn't require narrowing down to one seat
 // first; the host can call it any time mid-game. Once the room has been
@@ -421,6 +510,9 @@ export function claimableSeats(room) {
 // place instead of appending one, and reactivates the underlying game
 // seat so the new occupant actually gets turns. A fresh reconnect token
 // is issued since this is a new occupant, not the seat's original owner.
+// Also explicitly clears bot/simulated — a claimable seat can now be a bot
+// mid-game hosted itself (see midGameAddBot), and without this a human who
+// claims it back would silently stay flagged as a bot forever.
 export function claimSeat(room, seatId, { name, profileId, userId, socketId, deviceId }) {
   if (!room?.game) return { error: "Game not in progress" };
   const seat = room.seats.find((s) => s.id === seatId);
@@ -437,6 +529,8 @@ export function claimSeat(room, seatId, { name, profileId, userId, socketId, dev
     deviceId,
     connected: true,
     token: randomToken(),
+    bot: false,
+    simulated: false,
   });
   room.game = reactivateSeat(room.game, seatId);
   return { room, seat };
@@ -626,6 +720,10 @@ export function serializeRoom(room) {
     // at approval time — see room:watchRequest:incoming in server.js).
     spectatePolicy: room.spectatePolicy,
     spectatorCount: room.spectators.filter((s) => s.connected).length,
+    // Mid-game seats with no seat object left at all (see vacatedSeats) —
+    // the host's only way to know an arm is fillable with a bot, since
+    // there's no seat row anywhere else in this payload to show it.
+    vacatedSeats: vacatedSeats(room),
     seats: room.seats.map((s) => ({
       id: s.id,
       name: s.name,

@@ -7,6 +7,13 @@ export type RoomStatus = "lobby" | "playing" | "finished";
 // Room.spectatorCount) — but still never individual watchers' names.
 export type SpectatePolicy = "private" | "public";
 
+// A mid-game seat with no seat object left at all — its game.seats entry
+// survives (finished, unplaced) but it dropped out of room.seats via the
+// server's disconnect-grace-period prune. The host can still fill it with a
+// bot (see room:addBot in server.js) even though there's no normal seat row
+// anywhere in `Room.seats` to show/manage it.
+export type VacatedSeat = { id: string; armIndex: number };
+
 export type Seat = {
   id: string;
   name: string;
@@ -36,6 +43,7 @@ export type Room = {
   matchmaking: boolean;
   spectatePolicy: SpectatePolicy;
   spectatorCount: number;
+  vacatedSeats: VacatedSeat[];
   seats: Seat[];
 };
 
