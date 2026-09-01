@@ -12,7 +12,6 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { cn } from "@/lib/utils";
 import type { EntitlementStatus } from "@/types/billing";
-import { useIsAndroidApp } from "@/lib/android-app";
 
 const PLAYER_COUNTS = [2, 3, 4] as const;
 
@@ -21,7 +20,6 @@ export default function CreateRoom() {
   const { data: session } = useSession();
   const addMySeats = useRoomStore((s) => s.addMySeats);
   const { profiles, loading: profilesLoading } = useProfiles();
-  const isAndroidApp = useIsAndroidApp();
 
   const [totalPlayers, setTotalPlayers] = useState(2);
   const [loading, setLoading] = useState(false);
@@ -258,13 +256,9 @@ export default function CreateRoom() {
           ) : blocked ? (
             <div className="flex flex-col gap-2 rounded-2xl border border-accent bg-surface p-4 text-center">
               <p className="text-sm">You&rsquo;ve used today&rsquo;s free games.</p>
-              {isAndroidApp ? (
-                <p className="text-xs text-ink-muted">Come back tomorrow for more.</p>
-              ) : (
-                <Link href="/pricing">
-                  <Button className="w-full">Get more games</Button>
-                </Link>
-              )}
+              <Link href="/pricing">
+                <Button className="w-full">Get more games</Button>
+              </Link>
             </div>
           ) : (
             <>

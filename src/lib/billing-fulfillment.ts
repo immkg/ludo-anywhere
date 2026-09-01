@@ -35,7 +35,19 @@ export async function reconcileOrder(uropaiOrderId: string): Promise<void> {
   // PENDING: leave as CREATED — a later poll or webhook delivery will settle it.
 }
 
-async function grantPayment(payment: Payment) {
+// entitlementWindow lets a Play Billing purchase (see src/lib/play-billing.ts
+// and the /api/billing/play routes) pass Google's own authoritative
+// startTime/expiryTime instead of deriving the window from
+// config.monthly/annual.days — Play's charge is the source of truth for a
+// Play purchase, so our records can't drift from what was actually billed.
+// eventTypeOverride lets a renewal fire "subscription_renewed" instead of
+// "subscription_started" in PostHog, so first purchases and renewals stay
+// distinguishable on dashboards even though both flow through this same
+// function.
+export async function grantPayment(
+  payment: Payment,
+  opts?: { entitlementWindow?: { startsAt: Date; expiresAt: Date }; eventTypeOverride?: string }
+) {
   const config = await getPricingConfig();
   const now = new Date();
   // Captured inside the transaction below (if a coupon was redeemed), read
@@ -63,13 +75,18 @@ async function grantPayment(payment: Payment) {
       });
     } else {
       const days = payment.purpose === "MONTHLY" ? config.monthly.days : config.annual.days;
+      const window = opts?.entitlementWindow ?? {
+        startsAt: now,
+        expiresAt: new Date(now.getTime() + days * 24 * 60 * 60 * 1000),
+      };
       await tx.entitlement.create({
         data: {
           userId: payment.userId,
           type: payment.purpose,
-          startsAt: now,
-          expiresAt: new Date(now.getTime() + days * 24 * 60 * 60 * 1000),
+          startsAt: window.startsAt,
+          expiresAt: window.expiresAt,
           paymentId: payment.id,
+          ...(payment.provider === "PLAY" ? { playPurchaseToken: payment.playPurchaseToken } : {}),
         },
       });
       // A Monthly subscriber upgrading to Annual (or otherwise buying a
@@ -109,7 +126,7 @@ async function grantPayment(payment: Payment) {
   });
 
   if (granted) {
-    const eventType = payment.purpose === "PACK" ? "pack_purchased" : "subscription_started";
+    const eventType = opts?.eventTypeOverride ?? (payment.purpose === "PACK" ? "pack_purchased" : "subscription_started");
     await logEvent(eventType, payment.userId, { purpose: payment.purpose, amountInr: payment.amountInr });
     // revenue/currency were Umami's special property names for its Revenue
     // report. Kept as plain properties here — PostHog's revenue analytics
