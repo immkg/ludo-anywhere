@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { endGame as emitEndGame, trackShare } from "@/lib/socketActions";
+import { endGame as emitEndGame, trackShare, addBotToSeat } from "@/lib/socketActions";
 import { shareRoomLink, roomJoinUrl } from "@/lib/share";
 import { colorForArm } from "@/game/board";
 import Button from "@/components/ui/Button";
@@ -10,7 +10,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import CosmeticsPicker from "@/components/CosmeticsPicker";
 import FeedbackPrompt from "@/components/game/FeedbackPrompt";
 import InviteFriendsList from "@/components/friends/InviteFriendsList";
-import type { Seat } from "@/types/room";
+import type { Seat, VacatedSeat } from "@/types/room";
 
 // Room-wide controls, opened from the "more" button in ReactionBar — also
 // where the host manages individual players (pause/resume/remove/make
@@ -23,6 +23,7 @@ export default function GameMenu({
   isHost,
   hostSeatId,
   seats,
+  vacatedSeats,
   canEndGame,
   openSeatCount,
   onLeaveGame,
@@ -33,6 +34,9 @@ export default function GameMenu({
   isHost: boolean;
   hostSeatId: string | null;
   seats: Seat[];
+  // Mid-game seats with no seat row at all to tap in the Players list below
+  // — see VacatedSeat in src/types/room.ts. Host-only, same as Players.
+  vacatedSeats: VacatedSeat[];
   // See canEndGame in GameView.tsx — false only for a matchmaking host with
   // a real opponent still seated, who can leave but not end outright.
   canEndGame: boolean;
@@ -48,6 +52,7 @@ export default function GameMenu({
   onManagePlayer: (seatId: string) => void;
   onClose: () => void;
 }) {
+  const [addingBotId, setAddingBotId] = useState<string | null>(null);
   const [confirmingEnd, setConfirmingEnd] = useState(false);
   const [endGameLoading, setEndGameLoading] = useState(false);
   const [endGameError, setEndGameError] = useState<string | null>(null);
@@ -160,6 +165,41 @@ export default function GameMenu({
                         />
                         <span className="min-w-0 flex-1 truncate">{seat.name}</span>
                         {seat.id === hostSeatId && <span className="text-xs font-normal text-ink-muted">Host</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isHost && vacatedSeats.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-sm text-ink-muted">Empty seats</p>
+                  <div className="flex flex-col gap-1">
+                    {vacatedSeats.map((vacated) => (
+                      <button
+                        key={vacated.id}
+                        disabled={addingBotId !== null}
+                        onClick={async () => {
+                          setAddingBotId(vacated.id);
+                          try {
+                            await addBotToSeat(roomCode, vacated.id, hostSeatId!);
+                          } catch {
+                            // The seat list refreshes from room:update either
+                            // way — nothing local to roll back here.
+                          } finally {
+                            setAddingBotId(null);
+                          }
+                        }}
+                        className="flex items-center gap-2 rounded-xl border border-dashed border-line px-3 py-2 text-left text-sm font-semibold text-ink transition hover:bg-surface-2 disabled:opacity-50"
+                      >
+                        <span
+                          className="h-3 w-3 shrink-0 rounded-full"
+                          style={{ backgroundColor: colorForArm(vacated.armIndex).hex }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-ink-muted">Empty seat</span>
+                        <span className="text-xs font-normal text-accent">
+                          {addingBotId === vacated.id ? "Adding…" : "Add bot"}
+                        </span>
                       </button>
                     ))}
                   </div>

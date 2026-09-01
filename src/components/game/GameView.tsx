@@ -19,8 +19,9 @@ import {
   leaveRoom,
   rematch,
   sendReaction,
+  addBotToSeat,
 } from "@/lib/socketActions";
-import { clearOwnedSeats } from "@/lib/identity";
+import { clearOwnedSeats, clearSpectatorToken } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { cn } from "@/lib/utils";
 import { colorForArm, buildBoardLayout } from "@/game/board";
@@ -50,6 +51,7 @@ import {
 import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
+import SpectateSettings from "@/components/lobby/SpectateSettings";
 import type { Room, Seat } from "@/types/room";
 import type { GameState } from "@/types/game";
 
@@ -160,7 +162,7 @@ function ReactionVisual({ reaction, size }: { reaction: DisplayReaction; size: "
   );
 }
 
-export default function GameView({ room }: { room: Room }) {
+export default function GameView({ room, isSpectator = false }: { room: Room; isSpectator?: boolean }) {
   const router = useRouter();
   const { data: session } = useSession();
   const { game, currentSeat, currentRoomSeat, isMyTurn, validMoves } = useGame();
@@ -486,7 +488,8 @@ export default function GameView({ room }: { room: Room }) {
 
   const handleLeaveGame = () => {
     leaveRoom(room.code);
-    clearOwnedSeats(room.code);
+    if (isSpectator) clearSpectatorToken(room.code);
+    else clearOwnedSeats(room.code);
     resetRoomStore();
     router.push(session?.user ? "/" : "/play");
   };
@@ -815,6 +818,7 @@ export default function GameView({ room }: { room: Room }) {
           isHost={isHost}
           hostSeatId={room.hostSeatId}
           seats={room.seats}
+          vacatedSeats={room.vacatedSeats}
           canEndGame={canEndGame}
           openSeatCount={openSeatCount}
           onLeaveGame={handleLeaveGame}
@@ -831,7 +835,12 @@ export default function GameView({ room }: { room: Room }) {
           normal py-2 top padding, so a notch/status-bar cutout in a
           full-screen PWA/TWA never sits flush against the reaction bar —
           see the matching pb- on bottomRowRef below. */}
-      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] sm:px-4">
+      <div className="sticky top-0 z-10 relative flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] sm:px-4">
+        {room.spectatorCount > 0 && (
+          <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-xs font-bold text-ink-muted sm:right-4">
+            👀 {room.spectatorCount}
+          </span>
+        )}
         <ReactionBar
           onReact={handleReact}
           onMore={() => setGameMenuOpen(true)}
@@ -843,8 +852,9 @@ export default function GameView({ room }: { room: Room }) {
       </div>
 
       {isHost && (
-        <div className="shrink-0 px-2 pt-2 sm:px-4">
+        <div className="shrink-0 flex flex-col gap-2 px-2 pt-2 sm:px-4">
           <IncomingJoinRequests roomCode={room.code} />
+          <SpectateSettings room={room} hostSeatId={room.hostSeatId!} />
         </div>
       )}
 
@@ -1029,6 +1039,12 @@ function PlayerActionsModal({
   const suspended = !!gameSeat?.suspended;
   const isHostSeat = seatId === room.hostSeatId;
   const color = gameSeat ? colorForArm(gameSeat.armIndex) : null;
+  // A seat mid-disconnect-grace (see handleSocketDisconnect in rooms.js) is
+  // already being auto-played like a bot, but its seat object is still
+  // here (not yet pruned) — the host can convert it to a real bot outright
+  // rather than waiting the grace period out (see midGameAddBot).
+  const disconnectedVacant = !seat.connected && !suspended && !removed && !won;
+  const canAddBot = !seat.bot && (suspended || removed || disconnectedVacant);
 
   const handleEndGame = async () => {
     setEndGameLoading(true);
@@ -1086,7 +1102,19 @@ function PlayerActionsModal({
         ) : (
           <>
             {won && <p className="text-sm text-ink-muted">Already finished — nothing to manage.</p>}
-            {removed && <p className="text-sm text-ink-muted">Removed from this game.</p>}
+            {removed && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm text-ink-muted">Removed from this game.</p>
+                {canAddBot && (
+                  <button
+                    onClick={() => addBotToSeat(room.code, seatId, room.hostSeatId!).catch(() => {})}
+                    className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+                  >
+                    Add bot
+                  </button>
+                )}
+              </div>
+            )}
             {!won && !removed && (
               <div className="flex flex-wrap gap-2">
                 <button
@@ -1095,6 +1123,14 @@ function PlayerActionsModal({
                 >
                   {suspended ? "Resume" : "Pause"}
                 </button>
+                {canAddBot && (
+                  <button
+                    onClick={() => addBotToSeat(room.code, seatId, room.hostSeatId!).catch(() => {})}
+                    className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+                  >
+                    Add bot
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     removeSeat(room.code, seatId, room.hostSeatId!).catch(() => {});
@@ -1102,9 +1138,9 @@ function PlayerActionsModal({
                   }}
                   className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
                 >
-                  Remove
+                  {seat.bot ? "Remove bot" : "Remove"}
                 </button>
-                {seat.connected && !suspended && (
+                {seat.connected && !suspended && !seat.bot && (
                   <button
                     onClick={() => transferHost(room.code, seatId, room.hostSeatId!).catch(() => {})}
                     className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-ink-muted"
