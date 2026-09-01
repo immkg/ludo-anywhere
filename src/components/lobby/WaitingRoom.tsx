@@ -465,7 +465,14 @@ export default function WaitingRoom({
         />
       )}
 
-      {isSpectator && spectatorId && <SpectatorChat roomCode={room.code} spectatorId={spectatorId} />}
+      {isSpectator && spectatorId && (
+        <SpectatorChat
+          roomCode={room.code}
+          spectatorId={spectatorId}
+          spectatorCount={room.spectatorCount}
+          variant="floating"
+        />
+      )}
     </div>
   );
 }

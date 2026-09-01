@@ -5,18 +5,38 @@ import { getSocket } from "@/lib/socket";
 import { sendSpectatorChat } from "@/lib/socketActions";
 import type { SpectatorChatMessage } from "@/types/room";
 
-// A floating, collapsible side channel for spectators to talk among
-// themselves — deliberately its own widget (not a card wedged into
-// WaitingRoom/GameView's existing layout) so it reads as visually and
-// structurally distinct from the players' own reaction/quick-chat stream
-// (ReactionBar/game:reaction). Only ever rendered for a confirmed
-// spectator (see RoomPageClient.tsx) — there's no host/player view of this
-// at all, matching the spectator model's privacy invariant that watchers'
-// identities never reach anyone but the host, and even then only
-// transiently at approval time (see SpectateSettings.tsx).
+// A collapsible side channel for spectators to talk among themselves —
+// deliberately its own widget (not a card wedged into WaitingRoom/GameView's
+// existing layout) so it reads as visually and structurally distinct from
+// the players' own reaction/quick-chat stream (ReactionBar/game:reaction).
+// Only ever rendered for a confirmed spectator (see RoomPageClient.tsx) —
+// there's no host/player view of this at all, matching the spectator
+// model's privacy invariant that watchers' identities never reach anyone
+// but the host, and even then only transiently at approval time (see
+// SpectateSettings.tsx).
+//
+// Two trigger styles, both anchored top-right (never bottom — the closed
+// trigger used to sit at bottom-4 right-4 and collide with the bottom-right
+// player corner on the live board):
+// - "badge": merges into GameView's own top bar, in the exact slot that
+//   would otherwise just show the static "👀 N watching" count — the
+//   spectator's own count IS the chat trigger, rather than a second
+//   floating button competing for the same corner.
+// - "floating": self-contained fixed button, used on the results screen
+//   (no existing top bar/badge there to merge into).
 const MESSAGE_MAX_LENGTH = 240;
 
-export default function SpectatorChat({ roomCode, spectatorId }: { roomCode: string; spectatorId: string }) {
+export default function SpectatorChat({
+  roomCode,
+  spectatorId,
+  spectatorCount,
+  variant,
+}: {
+  roomCode: string;
+  spectatorId: string;
+  spectatorCount: number;
+  variant: "badge" | "floating";
+}) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<SpectatorChatMessage[]>([]);
   const [unread, setUnread] = useState(0);
@@ -73,11 +93,24 @@ export default function SpectatorChat({ roomCode, spectatorId }: { roomCode: str
   };
 
   if (!open) {
-    return (
+    return variant === "badge" ? (
       <button
         onClick={() => setOpen(true)}
         aria-label="Open spectator chat"
-        className="fixed bottom-4 right-4 z-30 flex h-12 items-center gap-1.5 rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink shadow-lg"
+        className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-xs font-bold text-ink-muted transition hover:text-ink sm:right-4"
+      >
+        👀 {spectatorCount}
+        {unread > 0 && (
+          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </button>
+    ) : (
+      <button
+        onClick={() => setOpen(true)}
+        aria-label="Open spectator chat"
+        className="fixed right-4 top-[calc(1rem+env(safe-area-inset-top))] z-30 flex h-12 items-center gap-1.5 rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink shadow-lg"
       >
         <span aria-hidden>💬</span> Spectator chat
         {unread > 0 && (
@@ -90,7 +123,13 @@ export default function SpectatorChat({ roomCode, spectatorId }: { roomCode: str
   }
 
   return (
-    <div className="fixed inset-x-4 bottom-4 z-30 mx-auto flex max-h-[60vh] w-auto max-w-sm flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl sm:inset-x-auto sm:right-4">
+    <div
+      className={
+        variant === "badge"
+          ? "absolute right-2 top-full z-30 mt-2 flex max-h-[60vh] w-72 flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl sm:right-4"
+          : "fixed inset-x-4 top-[calc(1rem+env(safe-area-inset-top))] z-30 mx-auto flex max-h-[60vh] w-auto max-w-sm flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl sm:inset-x-auto sm:right-4"
+      }
+    >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface-2 px-3 py-2">
         <p className="text-sm font-bold text-ink">
           <span aria-hidden>💬</span> Spectator chat
