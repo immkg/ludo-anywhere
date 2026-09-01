@@ -8,12 +8,18 @@ import { cn } from "@/lib/utils";
 import { IconCheck, IconCrown, IconUsers } from "@/components/lobby/icons";
 import { IconLightning } from "@/components/home/icons";
 import { IconGift, IconSprout, IconLock } from "@/components/pricing/icons";
+import { useIsAndroidApp, usePlayDigitalGoodsService } from "@/lib/android-app";
+import { playSkuFor } from "@/lib/play-products";
 
-// These are one-time purchases, not subscriptions — no renewal, no
-// cancellation, no recurring billing. The copy and states below are built
-// around expiry, never renewal. "MONTHLY"/"ANNUAL"/"PACK" below are the
-// existing backend entitlement/purpose identifiers (src/types/billing.ts);
-// only their customer-facing names change here.
+// On the web, these are one-time purchases, not subscriptions — no
+// cancellation, no recurring billing, and the copy/states below are built
+// around expiry. On Android, MONTHLY/ANNUAL purchase through Google Play
+// Billing instead (see the buy() branch below), where they DO auto-renew
+// natively and are managed/cancelled from Play's own subscription center
+// (required by Play policy — this app doesn't build its own cancel UI for
+// that path). "MONTHLY"/"ANNUAL"/"PACK" below are the existing backend
+// entitlement/purpose identifiers (src/types/billing.ts); only their
+// customer-facing names change here.
 type PlanKey = "FREE" | "PACK" | "MONTHLY" | "ANNUAL";
 
 type PlanMeta = { name: string; color: string; Icon: ComponentType<{ className?: string }> };
@@ -68,6 +74,13 @@ export default function PricingPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const processing = searchParams.get("status") === "processing";
+  const isAndroidApp = useIsAndroidApp();
+  const digitalGoodsService = usePlayDigitalGoodsService();
+  // True once we know Android billing genuinely isn't available on this
+  // exact app build (not while still checking) — see
+  // usePlayDigitalGoodsService()'s comment for why an old build or a
+  // spoofed android-app:// referrer must not show a broken buy button.
+  const androidBillingUnavailable = isAndroidApp && digitalGoodsService === null;
 
   const [status, setStatus] = useState<EntitlementStatus | null>(null);
   const [buying, setBuying] = useState<BillingPurpose | null>(null);
@@ -142,12 +155,51 @@ export default function PricingPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- baseline is captured once when processing starts, not re-read every render
   }, [processing, router]);
 
+  const buyOnAndroid = useCallback(
+    async (purpose: BillingPurpose) => {
+      const sku = playSkuFor(purpose);
+      const request = new PaymentRequest(
+        [{ supportedMethods: "https://play.google.com/billing", data: { sku } }],
+        { total: { label: "Total", amount: { currency: "INR", value: "0" } } }
+      );
+      const response = await request.show();
+      const purchaseToken = (response.details as { purchaseToken?: string } | null)?.purchaseToken;
+      if (!purchaseToken) {
+        await response.complete("fail");
+        throw new Error("No purchase token returned");
+      }
+      const res = await fetch("/api/billing/play/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purchaseToken, productId: sku }),
+      });
+      if (!res.ok) {
+        await response.complete("fail");
+        throw new Error("Could not verify purchase");
+      }
+      await response.complete("success");
+      const next = await fetchStatus();
+      if (next) setStatus(next);
+    },
+    []
+  );
+
   const buy = useCallback(
     async (purpose: BillingPurpose) => {
       if (!session?.user) return;
+      if (androidBillingUnavailable) {
+        setError("Update the app from Play Store to purchase.");
+        return;
+      }
       setBuying(purpose);
       setError(null);
       try {
+        if (isAndroidApp && digitalGoodsService && digitalGoodsService !== "loading") {
+          await buyOnAndroid(purpose);
+          setBuying(null);
+          return;
+        }
+
         const res = await fetch("/api/billing/uropai/order", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -164,7 +216,7 @@ export default function PricingPageClient() {
         setBuying(null);
       }
     },
-    [session, applyCoupon, coupon]
+    [session, applyCoupon, coupon, isAndroidApp, digitalGoodsService, androidBillingUnavailable, buyOnAndroid]
   );
 
   const planType = status?.entitlement?.type ?? null;
@@ -172,13 +224,15 @@ export default function PricingPageClient() {
 
   // Flash-coupon preview prices for the Game Pack / Game Pass cards below —
   // undefined unless the checkbox is checked and the active coupon is
-  // actually usable against that plan (see couponAppliesTo above).
+  // actually usable against that plan (see couponAppliesTo above). Never
+  // shown on Android — v1 ships flat Play Billing prices only, see the
+  // top-of-file comment.
   const flashPackPriceInr =
-    status && applyCoupon && coupon && couponAppliesTo(coupon, "PACK")
+    status && !isAndroidApp && applyCoupon && coupon && couponAppliesTo(coupon, "PACK")
       ? previewDiscountedPrice(status.pricing.gamePack.priceInr, coupon)
       : undefined;
   const flashMonthlyPriceInr =
-    status && applyCoupon && coupon && couponAppliesTo(coupon, "MONTHLY")
+    status && !isAndroidApp && applyCoupon && coupon && couponAppliesTo(coupon, "MONTHLY")
       ? previewDiscountedPrice(status.pricing.monthly.priceInr, coupon)
       : undefined;
 
@@ -193,13 +247,21 @@ export default function PricingPageClient() {
         </p>
       )}
       {error && <p className="text-sm text-accent">{error}</p>}
+      {androidBillingUnavailable && (
+        <p className="rounded-2xl border border-line bg-surface-2 p-3 text-sm text-ink-muted">
+          This app version can&apos;t process purchases yet — update MyLudo from the Play Store to buy a Game Pack or
+          Game Pass.
+        </p>
+      )}
 
-      <CouponBar
-        coupon={coupon}
-        applyCoupon={applyCoupon}
-        onToggle={setApplyCoupon}
-        onRedeemed={setCoupon}
-      />
+      {!isAndroidApp && (
+        <CouponBar
+          coupon={coupon}
+          applyCoupon={applyCoupon}
+          onToggle={setApplyCoupon}
+          onRedeemed={setCoupon}
+        />
+      )}
 
       {!status ? (
         <LoadingSkeleton />
@@ -352,7 +414,7 @@ export default function PricingPageClient() {
 
       <HostBenefitBanner />
 
-      <PaymentFooter />
+      <PaymentFooter isAndroidApp={isAndroidApp} />
     </main>
   );
 }
@@ -643,14 +705,18 @@ function PlanCard({
   );
 }
 
-function PaymentFooter() {
+function PaymentFooter({ isAndroidApp }: { isAndroidApp: boolean }) {
   return (
     <div className="flex flex-col items-center gap-1 pb-2 pt-2 text-center">
       <p className="flex items-center gap-1.5 text-xs font-semibold text-ink-muted">
         <IconLock className="h-3.5 w-3.5" />
-        Secure one-time payment
+        {isAndroidApp ? "Secure payment via Google Play" : "Secure one-time payment"}
       </p>
-      <p className="text-xs text-ink-muted">Pay once. Play for the validity period. No recurring payments.</p>
+      <p className="text-xs text-ink-muted">
+        {isAndroidApp
+          ? "Game Pack is a one-time purchase. Game Pass plans auto-renew and can be managed or cancelled anytime from Google Play's subscription settings."
+          : "Pay once. Play for the validity period. No recurring payments."}
+      </p>
     </div>
   );
 }

@@ -49,7 +49,6 @@ import {
 } from "@/components/lobby/icons";
 import type { PlayerProfile } from "@/types/profile";
 import type { Room, OwnedSeat } from "@/types/room";
-import { useIsAndroidApp } from "@/lib/android-app";
 
 // Links into existing pages so the desktop shell's sidebar isn't a dead
 // end — this component doesn't own those routes, it just points at them.
@@ -85,7 +84,6 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
   const openSlots = Math.max(0, room.maxPlayers - room.seats.length);
   const hostName = room.seats.find((s) => s.id === room.hostSeatId)?.name;
   const myName = mySeats[0]?.name ?? "A player";
-  const isAndroidApp = useIsAndroidApp();
 
   // Nudges from a non-host in a matchmaking room asking the host to start
   // early or fill with bots — purely a relayed toast (see room:requestStart/
@@ -277,7 +275,7 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
               <div className="flex items-start justify-between gap-3 rounded-2xl border border-accent bg-surface p-3">
                 <p className="text-sm">
                   {error}
-                  {error.includes("used up today") && !isAndroidApp && (
+                  {error.includes("used up today") && (
                     <>
                       {" "}
                       <Link href="/pricing" className="font-semibold text-accent underline">

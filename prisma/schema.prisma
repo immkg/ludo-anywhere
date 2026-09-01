@@ -196,6 +196,12 @@ model Entitlement {
   paymentId String   @unique
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Play Billing only — the latest known purchase token for this
+  // subscription, used by the RTDN webhook to find which Entitlement a
+  // renewal/cancellation notification belongs to (Google's purchase token
+  // is the only handle we get back; there's no way to attach our own userId
+  // at purchase time via the Digital Goods API). Null for Uropai rows.
+  playPurchaseToken String? @unique
 
   @@index([userId, expiresAt])
 }
@@ -233,13 +239,25 @@ model Payment {
   purpose           String // PACK | MONTHLY | ANNUAL
   amountInr         Int
   discountInr       Int       @default(0) // e.g. the Monthly->Annual upgrade credit, for audit/analytics
-  uropaiOrderId     String    @unique
-  tenantOrderRef    String    @unique // idempotency key sent to Uropai when creating the order
+  // Which gateway settled this payment. UROPAI is every row created before
+  // this field existed (the default) and every web purchase since. PLAY is
+  // a Google Play Billing purchase from the Android TWA — see
+  // src/lib/play-billing.ts. The two gateways' identifying fields below are
+  // therefore both nullable: exactly one set is populated, matching provider.
+  provider          String    @default("UROPAI")
+  uropaiOrderId     String?   @unique
+  tenantOrderRef    String?   @unique // idempotency key sent to Uropai when creating the order
+  // Play Billing only, below. playPurchaseToken is the idempotency key
+  // (Google issues one token per purchase/renewal) — see the verify route.
+  playPurchaseToken String?   @unique
+  playProductId     String? // e.g. "game_pack" or "premium_plan:monthly"
+  playOrderId       String? // Google's GPA.xxxx order id, kept for support/refund lookups only
   status            String // CREATED | PAID | FAILED
   // The coupon selected at order-creation time, if any (see order/route.ts).
   // Not unique — a coupon can sit on more than one CREATED payment across
   // retries; only the one that actually settles marks the coupon REDEEMED
-  // via Coupon.redeemedPaymentId, which is unique.
+  // via Coupon.redeemedPaymentId, which is unique. Always null for Play
+  // purchases — v1 ships flat pricing only on Android, see PricingPageClient.
   couponId          String?
   createdAt         DateTime  @default(now())
   verifiedAt        DateTime?
@@ -247,6 +265,7 @@ model Payment {
   coupon            Coupon?   @relation(fields: [couponId], references: [id])
 
   @@index([userId, status])
+  @@index([provider])
 }
 
 model AnalyticsEvent {

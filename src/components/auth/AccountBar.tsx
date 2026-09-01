@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import Button from "@/components/ui/Button";
 import type { EntitlementStatus } from "@/types/billing";
-import { useIsAndroidApp } from "@/lib/android-app";
 
 function planSummary(status: EntitlementStatus): { label: string; cta: string } {
   if (status.entitlement) {
@@ -26,7 +25,6 @@ export default function AccountBar() {
   const { data: session, status } = useSession();
   const [pendingCount, setPendingCount] = useState(0);
   const [billing, setBilling] = useState<EntitlementStatus | null>(null);
-  const isAndroidApp = useIsAndroidApp();
 
   useEffect(() => {
     if (!session?.user) return;
@@ -78,12 +76,7 @@ export default function AccountBar() {
           Sign out
         </button>
       </div>
-      {plan && isAndroidApp && (
-        <div className="flex items-center rounded-xl bg-surface-2 px-3 py-2 text-xs font-semibold text-ink-muted">
-          <span>{plan.label}</span>
-        </div>
-      )}
-      {plan && !isAndroidApp && (
+      {plan && (
         <Link
           href="/pricing"
           className="flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2 text-xs font-semibold text-ink-muted"

@@ -18,11 +18,15 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
 
+  // Only Uropai payments can still be sitting CREATED waiting on this poll
+  // — a Play Billing purchase (see /api/billing/play/verify) is verified
+  // and granted synchronously, never left pending for this endpoint to
+  // reconcile.
   const pending = await prisma.payment.findFirst({
-    where: { userId: session.user.id, status: "CREATED" },
+    where: { userId: session.user.id, status: "CREATED", provider: "UROPAI" },
     orderBy: { createdAt: "desc" },
   });
-  if (pending) await reconcileOrder(pending.uropaiOrderId);
+  if (pending?.uropaiOrderId) await reconcileOrder(pending.uropaiOrderId);
 
   const [status, config] = await Promise.all([
     getEntitlementStatus(session.user.id),
