@@ -2,89 +2,14 @@
 
 import { useState } from "react";
 import type Konva from "konva";
-import { Arc, Circle, Ellipse, Group, Line } from "react-konva";
+import { Arc, Circle, Ellipse, Group, Line, RegularPolygon } from "react-konva";
 import { useFade, useRotation } from "@/hooks/useAnimatedPoint";
 import { useSteppedToken } from "@/hooks/useSteppedToken";
+import { useCosmetics } from "@/components/CosmeticsProvider";
+import { resolveTokenStyle } from "@/game/cosmetics";
+import { darkenForContrast, shade } from "@/lib/color";
 
-const WHITE = "#DFDACD"; // a warm off-white (not pure white) — softer against the now-darker disc colors, still reads as "white border".
 const SHADOW = "#463B2E"; // soft warm gray, not flat black — a physical piece's shadow on a board, not a graphic drop-shadow.
-
-// Blends `hex` toward white (amount > 0) or black (amount < 0) — used only
-// for a gentle radial gradient across the disc's own fill (still one flat
-// color at a glance, just enough falloff to read as subtly domed/lit from
-// above rather than a flat cutout) and a soft highlight, not a glossy gem.
-function shade(hex: string, amount: number) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const target = amount >= 0 ? 255 : 0;
-  const t = Math.abs(amount);
-  const mix = (c: number) => Math.round(c * (1 - t) + target * t);
-  // Hex (not rgb()) so a shaded result can itself be fed back into shade()
-  // — see discColor below, which darkens the base color once and is then
-  // shaded again (lighter/darker) for the gradient's own stops.
-  const toHex = (c: number) => c.toString(16).padStart(2, "0");
-  return `#${toHex(mix(r))}${toHex(mix(g))}${toHex(mix(b))}`;
-}
-
-// Darkens `hex` for contrast by reducing HSL lightness (not blending
-// toward black in RGB) — RGB blending drags a bright, low-saturation hue
-// like yellow through olive/brown well before it reads as "a darker
-// yellow." Cutting lightness by a fixed amount keeps the hue and
-// saturation intact, so it stays recognizably the same color, just deeper.
-function darkenForContrast(hex: string, lightnessDrop: number) {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  let h = 0;
-  let s = 0;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r:
-        h = (g - b) / d + (g < b ? 6 : 0);
-        break;
-      case g:
-        h = (b - r) / d + 2;
-        break;
-      default:
-        h = (r - g) / d + 4;
-    }
-    h /= 6;
-  }
-  const l2 = Math.max(0, l - lightnessDrop);
-
-  const hue2rgb = (p: number, q: number, t: number) => {
-    let tt = t;
-    if (tt < 0) tt += 1;
-    if (tt > 1) tt -= 1;
-    if (tt < 1 / 6) return p + (q - p) * 6 * tt;
-    if (tt < 1 / 2) return q;
-    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
-    return p;
-  };
-  let r2: number;
-  let g2: number;
-  let b2: number;
-  if (s === 0) {
-    r2 = g2 = b2 = l2;
-  } else {
-    const q = l2 < 0.5 ? l2 * (1 + s) : l2 + s - l2 * s;
-    const p = 2 * l2 - q;
-    r2 = hue2rgb(p, q, h + 1 / 3);
-    g2 = hue2rgb(p, q, h);
-    b2 = hue2rgb(p, q, h - 1 / 3);
-  }
-  const toHex = (c: number) =>
-    Math.round(c * 255)
-      .toString(16)
-      .padStart(2, "0");
-  return `#${toHex(r2)}${toHex(g2)}${toHex(b2)}`;
-}
 
 // The legal-move ring's color: a darker, more saturated "neon" take on
 // each player's actual board color (see colorForArm in src/game/board.js),
@@ -175,6 +100,12 @@ export default function Token({
   const py = rawY + offsetY;
   const [hovered, setHovered] = useState(false);
 
+  // Each player's own free local pick — see src/game/cosmetics.ts and
+  // CosmeticsProvider.tsx. Never synced between players; every seat draws
+  // its tokens from its own choice here, same as ThemeProvider's dark/light.
+  const { tokenStyle } = useCosmetics();
+  const style = resolveTokenStyle(tokenStyle);
+
   // A stable per-token phase offset so multiple legal tokens' rings don't
   // all rotate in perfect lockstep — deterministic (not Math.random()) so
   // it doesn't jump around on re-render.
@@ -256,21 +187,57 @@ export default function Token({
           but a gentle radial gradient (lit from the upper-left, like every
           other light source on this board) gives it a subtly domed,
           slightly-raised feel instead of a flat cutout. Konva's own shadow
-          (not a separate shape) adds the lift underneath. */}
-      <Circle
-        radius={discRadius}
-        fillRadialGradientStartPoint={{ x: -discRadius * 0.35, y: -discRadius * 0.4 }}
-        fillRadialGradientStartRadius={0}
-        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-        fillRadialGradientEndRadius={discRadius * 1.05}
-        fillRadialGradientColorStops={[0, shade(discColor, 0.16), 0.6, discColor, 1, shade(discColor, -0.08)]}
-        stroke={WHITE}
-        strokeWidth={borderWidth}
-        shadowColor={SHADOW}
-        shadowBlur={4 * k}
-        shadowOffset={{ x: 0, y: 1.5 * k }}
-        shadowOpacity={hovered ? 0.4 : 0.32}
-      />
+          (not a separate shape) adds the lift underneath. Shape (circle vs
+          a faceted polygon) and border color/highlight strength come from
+          the player's own token-style pick — see resolveTokenStyle. The
+          invisible hit area above is unaffected: it's computed separately
+          in Board.tsx and never depends on this shape. */}
+      {style.shape === "polygon" ? (
+        <RegularPolygon
+          sides={style.sides ?? 6}
+          radius={discRadius}
+          fillRadialGradientStartPoint={{ x: -discRadius * 0.35, y: -discRadius * 0.4 }}
+          fillRadialGradientStartRadius={0}
+          fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+          fillRadialGradientEndRadius={discRadius * 1.05}
+          fillRadialGradientColorStops={[
+            0,
+            shade(discColor, style.highlightAmount),
+            0.6,
+            discColor,
+            1,
+            shade(discColor, -0.08),
+          ]}
+          stroke={style.borderColor}
+          strokeWidth={borderWidth}
+          shadowColor={SHADOW}
+          shadowBlur={4 * k}
+          shadowOffset={{ x: 0, y: 1.5 * k }}
+          shadowOpacity={hovered ? 0.4 : 0.32}
+        />
+      ) : (
+        <Circle
+          radius={discRadius}
+          fillRadialGradientStartPoint={{ x: -discRadius * 0.35, y: -discRadius * 0.4 }}
+          fillRadialGradientStartRadius={0}
+          fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+          fillRadialGradientEndRadius={discRadius * 1.05}
+          fillRadialGradientColorStops={[
+            0,
+            shade(discColor, style.highlightAmount),
+            0.6,
+            discColor,
+            1,
+            shade(discColor, -0.08),
+          ]}
+          stroke={style.borderColor}
+          strokeWidth={borderWidth}
+          shadowColor={SHADOW}
+          shadowBlur={4 * k}
+          shadowOffset={{ x: 0, y: 1.5 * k }}
+          shadowOpacity={hovered ? 0.4 : 0.32}
+        />
+      )}
 
       {/* A small, soft highlight — just enough to read as a rounded top
           surface catching light, not a glossy gem's hot spot. */}
