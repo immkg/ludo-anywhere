@@ -23,7 +23,13 @@ import {
 import { clearOwnedSeats } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { colorForArm, buildBoardLayout } from "@/game/board";
-import { moveToken as applyMoveToken, placementFor, DICE_HOLD_MS, timeoutsForLevel } from "@/game/engine";
+import {
+  moveToken as applyMoveToken,
+  placementFor,
+  claimableSeatCount,
+  DICE_HOLD_MS,
+  timeoutsForLevel,
+} from "@/game/engine";
 import Dice, { type ThrowStyle } from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import ReactionBar from "@/components/game/ReactionBar";
@@ -525,6 +531,12 @@ export default function GameView({ room }: { room: Room }) {
   const suspendedForArm = (seat: Seat | undefined) =>
     !!seat && !!game.seats.find((s) => s.id === seat.id)?.suspended;
 
+  // Paused or removed-and-unclaimed seats a friend could actually join
+  // right now (see claimableSeatCount in src/game/engine.js) — passed to
+  // GameMenu so its in-game "Invite a friend" list only shows once
+  // there's really a seat to put them in (Issue #24).
+  const openSeatCount = claimableSeatCount(game);
+
   const canRoll = isMyTurn && game.diceValue == null;
   const canMove = isMyTurn && game.diceValue != null && validMoves.length > 0;
   // The current seat's own decaying deadline (see INACTIVITY_TIMEOUTS_MS in
@@ -593,6 +605,7 @@ export default function GameView({ room }: { room: Room }) {
           hostSeatId={room.hostSeatId}
           seats={room.seats}
           canEndGame={canEndGame}
+          openSeatCount={openSeatCount}
           onLeaveGame={handleLeaveGame}
           onManagePlayer={handleManagePlayer}
           onClose={() => setGameMenuOpen(false)}
