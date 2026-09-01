@@ -1,4 +1,10 @@
-import type { AnimationControls } from "framer-motion";
+import type { useAnimationControls } from "framer-motion";
+
+// framer-motion doesn't export its `useAnimationControls()` return type under
+// its own name (it's an internal `LegacyAnimationControls`, not re-exported)
+// — deriving it this way instead keeps this file working across
+// framer-motion versions without depending on that internal name.
+type AnimationControls = ReturnType<typeof useAnimationControls>;
 
 export type Point = { x: number; y: number };
 

@@ -4,7 +4,13 @@ import dynamic from "next/dynamic";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { AnimatePresence, motion, useMotionValue, useReducedMotion } from "framer-motion";
+import {
+  AnimatePresence,
+  motion,
+  useAnimationControls,
+  useMotionValue,
+  useReducedMotion,
+} from "framer-motion";
 import { useGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/useGameStore";
 import { useRoomStore } from "@/store/useRoomStore";
@@ -25,6 +31,7 @@ import { getSocket } from "@/lib/socket";
 import { colorForArm, buildBoardLayout } from "@/game/board";
 import { moveToken as applyMoveToken, placementFor, DICE_HOLD_MS, timeoutsForLevel } from "@/game/engine";
 import Dice, { type ThrowStyle } from "@/components/game/Dice";
+import { arcKeyframes, playSettleBounces, randomBetween, type Point } from "@/lib/diceMotion";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import ReactionBar from "@/components/game/ReactionBar";
 import GameMenu from "@/components/game/GameMenu";
@@ -51,6 +58,12 @@ const Board = dynamic(() => import("@/components/game/Board"), {
 });
 
 const REACTION_DISPLAY_MS = 1600;
+// How long the floating die's own arc leg of a corner-to-corner handoff
+// takes (see the overlay-positioning logic in the board-geometry effect
+// below) — brisker than Dice.tsx's own flick-throw range (700-1050ms),
+// since this hop is usually shorter and happens after every single roll, so
+// it shouldn't feel like it's dragging the pace of play down.
+const HANDOFF_ARC_MS = 550;
 
 // Where a per-player sticker (see homeReactions below) lands: the center
 // of that arm's "cage" — the same board-space rect Board.tsx draws the
@@ -144,6 +157,39 @@ export default function GameView({ room }: { room: Room }) {
   const bottomRowRef = useRef<HTMLDivElement>(null);
   const boardSlotRef = useRef<HTMLDivElement>(null);
   const diceWrapRef = useRef<HTMLDivElement>(null);
+  // The floating <Dice/> overlay's own positioned ancestor (see diceMount
+  // below) — a fixed-position box whose left/top this same board-geometry
+  // effect drives directly (imperative style writes, not React state — see
+  // recompute below) so it always sits exactly over whichever corner's
+  // reserved dice slot currently holds the turn, and so a corner-to-corner
+  // handoff can measure the old/new slot positions and animate between them
+  // in that same synchronous pass, with no extra render round-trip.
+  const diceOverlayRef = useRef<HTMLDivElement>(null);
+  // The overlay's own x/y/scale offset, relative to wherever it's currently
+  // anchored — animated from the old corner's position down to {x:0,y:0}
+  // (see playHandoffArc below) whenever diceArm actually changes to a
+  // different corner, instead of a hard cut.
+  const diceHandoffControls = useAnimationControls();
+  // Every corner's own reserved dice-slot element (see PlayerCorner.tsx's
+  // diceSlotRef), keyed by arm — tracked regardless of which corner
+  // currently holds the die, so a handoff's *source* corner (which no
+  // longer has it) can still be measured too. A plain ref object (not
+  // state): these never need to trigger a render themselves, only to be
+  // read inside the geometry effect below.
+  const cornerSlotElsRef = useRef<Partial<Record<number, HTMLDivElement>>>({});
+  // Stable ref-callback identities (created once) so passing them down to
+  // PlayerCorner doesn't detach/reattach the slot ref on every render.
+  const cornerSlotRefCallbacks = useRef(
+    [0, 1, 2, 3].map((arm) => (el: HTMLDivElement | null) => {
+      if (el) cornerSlotElsRef.current[arm] = el;
+      else delete cornerSlotElsRef.current[arm];
+    }),
+  ).current;
+  // Which arm the overlay was last positioned at — lets the geometry effect
+  // tell "diceArm actually just changed to a new corner" (play the handoff
+  // arc) apart from "recomputing for some other reason, e.g. a resize"
+  // (just reposition instantly, no replayed animation).
+  const lastPositionedArmRef = useRef<number | null>(null);
   const [boardSize, setBoardSize] = useState<number | null>(null);
   const [diceGeometry, setDiceGeometry] = useState<{
     restPoint: { x: number; y: number };
@@ -198,12 +244,33 @@ export default function GameView({ room }: { room: Room }) {
   }, [diceHoldArm, game?.rollSeq]);
   const diceArm = diceHoldArm ?? currentArm;
 
+  // Plays the floating dice overlay's own corner-to-corner arc leg (see
+  // diceOverlayRef/diceHandoffControls above and the geometry effect below,
+  // which computes `startOffset` and kicks this off): the same curved-arc
+  // shape Dice.tsx's own flick-throw uses (arcKeyframes), settling with the
+  // same squash-bounce (playSettleBounces) — just traveling between two
+  // corners instead of between a resting spot and a point on the board.
+  async function playHandoffArc(startOffset: Point) {
+    const { x, y } = arcKeyframes(startOffset, { x: 0, y: 0 });
+    await diceHandoffControls.start({
+      x,
+      y,
+      transition: {
+        duration: HANDOFF_ARC_MS / 1000,
+        times: [0, 0.55, 1],
+        ease: ["easeOut", "easeIn"],
+      },
+    });
+    const bounces = Math.round(randomBetween(1, 2));
+    await playSettleBounces(diceHandoffControls, bounces);
+  }
+
   useLayoutEffect(() => {
     const areaEl = boardAreaRef.current;
     const topRowEl = topRowRef.current;
     const bottomRowEl = bottomRowRef.current;
-    const diceEl = diceWrapRef.current;
-    if (!areaEl || !topRowEl || !bottomRowEl || !diceEl) return;
+    const overlayEl = diceOverlayRef.current;
+    if (!areaEl || !topRowEl || !bottomRowEl || !overlayEl || diceArm == null) return;
     const recompute = () => {
       const areaRect = areaEl.getBoundingClientRect();
       const topRowHeight = topRowEl.getBoundingClientRect().height;
@@ -223,9 +290,45 @@ export default function GameView({ room }: { room: Room }) {
       // An 80%-of-the-board square, centered, so a throw never lands flush
       // against the edge.
       const safeSize = size * 0.8;
-      const diceRect = diceEl.getBoundingClientRect();
+
+      // Reposition the floating dice overlay directly over whichever
+      // corner's own reserved dice slot currently holds the turn (see
+      // cornerSlotElsRef/PlayerCorner.tsx's diceSlotRef) — an imperative
+      // style write (not React state) so this and the restPoint below
+      // always see the same already-updated position in this one
+      // synchronous pass, with no extra render round-trip. Whenever this is
+      // a genuine handoff — the die was just sitting at a *different*
+      // corner a moment ago, not merely a resize/rematch recompute of the
+      // same corner — it also plays the arc travel animation between the
+      // two, unless reduced motion is requested, in which case it just
+      // relocates instantly (today's behavior).
+      const slotEl = cornerSlotElsRef.current[diceArm];
+      if (!slotEl) return;
+      const slotRect = slotEl.getBoundingClientRect();
+      overlayEl.style.left = `${slotRect.left}px`;
+      overlayEl.style.top = `${slotRect.top}px`;
+      overlayEl.style.width = `${slotRect.width}px`;
+      overlayEl.style.height = `${slotRect.height}px`;
+
+      if (lastPositionedArmRef.current !== diceArm) {
+        const prevArm = lastPositionedArmRef.current;
+        lastPositionedArmRef.current = diceArm;
+        const prevSlotEl = prevArm != null ? cornerSlotElsRef.current[prevArm] : null;
+        if (prevSlotEl && !reduceMotion) {
+          const prevRect = prevSlotEl.getBoundingClientRect();
+          const startOffset: Point = {
+            x: prevRect.left - slotRect.left,
+            y: prevRect.top - slotRect.top,
+          };
+          diceHandoffControls.set({ x: startOffset.x, y: startOffset.y, scaleX: 1, scaleY: 1 });
+          playHandoffArc(startOffset);
+        } else {
+          diceHandoffControls.set({ x: 0, y: 0, scaleX: 1, scaleY: 1 });
+        }
+      }
+
       setDiceGeometry({
-        restPoint: { x: diceRect.left + diceRect.width / 2, y: diceRect.top + diceRect.height / 2 },
+        restPoint: { x: slotRect.left + slotRect.width / 2, y: slotRect.top + slotRect.height / 2 },
         safeRegion: {
           left: boardLeft + (size - safeSize) / 2,
           top: boardTop + (size - safeSize) / 2,
@@ -265,6 +368,16 @@ export default function GameView({ room }: { room: Room }) {
     // happens to change diceArm, e.g. the first roll of the new game.
     // `room.code` always changes on rematch (a new room is created), so
     // it's a reliable trigger even when the others coincidentally aren't.
+    //
+    // Also reads diceHandoffControls/playHandoffArc/reduceMotion (for the
+    // handoff-arc logic above) without listing them: diceHandoffControls is
+    // framer-motion's own stable controls object (identity never changes
+    // across renders, same as a ref), playHandoffArc is a plain function
+    // whose own body always closes over each render's latest values anyway,
+    // and reduceMotion only ever needs to reflect whatever it is at the
+    // moment a given handoff actually starts, not to itself re-trigger this
+    // effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasGame, diceArm, room.code, game?.status]);
 
   const showReaction = (reaction: Reaction) => {
@@ -540,26 +653,42 @@ export default function GameView({ room }: { room: Room }) {
     emitRollDice(room.code, currentSeat.id, style);
   };
 
-  // Mounted once, next to whichever corner currently holds the die (see
-  // diceArm above and the row JSX below) — not in a fixed spot anymore, so
-  // this same single Dice instance just relocates as the turn passes
-  // instead of a separate copy living in each corner. Deliberately keyed
-  // off diceArm rather than currentArm — see the note above diceArm.
+  // A single Dice instance, mounted once for the whole game (never
+  // unmounted/remounted as the turn passes — see diceOverlayRef/
+  // diceHandoffControls above), floated over whichever corner currently
+  // holds the die via a fixed-position wrapper the board-geometry effect
+  // positions directly (imperative style writes) and animates between
+  // corners along the same curved arc Dice.tsx's own flick-throw uses (see
+  // playHandoffArc above), instead of hard-cutting between them. Each
+  // PlayerCorner below just reserves blank space for it (see `dice`/
+  // diceSlotRef there) rather than mounting it as a child — so it's never
+  // actually inside any one corner's own DOM subtree, and so it can keep
+  // animating smoothly across a corner change without ever disappearing.
+  // Deliberately keyed off diceArm rather than currentArm — see the note
+  // above diceArm.
   const diceMount = diceArm != null && (
-    <div ref={diceWrapRef}>
-      <Dice
-        lastRoll={game.lastRoll}
-        rollSeq={game.rollSeq}
-        canRoll={canRoll}
-        onRoll={handleRoll}
-        restPoint={diceGeometry?.restPoint ?? null}
-        safeRegion={diceGeometry?.safeRegion ?? null}
-        diceValue={game.diceValue}
-        throwStyle={lastThrowStyle}
-        rollProgress={rollProgressMV}
-        glowColor={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
-        autoRollMs={autoRollMs}
-      />
+    <div ref={diceOverlayRef} className="pointer-events-none fixed z-[15]">
+      <motion.div
+        animate={diceHandoffControls}
+        initial={{ x: 0, y: 0, scaleX: 1, scaleY: 1 }}
+        className="pointer-events-auto h-full w-full"
+      >
+        <div ref={diceWrapRef} className="h-full w-full">
+          <Dice
+            lastRoll={game.lastRoll}
+            rollSeq={game.rollSeq}
+            canRoll={canRoll}
+            onRoll={handleRoll}
+            restPoint={diceGeometry?.restPoint ?? null}
+            safeRegion={diceGeometry?.safeRegion ?? null}
+            diceValue={game.diceValue}
+            throwStyle={lastThrowStyle}
+            rollProgress={rollProgressMV}
+            glowColor={currentSeat ? colorForArm(currentSeat.armIndex).hex : "#2B2016"}
+            autoRollMs={autoRollMs}
+          />
+        </div>
+      </motion.div>
     </div>
   );
 
@@ -576,6 +705,7 @@ export default function GameView({ room }: { room: Room }) {
 
   return (
     <div ref={rootRef} className="mx-auto flex h-dvh w-full flex-col overflow-y-auto">
+      {diceMount}
       {selectedSeatId && (
         <PlayerActionsModal
           room={room}
@@ -630,7 +760,8 @@ export default function GameView({ room }: { room: Room }) {
             rollProgress={currentArm === 0 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 0 && canMove}
             moveTimeoutMs={autoMoveMs}
-            dice={diceArm === 0 ? diceMount : undefined}
+            dice={diceArm === 0}
+            diceSlotRef={cornerSlotRefCallbacks[0]}
             onSendSticker={handleSendPlayerSticker}
           />
           <PlayerCorner
@@ -641,7 +772,8 @@ export default function GameView({ room }: { room: Room }) {
             rollProgress={currentArm === 1 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 1 && canMove}
             moveTimeoutMs={autoMoveMs}
-            dice={diceArm === 1 ? diceMount : undefined}
+            dice={diceArm === 1}
+            diceSlotRef={cornerSlotRefCallbacks[1]}
             diceFirst
             onSendSticker={handleSendPlayerSticker}
           />
@@ -738,7 +870,8 @@ export default function GameView({ room }: { room: Room }) {
             rollProgress={currentArm === 3 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 3 && canMove}
             moveTimeoutMs={autoMoveMs}
-            dice={diceArm === 3 ? diceMount : undefined}
+            dice={diceArm === 3}
+            diceSlotRef={cornerSlotRefCallbacks[3]}
             bottomRow
             onSendSticker={handleSendPlayerSticker}
           />
@@ -750,7 +883,8 @@ export default function GameView({ room }: { room: Room }) {
             rollProgress={currentArm === 2 && canRoll ? rollProgressMV : undefined}
             canMove={currentArm === 2 && canMove}
             moveTimeoutMs={autoMoveMs}
-            dice={diceArm === 2 ? diceMount : undefined}
+            dice={diceArm === 2}
+            diceSlotRef={cornerSlotRefCallbacks[2]}
             diceFirst
             bottomRow
             onSendSticker={handleSendPlayerSticker}

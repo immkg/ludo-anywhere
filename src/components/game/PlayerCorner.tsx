@@ -135,12 +135,22 @@ type PlayerCornerProps = {
   // down by GameView.tsx. Purely visual, same as Dice.tsx's autoRollMs:
   // the actual auto-move only ever happens server-side.
   moveTimeoutMs?: number;
-  // The <Dice/> for whichever corner currently has the turn (see
-  // GameView.tsx) — mounted into this card's own reserved dice slot (see
-  // DICE_SLOT_SIZE), which every corner keeps blank-but-present even when
-  // this is unset, so a corner never resizes when the die arrives or
-  // leaves.
+  // Truthy for whichever corner currently has the turn (see GameView.tsx) —
+  // its own reserved dice slot (see DICE_SLOT_SIZE) then renders blank
+  // instead of the idle sticker button, since GameView.tsx renders the
+  // actual <Dice/> itself as a single floating overlay positioned over
+  // that slot (so it can animate traveling between corners instead of
+  // hard-cutting between them) rather than mounting it as a child here.
+  // Still accepts a real node too (the dev test-mode harness in
+  // TestModeView.tsx mounts <Dice/> the older, simpler way, with no
+  // handoff animation).
   dice?: ReactNode;
+  // Reports this corner's own reserved dice-slot element back to the
+  // caller, regardless of whether `dice` is set — GameView.tsx uses this
+  // to know every corner's on-screen position at all times, so it can
+  // animate the floating die from whichever corner it's leaving to
+  // whichever corner it's arriving at.
+  diceSlotRef?: (el: HTMLDivElement | null) => void;
   // Which side of the avatar the dice slot sits on: true puts it first
   // (dice-then-avatar, for a right-side corner where the board is to the
   // die's own left), false puts it last (avatar-then-dice, for a
@@ -169,6 +179,7 @@ export default function PlayerCorner({
   canMove,
   moveTimeoutMs = DEFAULT_MOVE_TIMEOUT_MS,
   dice,
+  diceSlotRef,
   diceFirst,
   bottomRow,
   onSendSticker,
@@ -214,11 +225,16 @@ export default function PlayerCorner({
   // (see homeReactions in GameView.tsx) instead of the usual center-screen
   // pop.
   const diceSlot = dice ? (
-    <div className="shrink-0" style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE }}>
-      {dice}
+    <div ref={diceSlotRef} className="shrink-0" style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE }}>
+      {/* `dice` is usually just `true` from GameView.tsx (a flag, not a
+          node — see the doc comment above) since it renders the actual
+          <Dice/> itself as a floating overlay instead; React renders a
+          bare `true` as nothing, so this only shows content for the older
+          TestModeView.tsx harness, which still passes a real node. */}
+      {dice === true ? null : dice}
     </div>
   ) : onSendSticker ? (
-    <div className="relative shrink-0">
+    <div ref={diceSlotRef} className="relative shrink-0">
       <button
         type="button"
         onClick={() => setStickerPickerOpen((v) => !v)}
@@ -242,7 +258,7 @@ export default function PlayerCorner({
       </AnimatePresence>
     </div>
   ) : (
-    <div className="shrink-0" style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE }} />
+    <div ref={diceSlotRef} className="shrink-0" style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE }} />
   );
 
   return (

@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { playDiceRoll } from "@/lib/sound";
 import { timeoutsForLevel } from "@/game/engine";
+import { arcKeyframes, playSettleBounces } from "@/lib/diceMotion";
 
 const MIN_SPIN_MS = 650;
 const SPIN_LOOP_SECONDS = 0.5;
@@ -330,21 +331,16 @@ export default function Dice({
       x: safeRegion.left + Math.random() * safeRegion.size,
       y: safeRegion.top + Math.random() * safeRegion.size,
     };
-    const dx = target.x - restPoint.x;
-    const dy = target.y - restPoint.y;
-    const dist = Math.hypot(dx, dy);
     // A curved (not straight-line) path: an intermediate point offset both
     // upward (a throwing arc) and sideways (so it doesn't look like a
-    // perfectly straight ramp), varied per throw.
-    const arcLift = dist * randomBetween(0.25, 0.45);
-    const sideDrift =
-      (Math.random() < 0.5 ? -1 : 1) * dist * randomBetween(0.05, 0.2);
-    const midX = dx / 2 + sideDrift;
-    const midY = dy / 2 - arcLift;
+    // perfectly straight ramp), varied per throw — see arcKeyframes in
+    // src/lib/diceMotion.ts (also reused by GameView.tsx's corner-to-corner
+    // handoff, which animates the same kind of arc between two points).
+    const { x, y } = arcKeyframes(restPoint, target);
 
     await posControls.start({
-      x: [0, midX, dx],
-      y: [0, midY, dy],
+      x,
+      y,
       transition: {
         duration: durationMs / 1000,
         times: [0, 0.55, 1],
@@ -352,17 +348,11 @@ export default function Dice({
       },
     });
 
-    // A couple of small squash-and-settle bounces on impact — count and
-    // intensity both vary per throw.
+    // A couple of small squash-and-settle bounces on impact — count varies
+    // per throw, intensity/falloff shared with the handoff's own landing
+    // (see playSettleBounces).
     const bounces = Math.round(randomBetween(1, 3));
-    for (let i = 0; i < bounces; i++) {
-      const intensity = 0.16 * (1 - i / bounces) + 0.04;
-      await posControls.start({
-        scaleY: [1, 1 - intensity, 1 + intensity * 0.4, 1],
-        scaleX: [1, 1 + intensity * 0.5, 1 - intensity * 0.2, 1],
-        transition: { duration: 0.22, ease: "easeOut" },
-      });
-    }
+    await playSettleBounces(posControls, bounces);
   }
 
   async function returnHome() {
@@ -396,7 +386,23 @@ export default function Dice({
       setIsRolling(true);
       setOrientation(spinFrom);
       playDiceRoll();
-      if (style === "flick") throwOntoBoard(durationMs);
+      if (style === "flick") {
+        const throwPromise = throwOntoBoard(durationMs);
+        // Some rolls resolve their own move in the very same server update
+        // that produced them — no legal moves, or three sixes (see endTurn
+        // in src/game/engine.js) — so `diceValue` is already back to null
+        // right here, in the same render as this very roll. The usual
+        // "bring it home" effect below watches for a non-null->null
+        // transition to know a move just finished; it never gets to see
+        // one for a roll like this (diceValue stays null the whole time,
+        // from this component's point of view), so a die that got flicked
+        // onto the board would otherwise be left stranded there — a
+        // physical object doesn't just get abandoned mid-turn. Bring it
+        // home here instead, once the throw itself finishes landing.
+        if (diceValue == null) {
+          throwPromise.then(() => returnHome());
+        }
+      }
     }
 
     const target = withTilt(
