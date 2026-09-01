@@ -71,7 +71,7 @@ export async function consumeProductPurchase(productId: string, purchaseToken: s
 
 export type PlaySubscriptionPurchase = {
   subscriptionState: string | null | undefined;
-  productId: string | null; // e.g. "premium_plan:monthly" — see mapPlayProductToPurpose
+  productId: string | null; // e.g. "monthly_plan" — see mapPlayProductToPurpose. Monthly/Annual are separate top-level products, not base plans of one product — see play-products.ts.
   startTime: Date | null;
   expiryTime: Date | null;
   linkedPurchaseToken: string | null;
@@ -84,10 +84,9 @@ export async function getSubscriptionPurchaseV2(purchaseToken: string): Promise<
     token: purchaseToken,
   });
   const lineItem = res.data.lineItems?.[0];
-  const basePlanId = lineItem?.offerDetails?.basePlanId;
   return {
     subscriptionState: res.data.subscriptionState,
-    productId: lineItem?.productId && basePlanId ? `${lineItem.productId}:${basePlanId}` : null,
+    productId: lineItem?.productId ?? null,
     startTime: res.data.startTime ? new Date(res.data.startTime) : null,
     expiryTime: lineItem?.expiryTime ? new Date(lineItem.expiryTime) : null,
     linkedPurchaseToken: res.data.linkedPurchaseToken ?? null,
