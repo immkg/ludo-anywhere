@@ -29,9 +29,19 @@ async function verifyPushToken(request: Request): Promise<boolean> {
   const expectedEmail = process.env.RTDN_INVOKER_SERVICE_ACCOUNT_EMAIL;
   if (!token || !expectedEmail) return false;
 
+  // request.url can't be trusted as the audience here — this app runs
+  // behind Railway's proxy (a custom server.js, not `next start` directly),
+  // so Next sees an internal URL rather than the real public one. Same
+  // class of issue AUTH_URL exists to work around elsewhere (see
+  // .env.example). The Pub/Sub push subscription signs its OIDC token
+  // against the exact endpoint URL it was configured with in Play Console
+  // / GCP, so that fixed URL — not whatever request.url resolves to — is
+  // the only correct audience to check against.
+  const audience = `${process.env.AUTH_URL}/api/billing/play/rtdn`;
+
   try {
     const client = new google.auth.OAuth2();
-    const ticket = await client.verifyIdToken({ idToken: token, audience: request.url });
+    const ticket = await client.verifyIdToken({ idToken: token, audience });
     const payload = ticket.getPayload();
     return payload?.email === expectedEmail && payload?.email_verified === true;
   } catch (e) {
