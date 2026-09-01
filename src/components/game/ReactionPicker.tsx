@@ -2,6 +2,7 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { QUICK_CHAT_PHRASES } from "@/game/quickChat";
 
 const EMOJIS = ["👍", "🎉", "😂", "😮", "😢", "🔥"];
 
@@ -16,13 +17,21 @@ const STICKERS: { src: string; alt: string }[] = [
   { src: "/brand/stickers/laugh.png", alt: "Laughing pawn" },
 ];
 
-export type Reaction = { kind: "emoji"; value: string } | { kind: "sticker"; src: string; alt: string };
+export type Reaction =
+  | { kind: "emoji"; value: string }
+  | { kind: "sticker"; src: string; alt: string }
+  // One of the fixed QUICK_CHAT_PHRASES (src/game/quickChat.js) — never
+  // free text. `fromName` isn't set here (the picker doesn't know who's
+  // sending it); GameView.tsx fills it in before broadcasting, the same
+  // way it's the one place that knows which seat(s) this device owns.
+  | { kind: "chat"; text: string; fromName?: string };
 
 // A local, self-only reaction picker — selecting an item shows a brief
 // floating bubble near the Game Bar (see FloatingReaction in GameView).
-// There's no realtime reaction broadcast in this pass — that needs a new
-// Socket.IO event and room-state field, which is out of scope here (see
-// the redesign report's assumptions).
+// Reactions (emoji/sticker) broadcast over game:reaction to everyone else
+// in the room (see sendReaction in socketActions.ts); quick-chat phrases
+// reuse that exact same event/rendering path, just with a fixed phrase
+// list instead of an emoji/image (see QUICK_CHAT_PHRASES).
 export default function ReactionPicker({
   mode,
   onSelect,
@@ -30,7 +39,7 @@ export default function ReactionPicker({
   align = "center",
   vAlign = "bottom",
 }: {
-  mode: "emoji" | "sticker";
+  mode: "emoji" | "sticker" | "chat";
   onSelect: (reaction: Reaction) => void;
   onClose: () => void;
   // "center" (the default, used by the game-wide bar's own triggers, which
@@ -55,7 +64,8 @@ export default function ReactionPicker({
       exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8, scale: 0.96 }}
       transition={{ duration: 0.15 }}
       className={cn(
-        "absolute z-20 grid w-max grid-cols-4 gap-1.5 rounded-2xl border border-line bg-surface p-2 shadow-lg",
+        "absolute z-20 rounded-2xl border border-line bg-surface p-2 shadow-lg",
+        mode === "chat" ? "flex w-48 flex-col gap-1" : "grid w-max grid-cols-4 gap-1.5",
         vAlign === "bottom" ? "top-full mt-2" : "bottom-full mb-2",
         align === "center" && "left-1/2 -translate-x-1/2",
         align === "left" && "left-0",
@@ -78,21 +88,36 @@ export default function ReactionPicker({
               {e}
             </button>
           ))
-        : STICKERS.map((s) => (
-            <button
-              key={s.src}
-              role="menuitem"
-              aria-label={`Send ${s.alt} sticker`}
-              onClick={() => {
-                onSelect({ kind: "sticker", src: s.src, alt: s.alt });
-                onClose();
-              }}
-              className="flex h-11 w-11 items-center justify-center rounded-xl transition hover:bg-surface-2"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={s.src} alt={s.alt} className="h-9 w-9 object-contain" />
-            </button>
-          ))}
+        : mode === "sticker"
+          ? STICKERS.map((s) => (
+              <button
+                key={s.src}
+                role="menuitem"
+                aria-label={`Send ${s.alt} sticker`}
+                onClick={() => {
+                  onSelect({ kind: "sticker", src: s.src, alt: s.alt });
+                  onClose();
+                }}
+                className="flex h-11 w-11 items-center justify-center rounded-xl transition hover:bg-surface-2"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={s.src} alt={s.alt} className="h-9 w-9 object-contain" />
+              </button>
+            ))
+          : QUICK_CHAT_PHRASES.map((phrase) => (
+              <button
+                key={phrase}
+                role="menuitem"
+                aria-label={`Say "${phrase}"`}
+                onClick={() => {
+                  onSelect({ kind: "chat", text: phrase });
+                  onClose();
+                }}
+                className="rounded-lg px-2.5 py-1.5 text-left text-sm font-semibold transition hover:bg-surface-2"
+              >
+                {phrase}
+              </button>
+            ))}
     </motion.div>
   );
 }

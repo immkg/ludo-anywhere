@@ -223,7 +223,9 @@ export function refreshPresence(): Promise<{ presence: Record<string, { online: 
 // (GameView.tsx), this just relays it to everyone else in the room.
 // `targetSeatId` (from a per-player sticker button — see PlayerCorner.tsx)
 // pins the reaction to that seat's home on the board instead of the usual
-// center-screen pop.
-export function sendReaction(roomCode: string, reaction: Reaction, targetSeatId?: string) {
-  getSocket().emit("game:reaction", { roomCode, reaction, targetSeatId });
+// center-screen pop. `fromName` is only ever set for a quick-chat phrase
+// (see handleReact in GameView.tsx) — an emoji/sticker reaction stays
+// anonymous, same as before.
+export function sendReaction(roomCode: string, reaction: Reaction, targetSeatId?: string, fromName?: string) {
+  getSocket().emit("game:reaction", { roomCode, reaction, targetSeatId, fromName });
 }

@@ -7,7 +7,9 @@ import { shareRoomLink, roomJoinUrl } from "@/lib/share";
 import { colorForArm } from "@/game/board";
 import Button from "@/components/ui/Button";
 import ThemeToggle from "@/components/ThemeToggle";
+import CosmeticsPicker from "@/components/CosmeticsPicker";
 import FeedbackPrompt from "@/components/game/FeedbackPrompt";
+import InviteFriendsList from "@/components/friends/InviteFriendsList";
 import type { Seat, VacatedSeat } from "@/types/room";
 
 // Room-wide controls, opened from the "more" button in ReactionBar — also
@@ -23,6 +25,7 @@ export default function GameMenu({
   seats,
   vacatedSeats,
   canEndGame,
+  openSeatCount,
   onLeaveGame,
   onManagePlayer,
   onClose,
@@ -37,6 +40,12 @@ export default function GameMenu({
   // See canEndGame in GameView.tsx — false only for a matchmaking host with
   // a real opponent still seated, who can leave but not end outright.
   canEndGame: boolean;
+  // How many seats are actually open to invite a friend into right now —
+  // paused or removed-and-unclaimed (see claimableSeatCount in
+  // src/game/engine.js). Gates the "Invite a friend" list below: sending
+  // the invite itself always works (see room:invite in server.js), but
+  // there's nothing for them to actually join until a seat frees up.
+  openSeatCount: number;
   onLeaveGame: () => void;
   // Host-only — opens PlayerActionsModal for the tapped seat (see
   // GameView.tsx).
@@ -107,6 +116,14 @@ export default function GameMenu({
             <p className="text-sm text-ink-muted">Theme</p>
             <ThemeToggle />
           </div>
+
+          {/* Free cosmetic customization (token style/board finish/dice
+              skin) — issues #23/#29. Placed here, right below Theme, since
+              there's no dedicated settings/profile screen yet and this is
+              the same kind of per-client, local-only, always-visible
+              preference Theme already is. Worth revisiting if a settings
+              screen shows up later. */}
+          <CosmeticsPicker />
 
           {showLeaveFeedback ? (
             <FeedbackPrompt context="LEFT_EARLY" gameId={roomCode} onDone={onLeaveGame} />
@@ -186,6 +203,19 @@ export default function GameMenu({
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Invite a specific online friend straight into this room
+                  (see InviteFriendsList) — distinct from the room-code
+                  Invite button below, which just shares a generic link.
+                  Only useful once a seat has actually opened up (a paused
+                  or removed player — see openSeatCount above), so it's
+                  hidden rather than shown disabled the rest of the time. */}
+              {isHost && openSeatCount > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-sm text-ink-muted">Invite a friend into the open seat</p>
+                  <InviteFriendsList roomCode={roomCode} />
                 </div>
               )}
 

@@ -16,6 +16,8 @@ import {
 import { cn } from "@/lib/utils";
 import { playDiceRoll } from "@/lib/sound";
 import { timeoutsForLevel } from "@/game/engine";
+import { useCosmetics } from "@/components/CosmeticsProvider";
+import { resolveDiceSkin, type DiceSkinColors } from "@/game/cosmetics";
 
 const MIN_SPIN_MS = 650;
 const SPIN_LOOP_SECONDS = 0.5;
@@ -45,21 +47,18 @@ const RETURN_MS_RANGE: [number, number] = [350, 600];
 // this much off whatever time was left when it resumes.
 const ABANDON_PENALTY_MS = 2000;
 
-// A plain cream-and-black die — not tinted per player, so it reads the
-// same physical object no matter whose turn it is (that's what the player
-// cards' own borders/traces are for now — see PlayerCorner.tsx). Fixed
-// colors rather than theme tokens (which flip dark in dark mode), same
-// reasoning as Token.tsx's fixed WHITE border: a physical die's plastic
-// stays the same color regardless of the app's theme.
-// A visibly cream (not near-white) gradient, plus the highlight blob and
-// outer drop shadow below, are what keep the die reading as a distinct
-// object against a white surface (bg-surface, a board cell) instead of
-// blending into it — no border needed for that, just this contrast.
-const DICE_FACE_BG =
-  "linear-gradient(135deg, #fffaf0 0%, #f7e9c8 45%, #ecdba8 100%)";
-const DICE_FACE_SHADOW =
-  "inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -3px 5px rgba(0,0,0,0.14), inset 2px 0 3px rgba(255,255,255,0.35), 0 3px 8px rgba(80,60,25,0.22)";
-const DICE_PIP_COLOR = "#241c15";
+// Not tinted per player, so it reads the same physical object no matter
+// whose turn it is (that's what the player cards' own borders/traces are
+// for now — see PlayerCorner.tsx). Fixed colors rather than theme tokens
+// (which flip dark in dark mode), same reasoning as Token.tsx's fixed
+// border: a physical die's plastic stays the same color regardless of the
+// app's theme — it only changes with the player's own free dice-skin pick
+// (see resolveDiceSkin in src/game/cosmetics.ts), read below via
+// useCosmetics(). A visibly cream (not near-white) gradient by default,
+// plus the highlight blob and outer drop shadow below, are what keep the
+// die reading as a distinct object against a white surface (bg-surface, a
+// board cell) instead of blending into it — no border needed for that,
+// just this contrast.
 
 const PIP_LAYOUTS: Record<number, [number, number][]> = {
   1: [[1, 1]],
@@ -160,15 +159,15 @@ function randomScreenRotate() {
   );
 }
 
-function Face({ value }: { value: number }) {
+function Face({ value, skin }: { value: number; skin: DiceSkinColors }) {
   const pips = PIP_LAYOUTS[value] ?? [];
   return (
     <div
       className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-0.5 rounded-2xl p-1.5 [backface-visibility:hidden]"
       style={{
         transform: FACE_PLACEMENT[value],
-        background: DICE_FACE_BG,
-        boxShadow: DICE_FACE_SHADOW,
+        background: skin.faceBg,
+        boxShadow: skin.faceShadow,
       }}
     >
       {/* A soft, offset highlight — the same "catching the light" gloss the
@@ -192,7 +191,7 @@ function Face({ value }: { value: number }) {
             style={
               active
                 ? {
-                    backgroundColor: DICE_PIP_COLOR,
+                    backgroundColor: skin.pipColor,
                     boxShadow: "inset 0 1px 1.5px rgba(0,0,0,0.3)",
                   }
                 : undefined
@@ -273,6 +272,11 @@ export default function Dice({
   glowColor,
   autoRollMs = DEFAULT_AUTO_ROLL_MS,
 }: DiceProps) {
+  // The viewer's own free local pick — see src/game/cosmetics.ts and
+  // CosmeticsProvider.tsx. Purely visual on this client; never synced
+  // between players, same as ThemeProvider's dark/light.
+  const { diceSkin } = useCosmetics();
+  const skin = resolveDiceSkin(diceSkin);
   const [isRolling, setIsRolling] = useState(false);
   const [orientation, setOrientation] = useState(() =>
     withTilt(LANDING_ORIENTATION[lastRoll ?? 1], randomRestingTilt()),
@@ -662,7 +666,7 @@ export default function Dice({
               }}
             >
               {[1, 2, 3, 4, 5, 6].map((value) => (
-                <Face key={value} value={value} />
+                <Face key={value} value={value} skin={skin} />
               ))}
             </motion.div>
           </div>

@@ -42,6 +42,7 @@ import {
   resetInactivity,
   advanceInactivity,
 } from "./src/game/engine.js";
+import { isQuickChatPhrase } from "./src/game/quickChat.js";
 import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
 import { resolveSeatProfiles, resolveGuestSeats } from "./src/server/profiles.js";
@@ -945,12 +946,15 @@ app.prepare().then(() => {
     // Ephemeral emoji/sticker reaction — fire-and-forget, no game-state
     // change, just relayed to everyone else currently viewing this room.
     // Payload shape is validated (not just trusted) since a hand-crafted
-    // client could otherwise broadcast arbitrary strings/paths to others.
+    // client could otherwise broadcast arbitrary strings/paths to others —
+    // in particular, a "chat" reaction is only ever one of the fixed
+    // QUICK_CHAT_PHRASES, never free text (see src/game/quickChat.js); a
+    // hand-crafted client can't smuggle anything else through this event.
     // An optional targetSeatId (from a per-player sticker button — see
     // PlayerCorner.tsx) pins it to that seat's home on the board instead of
     // the usual center-screen pop; only relayed if it actually names a seat
     // still in this room.
-    socket.on("game:reaction", ({ roomCode, reaction, targetSeatId } = {}) => {
+    socket.on("game:reaction", ({ roomCode, reaction, targetSeatId, fromName } = {}) => {
       const room = getRoom(roomCode);
       if (!room || !socket.rooms.has(roomCode)) return;
       const target =
@@ -967,6 +971,13 @@ app.prepare().then(() => {
           src: reaction.src,
           alt: typeof reaction.alt === "string" ? reaction.alt.slice(0, 60) : "",
           targetSeatId: target,
+        });
+      } else if (reaction?.kind === "chat" && typeof reaction.text === "string" && isQuickChatPhrase(reaction.text)) {
+        socket.to(roomCode).emit("game:reaction", {
+          kind: "chat",
+          text: reaction.text,
+          targetSeatId: target,
+          fromName: typeof fromName === "string" ? fromName.slice(0, 20) : "A player",
         });
       }
     });
