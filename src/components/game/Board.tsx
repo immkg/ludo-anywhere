@@ -7,6 +7,8 @@ import { placementFor } from "@/game/engine";
 import Token from "@/components/game/Token";
 import { STEP_MS } from "@/hooks/useSteppedToken";
 import { voronoiTerritory } from "@/lib/hitTerritory";
+import { useCosmetics } from "@/components/CosmeticsProvider";
+import { resolveBoardFinishFill } from "@/game/cosmetics";
 import type { GameState } from "@/types/game";
 
 const INK = "#000000";
@@ -53,6 +55,41 @@ function useContainerSize() {
 }
 
 const FINISH_LINE = finishedPos();
+
+// The "weave" board finish's diagonal-hatch pattern tile — generated on a
+// small offscreen canvas rather than a shipped image asset, and cached per
+// arm color (there are only ever 4) so it's built once, not once per
+// render. Konva accepts a canvas directly as fillPatternImage. This file is
+// dynamic-imported with ssr:false (see GameView.tsx, Konva needs a real
+// canvas/window), so `document` is always available by the time this runs.
+const weavePatternCache = new Map<string, HTMLCanvasElement>();
+function weavePatternCanvas(hex: string): HTMLCanvasElement | undefined {
+  const cached = weavePatternCache.get(hex);
+  if (cached) return cached;
+  const size = 24;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return undefined;
+  ctx.fillStyle = hex;
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = "rgba(255,255,255,0.32)";
+  ctx.lineWidth = 2.5;
+  // One diagonal stroke through the tile, plus its two wrap-around slivers
+  // (top-left and bottom-right corners), so the hatch reads as a single
+  // continuous diagonal once the tile repeats rather than a chevron.
+  ctx.beginPath();
+  ctx.moveTo(0, size);
+  ctx.lineTo(size, 0);
+  ctx.moveTo(-size * 0.3, size * 0.3);
+  ctx.lineTo(size * 0.3, -size * 0.3);
+  ctx.moveTo(size * 0.7, size * 1.3);
+  ctx.lineTo(size * 1.3, size * 0.7);
+  ctx.stroke();
+  weavePatternCache.set(hex, canvas);
+  return canvas;
+}
 
 // The one token that just moved forward this turn (a captured token also
 // changes, but only ever backward to the yard, so it's excluded here) — the
@@ -131,6 +168,10 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
   const [containerRef, containerSize] = useContainerSize();
   const layout = buildBoardLayout();
   const { captureDelayByKey, finishSoundByKey } = useMoveEffects(game);
+  // Each player's own free local pick — see src/game/cosmetics.ts and
+  // CosmeticsProvider.tsx. Purely visual on this client; never synced
+  // between players, same as ThemeProvider's dark/light.
+  const { boardFinish } = useCosmetics();
 
   const pitch = Math.hypot(
     layout.ringCells[1].x - layout.ringCells[0].x,
@@ -240,22 +281,39 @@ export default function Board({ game, isMyTurn, currentSeatId, validMoves, onTok
             shadowOffset={{ x: 0, y: 6 }}
           />
 
-          {/* each arm's solid-color quadrant — always full color, whether
-              or not that arm has a seated player (2p/3p games leave some
-              arms empty), so the board looks the same regardless of
-              player count. */}
-          {layout.arms.map((arm) => (
-            <Rect
-              key={arm.color.id}
-              x={arm.block.x}
-              y={arm.block.y}
-              width={arm.block.width}
-              height={arm.block.height}
-              fill={arm.color.hex}
-              stroke={INK}
-              strokeWidth={2.5}
-            />
-          ))}
+          {/* each arm's quadrant — always fully colored, whether or not
+              that arm has a seated player (2p/3p games leave some arms
+              empty), so the board looks the same regardless of player
+              count. Flat/gradient/pattern comes from the viewer's own free
+              board-finish pick (see resolveBoardFinishFill) — genuinely
+              per-client, never synced between players. */}
+          {layout.arms.map((arm) => {
+            const fill = resolveBoardFinishFill(boardFinish, arm.color.hex, arm.block.width, arm.block.height);
+            return (
+              <Rect
+                key={arm.color.id}
+                x={arm.block.x}
+                y={arm.block.y}
+                width={arm.block.width}
+                height={arm.block.height}
+                fill={fill.kind === "gradient" ? undefined : fill.fill}
+                fillPriority={fill.kind === "weave" ? "pattern" : undefined}
+                // Konva accepts an HTMLCanvasElement here at runtime (see
+                // Konva.Shape's own GetSet typing), but react-konva's Rect
+                // props narrow this to HTMLImageElement only — a type-def
+                // gap, not a real runtime restriction.
+                fillPatternImage={fill.kind === "weave" ? (weavePatternCanvas(fill.fill) as unknown as HTMLImageElement) : undefined}
+                fillPatternRepeat={fill.kind === "weave" ? "repeat" : undefined}
+                fillLinearGradientStartPoint={fill.kind === "gradient" ? fill.fillLinearGradientStartPoint : undefined}
+                fillLinearGradientEndPoint={fill.kind === "gradient" ? fill.fillLinearGradientEndPoint : undefined}
+                fillLinearGradientColorStops={
+                  fill.kind === "gradient" ? fill.fillLinearGradientColorStops : undefined
+                }
+                stroke={INK}
+                strokeWidth={2.5}
+              />
+            );
+          })}
 
           {/* the "cage": a white inset square with a ~1-cell colored
               border, where each arm's 4 waiting tokens sit — matches a
