@@ -16,7 +16,14 @@ import {
 // the server's bot scheduler can guarantee it never rolls again before this
 // hold has released — otherwise the *next* bot's roll arrives mid-hold,
 // forcing a remount right as it needs to animate, silently swallowing it.
-export const DICE_HOLD_MS = 2000;
+// Long enough to cover that same auto-resolved roll's own worst-case
+// on-screen sequence in full — the flick-throw landing (up to
+// THROW_MS_RANGE), the AUTO_RETURN_HOLD_MS beat resting on the board
+// showing its face, and the return-home flight (up to RETURN_MS_RANGE), all
+// in Dice.tsx — plus a margin, so a corner-to-corner handoff never starts
+// while that return-home animation is still in flight, fighting the
+// handoff's own overlay transform.
+export const DICE_HOLD_MS = 2500;
 
 // [autoRollMs, autoMoveMs] per inactivity level — see resetInactivity/
 // advanceInactivity below. A connected seat that lets the server auto-play
@@ -73,6 +80,17 @@ export function placementFor(state, seatId) {
   const rank = state.placements.indexOf(seatId);
   if (rank !== -1) return rank + 1;
   return state.status === "finished" && !state.endedEarly ? state.seats.length : null;
+}
+
+// How many seats a friend could actually be invited into right now:
+// paused (suspended) or removed-and-never-won. Mirrors claimableSeats in
+// src/server/rooms.js, but working purely off GameState (no Room needed)
+// — every game seat has a corresponding room seat, so counting straight
+// from `state.seats` gives the same answer. Used client-side (see
+// GameView.tsx) to gate the in-game "invite a friend" action on there
+// being an open seat to invite them into.
+export function claimableSeatCount(state) {
+  return state.seats.filter((s) => s.suspended || (s.finished && !state.placements.includes(s.id))).length;
 }
 
 export function getCurrentSeat(state) {

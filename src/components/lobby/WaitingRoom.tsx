@@ -8,7 +8,6 @@ import { getSocket } from "@/lib/socket";
 import { armForSeatIndex, colorForArm } from "@/game/board";
 import {
   startGame,
-  inviteFriendToRoom,
   removeSeat,
   joinRoom,
   trackShare,
@@ -18,21 +17,20 @@ import {
   requestBotFill,
 } from "@/lib/socketActions";
 import { shareRoomLink, roomJoinUrl } from "@/lib/share";
-import { saveOwnedSeats, clearOwnedSeats } from "@/lib/identity";
+import { saveOwnedSeats, clearOwnedSeats, clearSpectatorToken } from "@/lib/identity";
 import { generateDummyEmail, randomEmailSuffix } from "@/lib/dummyEmail";
-import { useFriends } from "@/hooks/useFriends";
 import { useProfiles } from "@/hooks/useProfiles";
-import { usePresenceStore } from "@/store/usePresenceStore";
 import { useRoomStore } from "@/store/useRoomStore";
-import { useNotificationsStore } from "@/store/useNotificationsStore";
 import { cn } from "@/lib/utils";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
-import FriendAvatar from "@/components/friends/FriendAvatar";
+import InviteFriendsList from "@/components/friends/InviteFriendsList";
 import PlayerAvatar from "@/components/lobby/PlayerAvatar";
 import Wordmark from "@/components/brand/Wordmark";
 import AppIconMark from "@/components/brand/AppIconMark";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
+import SpectateSettings from "@/components/lobby/SpectateSettings";
+import SpectatorChat from "@/components/lobby/SpectatorChat";
 import { OccupiedSeatCard, EmptySeatCard } from "@/components/lobby/PlayerSeatCard";
 import {
   IconCheck,
@@ -65,7 +63,26 @@ function formatElapsed(totalSeconds: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: OwnedSeat[] }) {
+export default function WaitingRoom({
+  room,
+  mySeats,
+  isSpectator = false,
+  spectatorId,
+}: {
+  room: Room;
+  mySeats: OwnedSeat[];
+  // A viewer with no seat here at all (see room:watch in server.js) —
+  // renders the same roster read-only, without any of the lobby-management
+  // actions below (nothing here needs an `isHost` check for those since a
+  // spectator is never the host, but the room-management-adjacent bits
+  // that any *player* would otherwise see — add a player, ask the host,
+  // invite friends — aren't relevant to someone who isn't seated at all).
+  isSpectator?: boolean;
+  // This device's own spectator id (see RoomPageClient.tsx) — only used to
+  // mount the spectator-only chat widget (SpectatorChat.tsx) and to tell
+  // this viewer's own messages apart from other watchers' there.
+  spectatorId?: string;
+}) {
   const router = useRouter();
   const { data: session } = useSession();
   const [copied, setCopied] = useState(false);
@@ -154,7 +171,8 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
 
   const handleLeave = () => {
     leaveRoom(room.code);
-    clearOwnedSeats(room.code);
+    if (isSpectator) clearSpectatorToken(room.code);
+    else clearOwnedSeats(room.code);
     resetRoomStore();
     router.push(session?.user ? "/" : "/play");
   };
@@ -232,13 +250,21 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                 </Button>
               ) : (
                 <p className="flex items-center gap-1.5 text-sm font-semibold text-ink-muted">
-                  <IconClock className="h-4 w-4 shrink-0" /> Waiting for host to start…
+                  <IconClock className="h-4 w-4 shrink-0" />
+                  {isSpectator ? "Watching — waiting for the host to start…" : "Waiting for host to start…"}
                 </p>
               )}
-              <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-sm font-bold text-ink">
-                <IconUsers className="h-4 w-4 text-accent" />
-                {room.seats.length}/{room.maxPlayers}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-sm font-bold text-ink">
+                  <IconUsers className="h-4 w-4 text-accent" />
+                  {room.seats.length}/{room.maxPlayers}
+                </span>
+                {room.spectatorCount > 0 && (
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-bold text-ink-muted">
+                    👀 {room.spectatorCount}
+                  </span>
+                )}
+              </div>
             </div>
             {isHost && !canStart && (
               <p className="flex items-center gap-1.5 text-xs text-ink-muted">
@@ -335,17 +361,20 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                     )}
                   </span>
                 </Button>
-                <Button variant="secondary" className="flex-1" onClick={() => setInviteOpen((v) => !v)}>
-                  <span className="flex items-center justify-center gap-2">
-                    <IconUsers className="h-4 w-4" /> Friends
-                  </span>
-                </Button>
+                {!isSpectator && (
+                  <Button variant="secondary" className="flex-1" onClick={() => setInviteOpen((v) => !v)}>
+                    <span className="flex items-center justify-center gap-2">
+                      <IconUsers className="h-4 w-4" /> Friends
+                    </span>
+                  </Button>
+                )}
               </div>
 
-              {inviteOpen && <InviteFriends roomCode={room.code} />}
+              {inviteOpen && <InviteFriendsList roomCode={room.code} />}
             </div>
 
             {isHost && <IncomingJoinRequests roomCode={room.code} />}
+            {isHost && <SpectateSettings room={room} hostSeatId={room.hostSeatId!} />}
 
             <div className="flex flex-col gap-3">
               {isHost && openSlots > 0 && (
@@ -383,21 +412,22 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                     />
                   );
                 })}
-                {Array.from({ length: openSlots }, (_, i) => {
-                  const arm = armForSeatIndex(room.seats.length + i, room.maxPlayers);
-                  return (
-                    <EmptySeatCard
-                      key={i}
-                      seatNumber={room.seats.length + i + 1}
-                      previewColorHex={colorForArm(arm).hex}
-                      onAdd={() => setAddPlayerOpen(true)}
-                    />
-                  );
-                })}
+                {!isSpectator &&
+                  Array.from({ length: openSlots }, (_, i) => {
+                    const arm = armForSeatIndex(room.seats.length + i, room.maxPlayers);
+                    return (
+                      <EmptySeatCard
+                        key={i}
+                        seatNumber={room.seats.length + i + 1}
+                        previewColorHex={colorForArm(arm).hex}
+                        onAdd={() => setAddPlayerOpen(true)}
+                      />
+                    );
+                  })}
               </div>
             </div>
 
-            {!isHost && room.matchmaking && room.seats.length < room.maxPlayers && (
+            {!isSpectator && !isHost && room.matchmaking && room.seats.length < room.maxPlayers && (
               <div className="flex gap-2">
                 <Button variant="secondary" className="flex-1" onClick={() => requestStart(room.code, myName)}>
                   Ask host to start
@@ -432,6 +462,15 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
           roomCode={room.code}
           seatedProfileIds={new Set(room.seats.map((s) => s.profileId).filter((id) => id != null))}
           onClose={() => setAddPlayerOpen(false)}
+        />
+      )}
+
+      {isSpectator && spectatorId && (
+        <SpectatorChat
+          roomCode={room.code}
+          spectatorId={spectatorId}
+          spectatorCount={room.spectatorCount}
+          variant="floating"
         />
       )}
     </div>
@@ -615,55 +654,6 @@ function AddPlayerModal({
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function InviteFriends({ roomCode }: { roomCode: string }) {
-  const { friends, loading } = useFriends();
-  const presence = usePresenceStore((s) => s.byUserId);
-  const declinedInvites = useNotificationsStore((s) => s.declinedInvites);
-  const [invitedIds, setInvitedIds] = useState<Set<string>>(new Set());
-
-  if (loading) return null;
-
-  const online = friends.filter((f) => presence[f.userId]?.online);
-  if (online.length === 0) {
-    return <p className="text-center text-xs text-ink-muted">No friends online right now.</p>;
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface-2 p-3">
-      {online.map((friend) => {
-        // Presence already tracks which room a friend is currently seated
-        // in (see usePresenceStore/room:update's setUserRoom calls) — reuse
-        // that instead of guessing from a local "I clicked invite" flag.
-        const joined = presence[friend.userId]?.roomCode === roomCode;
-        const declined = declinedInvites.some((d) => d.roomCode === roomCode && d.userId === friend.userId);
-        const invited = invitedIds.has(friend.userId);
-        const settled = joined || declined;
-        const label = joined ? "Joined" : declined ? "Rejected" : invited ? "Invited" : "Invite";
-
-        return (
-          <div key={friend.userId} className="flex items-center gap-3">
-            <FriendAvatar image={friend.image} />
-            <p className="min-w-0 flex-1 truncate text-sm">{friend.name ?? friend.email}</p>
-            <button
-              disabled={settled || invited}
-              onClick={() => {
-                inviteFriendToRoom(roomCode, friend.userId).catch(() => {});
-                setInvitedIds((prev) => new Set(prev).add(friend.userId));
-              }}
-              className={cn(
-                "shrink-0 text-xs font-semibold",
-                settled ? "text-ink-muted" : "text-accent underline disabled:text-ink-muted"
-              )}
-            >
-              {label}
-            </button>
-          </div>
-        );
-      })}
     </div>
   );
 }

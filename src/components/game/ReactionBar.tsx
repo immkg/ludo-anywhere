@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { IconSmiley, IconPalette, IconKebab } from "@/components/game/gameIcons";
+import { IconChat } from "@/components/friends/icons";
 import ReactionPicker, { type Reaction } from "@/components/game/ReactionPicker";
 
 // A small floating bar of game-wide controls (not tied to any player seat):
-// the two reaction triggers, an End/Leave shortcut (one click + a confirm,
-// instead of burying the most-reached-for action in the "more" menu), and
-// "more" for the room-wide Game Menu (see GameMenu.tsx, opened by GameView).
+// the three reaction triggers (emoji, sticker, quick-chat phrase), an
+// End/Leave shortcut (one click + a confirm, instead of burying the
+// most-reached-for action in the "more" menu), and "more" for the
+// room-wide Game Menu (see GameMenu.tsx, opened by GameView).
 export default function ReactionBar({
   onReact,
   onMore,
@@ -16,6 +18,10 @@ export default function ReactionBar({
   canEndGame,
   onEndGame,
   onLeaveGame,
+  showSpectatorsToggle,
+  spectatePolicy,
+  spectatorSaving,
+  onToggleSpectatePolicy,
 }: {
   onReact: (reaction: Reaction) => void;
   onMore: () => void;
@@ -27,13 +33,33 @@ export default function ReactionBar({
   canEndGame: boolean;
   onEndGame: () => void;
   onLeaveGame: () => void;
+  // Host-only, private (non-matchmaking) rooms only — see showSpectatorsToggle
+  // in GameView.tsx. Replaces the old standalone SpectateSettings card with
+  // a single compact color-coded toggle, first in this bar.
+  showSpectatorsToggle?: boolean;
+  spectatePolicy?: "private" | "public";
+  spectatorSaving?: boolean;
+  onToggleSpectatePolicy?: () => void;
 }) {
-  const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | "confirm" | null>(null);
+  const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | "chat" | "confirm" | null>(null);
   const reduceMotion = useReducedMotion();
   const showEnd = isHost && canEndGame;
 
   return (
     <div className="relative flex items-center gap-1 rounded-2xl border border-line bg-surface px-1.5 py-1 shadow-sm">
+      {showSpectatorsToggle && (
+        <button
+          onClick={onToggleSpectatePolicy}
+          disabled={spectatorSaving}
+          className={
+            "flex min-h-11 items-center justify-center rounded-xl px-2 text-sm font-bold transition hover:bg-surface-2 disabled:opacity-50 " +
+            (spectatePolicy === "public" ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")
+          }
+        >
+          Spectators
+        </button>
+      )}
+
       <div className="relative">
         <button
           onClick={() => setOpenPicker(openPicker === "emoji" ? null : "emoji")}
@@ -62,6 +88,22 @@ export default function ReactionBar({
         <AnimatePresence>
           {openPicker === "sticker" && (
             <ReactionPicker mode="sticker" onSelect={onReact} onClose={() => setOpenPicker(null)} />
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="relative">
+        <button
+          onClick={() => setOpenPicker(openPicker === "chat" ? null : "chat")}
+          aria-label="Quick chat"
+          aria-expanded={openPicker === "chat"}
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-ink-muted transition hover:bg-surface-2 hover:text-ink"
+        >
+          <IconChat className="h-5 w-5" />
+        </button>
+        <AnimatePresence>
+          {openPicker === "chat" && (
+            <ReactionPicker mode="chat" onSelect={onReact} onClose={() => setOpenPicker(null)} />
           )}
         </AnimatePresence>
       </div>
@@ -128,7 +170,20 @@ export default function ReactionBar({
       </AnimatePresence>
 
       <button
-        onClick={onMore}
+        onClick={() => {
+          // The Game Menu (see GameMenu.tsx) is a full-screen overlay that
+          // shares this component's own z-20 stacking level (both the
+          // emoji/sticker picker below and the confirm modal above render
+          // at z-20 too) — opening it without first closing whichever of
+          // those this bar still has open left that overlay rendered
+          // fully lit on top of the menu's dark backdrop, since DOM order
+          // (not z-index) breaks the tie and this bar's markup comes after
+          // GameMenu's in GameView.tsx. Closing here, the one place that
+          // can open the Game Menu, is simpler than introducing a whole
+          // new z-index tier for a state that's local to this component.
+          setOpenPicker(null);
+          onMore();
+        }}
         aria-label="More options"
         className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-ink-muted transition hover:bg-surface-2 hover:text-ink"
       >

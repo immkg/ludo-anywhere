@@ -44,7 +44,9 @@ export function useSocketConnection() {
     const onRoomInvited = (payload: { roomCode: string; fromName: string; fromUserId: string }) =>
       addRoomInvite({ id: crypto.randomUUID(), ...payload });
     const onJoinRequestIncoming = (payload: { roomCode: string; fromUserId: string; fromName: string }) =>
-      addJoinRequest({ id: crypto.randomUUID(), ...payload });
+      addJoinRequest({ id: crypto.randomUUID(), kind: "seat", ...payload });
+    const onWatchRequestIncoming = (payload: { roomCode: string; fromUserId: string; fromName: string }) =>
+      addJoinRequest({ id: crypto.randomUUID(), kind: "spectate", ...payload });
     const onInviteDeclined = (payload: { roomCode: string; byUserId: string }) =>
       addDeclinedInvite({ roomCode: payload.roomCode, userId: payload.byUserId });
     // A rematch's new seats are pushed directly (see room:rematch in
@@ -66,6 +68,7 @@ export function useSocketConnection() {
     socket.on("presence:update", onPresenceUpdate);
     socket.on("room:invited", onRoomInvited);
     socket.on("room:joinRequest:incoming", onJoinRequestIncoming);
+    socket.on("room:watchRequest:incoming", onWatchRequestIncoming);
     socket.on("room:invite:declined", onInviteDeclined);
     socket.on("room:rematchReady", onRematchReady);
 
@@ -84,6 +87,7 @@ export function useSocketConnection() {
       socket.off("presence:update", onPresenceUpdate);
       socket.off("room:invited", onRoomInvited);
       socket.off("room:joinRequest:incoming", onJoinRequestIncoming);
+      socket.off("room:watchRequest:incoming", onWatchRequestIncoming);
       socket.off("room:invite:declined", onInviteDeclined);
       socket.off("room:rematchReady", onRematchReady);
     };

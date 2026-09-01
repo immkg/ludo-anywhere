@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeXp, getTrophyTier, nextTrophyTier, TROPHY_TIERS } from "./trophies";
+import { computeGameXp, computeXp, getTrophyTier, nextTrophyTier, TROPHY_TIERS } from "./trophies";
 
 describe("computeXp", () => {
   it("is 0 for a player who hasn't done anything yet", () => {
@@ -14,6 +14,28 @@ describe("computeXp", () => {
 
   it("never goes negative for any non-negative inputs", () => {
     expect(computeXp({ gamesWon: 0, gamesPlayed: 3, playTimeHours: 0.4 })).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("computeGameXp", () => {
+  it("credits a normal win with both the win and participation bonus", () => {
+    expect(computeGameXp({ isWinner: true, endedEarly: false, playTimeHours: 0 })).toBe(60); // 50 + 10
+  });
+
+  it("credits a normal (not-early) loss with just the participation bonus", () => {
+    expect(computeGameXp({ isWinner: false, endedEarly: false, playTimeHours: 0 })).toBe(10);
+  });
+
+  it("does not count an early-ended loss as played — mirrors src/app/page.tsx's totals rule", () => {
+    expect(computeGameXp({ isWinner: false, endedEarly: true, playTimeHours: 0 })).toBe(0);
+  });
+
+  it("still counts an early-ended game the viewer won", () => {
+    expect(computeGameXp({ isWinner: true, endedEarly: true, playTimeHours: 0 })).toBe(60);
+  });
+
+  it("always folds in playtime, even for an early-ended loss", () => {
+    expect(computeGameXp({ isWinner: false, endedEarly: true, playTimeHours: 1 })).toBe(5);
   });
 });
 
