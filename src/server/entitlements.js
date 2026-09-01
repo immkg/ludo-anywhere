@@ -156,10 +156,22 @@ export async function getEntitlementStatus(userId, prisma = getPrisma()) {
   return {
     entitlement: entitlement ? { type: entitlement.type, expiresAt: entitlement.expiresAt } : null,
     creditsRemaining: totalCredits,
-    // Soonest-expiring active batch — credits are spent FIFO (see
-    // availableCredits' ordering), so this is the expiry that actually
-    // matters to the UI even when multiple packs are stacked.
-    creditsExpireAt: credits[0]?.expiresAt ?? null,
+    // The LATEST-expiring active batch's date, shown as "valid until". Not
+    // just optimistic framing — grantPayment's PACK branch (see
+    // src/lib/billing-fulfillment.ts) pulls every other active batch's
+    // expiresAt forward to match a new purchase's, so in the normal case
+    // all active batches genuinely share this date; this is just reading
+    // the max in case of a since-changed expiryHours edge case. Credits
+    // are still spent oldest-batch-first (see availableCredits' ascending
+    // order, unchanged) — that ordering no longer matters for *when
+    // credits are lost*, only for which paymentId a UsageEvent attributes
+    // a game to.
+    creditsExpireAt: credits.length ? credits[credits.length - 1].expiresAt : null,
+    // How many separate packs are currently stacked — the UI shows this as
+    // a "×N" badge (see PricingPageClient.tsx / CreditBalance.tsx) so
+    // "buy another pack while one's still active" is visible as a count,
+    // not just a bigger credits number.
+    creditBatchCount: credits.length,
     freeRemaining,
   };
 }

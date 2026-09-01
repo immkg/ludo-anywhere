@@ -2,13 +2,23 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getActiveCoupon } from "@/lib/coupons";
+import { getEntitlementStatus } from "@/lib/entitlements";
 
 // Called once when a client-side trigger signal (session count, pages
 // browsed, minutes played, games completed, or leaving /pricing without
 // buying — see src/lib/splashTriggers.ts) fires, before the flash-discount
-// splash is allowed to mount. Two things make a user ineligible, and both
-// are permanent for that user — there's no second chance this session or
-// any other:
+// splash is allowed to mount. Three things make a user ineligible:
+//
+// 0. They already have an active plan (Entitlement) or unspent Game Pack
+//    credits — pitching a purchase to someone already paying/holding
+//    credits makes no sense. Checked BEFORE the one-time "shown" flag
+//    below and deliberately does NOT claim it: unlike the two cases
+//    below, this is a temporary state — once their plan/credits actually
+//    run out, the splash becomes useful again and should still get its
+//    one shot then, not have been burned on a moment they didn't need it.
+//
+// The remaining two are permanent for that user — there's no second
+// chance this session or any other:
 //
 // 1. They've already been shown it before. The updateMany's WHERE guard
 //    (rather than a plain read-then-write) makes "first one wins" atomic
@@ -22,6 +32,11 @@ import { getActiveCoupon } from "@/lib/coupons";
 export async function POST() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+
+  const status = await getEntitlementStatus(session.user.id);
+  if (status.entitlement || status.creditsRemaining > 0) {
+    return NextResponse.json({ eligible: false });
+  }
 
   const claimed = await prisma.user.updateMany({
     where: { id: session.user.id, upgradeSplashShownAt: null },

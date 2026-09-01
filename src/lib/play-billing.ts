@@ -54,6 +54,21 @@ export async function acknowledgeProductPurchase(productId: string, purchaseToke
   });
 }
 
+// Game Pack is a repeatable "consumable" one-time product, not a permanent
+// unlock — Google Play treats an unconsumed managed product as still
+// "owned", and refuses a second purchase of the same product with
+// "You already own this item" until it's explicitly consumed. Consuming
+// also implicitly acknowledges the purchase (per Play Billing's own docs),
+// so this replaces acknowledgeProductPurchase for the PACK path rather than
+// running alongside it — see the verify route.
+export async function consumeProductPurchase(productId: string, purchaseToken: string): Promise<void> {
+  await androidPublisher().purchases.products.consume({
+    packageName: packageName(),
+    productId,
+    token: purchaseToken,
+  });
+}
+
 export type PlaySubscriptionPurchase = {
   subscriptionState: string | null | undefined;
   productId: string | null; // e.g. "premium_plan:monthly" — see mapPlayProductToPurpose

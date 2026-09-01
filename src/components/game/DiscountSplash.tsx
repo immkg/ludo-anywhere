@@ -9,6 +9,7 @@ import type { EntitlementStatus, BillingPurpose } from "@/types/billing";
 import { IconGift } from "@/components/pricing/icons";
 import { IconLightning } from "@/components/home/icons";
 import type { SplashTrigger } from "@/lib/splashTriggers";
+import { useIsAndroidApp } from "@/lib/android-app";
 
 type FlashPlan = Extract<BillingPurpose, "PACK" | "MONTHLY">;
 
@@ -52,6 +53,13 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
   const [claiming, setClaiming] = useState<FlashPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const closedRef = useRef(false);
+  // Android ships flat Play Billing pricing only (see PricingPageClient.tsx)
+  // — no flash discount, no coupon, no time-limited framing. This splash
+  // still opens (it's also a re-engagement nudge, not just a discount
+  // pitch), but shows the same flat price /pricing does and its CTA just
+  // sends the user there instead of claiming a coupon that doesn't apply
+  // on this platform.
+  const isAndroidApp = useIsAndroidApp();
 
   useEffect(() => {
     fetchPricing().then(setPricing);
@@ -66,6 +74,10 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
   };
 
   useEffect(() => {
+    // No countdown on Android — there's no discount to expire, so a ticking
+    // timer would just be misleading urgency theater. The splash stays open
+    // until the user dismisses it or taps a plan.
+    if (isAndroidApp) return;
     if (secondsLeft <= 0) {
       close("expired");
       return;
@@ -73,7 +85,7 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
     const timer = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close() reads closedRef, not secondsLeft; re-running per tick is intentional
-  }, [secondsLeft]);
+  }, [secondsLeft, isAndroidApp]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -84,6 +96,17 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
     return () => document.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: sets up the Escape handler and initial focus once
   }, []);
+
+  // Android has no coupon to claim — just send them to /pricing, where the
+  // actual Play Billing purchase happens (see PricingPageClient.tsx). Same
+  // destination whether they're signed in or not: a guest lands on
+  // /pricing and signs in there like any other visitor, since there's no
+  // flash-offer identity to preserve across that hop anymore.
+  const handleAndroidBuy = (plan: FlashPlan) => {
+    posthog.capture("flash_splash_claim_clicked", { trigger, plan });
+    closedRef.current = true; // navigating away — not a "dismissed" close
+    router.push("/pricing");
+  };
 
   const handleClaim = async (plan: FlashPlan) => {
     posthog.capture("flash_splash_claim_clicked", { trigger, plan });
@@ -129,7 +152,7 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
           ref={sheetRef}
           role="dialog"
           aria-modal="true"
-          aria-label="Limited-time discount"
+          aria-label={isAndroidApp ? "Get more games" : "Limited-time discount"}
           onClick={(e) => e.stopPropagation()}
           // Matches the backdrop's own p-4 (1rem top + 1rem bottom) so the
           // card gets the full height that still leaves equal margins,
@@ -167,33 +190,44 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
                 ✕
               </button>
             </div>
-            <p className="text-lg font-extrabold sm:text-xl">🎲 A deal, just for you</p>
-            <p className="text-xs text-white/85 sm:text-sm">This price disappears when the timer hits 0.</p>
+            {isAndroidApp ? (
+              <>
+                <p className="text-lg font-extrabold sm:text-xl">🎲 Keep the games going</p>
+                <p className="text-xs text-white/85 sm:text-sm">Grab a Game Pack or Game Pass anytime.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-lg font-extrabold sm:text-xl">🎲 A deal, just for you</p>
+                <p className="text-xs text-white/85 sm:text-sm">This price disappears when the timer hits 0.</p>
+              </>
+            )}
           </div>
 
-          <div className="flex justify-center">
-            <motion.div
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, y: -10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={reduceMotion ? { duration: 0 } : { type: "spring", damping: 14, stiffness: 260, delay: 0.15 }}
-              className="relative -mt-3 flex items-center gap-1.5 rounded-2xl border-2 bg-surface px-3 py-1 shadow-lg sm:-mt-4 sm:px-3.5 sm:py-1.5"
-              style={{ borderColor: urgent ? "#E8262C" : "var(--color-accent)" }}
-            >
-              <motion.span
-                aria-hidden
-                animate={reduceMotion || !urgent ? undefined : { scale: [1, 1.15, 1] }}
-                transition={{ duration: 1, repeat: Infinity }}
+          {!isAndroidApp && (
+            <div className="flex justify-center">
+              <motion.div
+                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6, y: -10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={reduceMotion ? { duration: 0 } : { type: "spring", damping: 14, stiffness: 260, delay: 0.15 }}
+                className="relative -mt-3 flex items-center gap-1.5 rounded-2xl border-2 bg-surface px-3 py-1 shadow-lg sm:-mt-4 sm:px-3.5 sm:py-1.5"
+                style={{ borderColor: urgent ? "#E8262C" : "var(--color-accent)" }}
               >
-                ⏱
-              </motion.span>
-              <span
-                className="text-sm font-extrabold tabular-nums sm:text-base"
-                style={{ color: urgent ? "#E8262C" : "var(--color-accent)" }}
-              >
-                {minutes}:{String(seconds).padStart(2, "0")}
-              </span>
-            </motion.div>
-          </div>
+                <motion.span
+                  aria-hidden
+                  animate={reduceMotion || !urgent ? undefined : { scale: [1, 1.15, 1] }}
+                  transition={{ duration: 1, repeat: Infinity }}
+                >
+                  ⏱
+                </motion.span>
+                <span
+                  className="text-sm font-extrabold tabular-nums sm:text-base"
+                  style={{ color: urgent ? "#E8262C" : "var(--color-accent)" }}
+                >
+                  {minutes}:{String(seconds).padStart(2, "0")}
+                </span>
+              </motion.div>
+            </div>
+          )}
 
           <div className="mx-5 mt-2 border-t border-dashed border-line sm:mx-6 sm:mt-3" />
 
@@ -212,11 +246,15 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
                   subtitle={`${pricing.gamePack.credits} games · ${pricing.gamePack.days} days`}
                   originalPriceInr={pricing.gamePack.originalPriceInr}
                   regularPriceInr={pricing.gamePack.priceInr}
-                  flashPriceInr={Math.max(0, pricing.gamePack.priceInr - FLASH_DISCOUNT_INR.PACK)}
+                  // No flash reduction on Android — flashPriceInr just
+                  // equals the flat price, same number /pricing shows.
+                  flashPriceInr={Math.max(0, pricing.gamePack.priceInr - (isAndroidApp ? 0 : FLASH_DISCOUNT_INR.PACK))}
                   isSignedIn={isSignedIn}
                   loading={claiming === "PACK"}
-                  onClaim={() => handleClaim("PACK")}
+                  onClaim={isAndroidApp ? () => handleAndroidBuy("PACK") : () => handleClaim("PACK")}
                   onSignIn={() => handleSignIn("PACK")}
+                  androidMode={isAndroidApp}
+                  androidCtaLabel="Get Game Pack"
                 />
                 <FlashPlanCard
                   plan="MONTHLY"
@@ -225,11 +263,13 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
                   subtitle={`Unlimited games · ${pricing.monthly.days} days`}
                   originalPriceInr={pricing.monthly.originalPriceInr}
                   regularPriceInr={pricing.monthly.priceInr}
-                  flashPriceInr={Math.max(0, pricing.monthly.priceInr - FLASH_DISCOUNT_INR.MONTHLY)}
+                  flashPriceInr={Math.max(0, pricing.monthly.priceInr - (isAndroidApp ? 0 : FLASH_DISCOUNT_INR.MONTHLY))}
                   isSignedIn={isSignedIn}
                   loading={claiming === "MONTHLY"}
-                  onClaim={() => handleClaim("MONTHLY")}
+                  onClaim={isAndroidApp ? () => handleAndroidBuy("MONTHLY") : () => handleClaim("MONTHLY")}
                   onSignIn={() => handleSignIn("MONTHLY")}
+                  androidMode={isAndroidApp}
+                  androidCtaLabel="Get Game Pass"
                   highlight
                 />
               </div>
@@ -256,6 +296,8 @@ function FlashPlanCard({
   onSignIn,
   highlight,
   plan,
+  androidMode,
+  androidCtaLabel,
 }: {
   plan: FlashPlan;
   name: string;
@@ -269,6 +311,13 @@ function FlashPlanCard({
   onClaim: () => void;
   onSignIn: () => void;
   highlight?: boolean;
+  // Android: no discount, so the card shows the same flat price /pricing
+  // does (originalPriceInr struck through -> flashPriceInr, which equals
+  // regularPriceInr here — see the call sites above), and the button
+  // always calls onClaim (which the caller wires to a plain /pricing
+  // navigation, not a coupon claim) regardless of sign-in state.
+  androidMode?: boolean;
+  androidCtaLabel?: string;
 }) {
   const color = PLAN_COLOR[plan];
   return (
@@ -306,10 +355,16 @@ function FlashPlanCard({
       {/* Strikethrough ladder + "Save ₹X" on one line — that line shows
           *that* the price dropped and *how much* together, so nobody has
           to subtract two struck-through numbers themselves. The flash
-          price then gets its own line: big, gradient-filled, unmissable. */}
+          price then gets its own line: big, gradient-filled, unmissable.
+          On Android, flashPriceInr === regularPriceInr (no flash
+          reduction), so the regularPriceInr line is skipped — otherwise
+          it'd show the exact same number struck through immediately above
+          the identical big price, which reads as a bug, not a deal. */}
       <div className="flex flex-wrap items-baseline justify-center gap-x-1.5 gap-y-0.5">
         <span className="text-xs text-ink-muted line-through opacity-60">₹{originalPriceInr}</span>
-        <span className="text-sm font-semibold text-ink-muted line-through">₹{regularPriceInr}</span>
+        {!androidMode && (
+          <span className="text-sm font-semibold text-ink-muted line-through">₹{regularPriceInr}</span>
+        )}
         {/* Plain colored text, not another pill — the button below is the
             only chip in this card that should read as "solid and pressable". */}
         <span className="text-xs font-bold" style={{ color }}>
@@ -323,7 +378,7 @@ function FlashPlanCard({
         ₹{flashPriceInr}
       </p>
       <button
-        onClick={isSignedIn ? onClaim : onSignIn}
+        onClick={androidMode ? onClaim : isSignedIn ? onClaim : onSignIn}
         disabled={loading}
         // mt-auto — grid stretches both cards to equal height already
         // (default align-items: stretch); this is what actually pushes the
@@ -332,7 +387,7 @@ function FlashPlanCard({
         className="mt-auto w-full min-h-10 rounded-full px-2 text-sm font-bold text-white transition active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none sm:min-h-11"
         style={{ background: color }}
       >
-        {loading ? "Claiming…" : isSignedIn ? "Get this price" : "Sign in to claim this price"}
+        {androidMode ? (androidCtaLabel ?? "Get this plan") : loading ? "Claiming…" : isSignedIn ? "Get this price" : "Sign in to claim this price"}
       </button>
     </div>
   );
