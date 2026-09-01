@@ -128,7 +128,20 @@ export default function ReactionBar({
       </AnimatePresence>
 
       <button
-        onClick={onMore}
+        onClick={() => {
+          // The Game Menu (see GameMenu.tsx) is a full-screen overlay that
+          // shares this component's own z-20 stacking level (both the
+          // emoji/sticker picker below and the confirm modal above render
+          // at z-20 too) — opening it without first closing whichever of
+          // those this bar still has open left that overlay rendered
+          // fully lit on top of the menu's dark backdrop, since DOM order
+          // (not z-index) breaks the tie and this bar's markup comes after
+          // GameMenu's in GameView.tsx. Closing here, the one place that
+          // can open the Game Menu, is simpler than introducing a whole
+          // new z-index tier for a state that's local to this component.
+          setOpenPicker(null);
+          onMore();
+        }}
         aria-label="More options"
         className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-ink-muted transition hover:bg-surface-2 hover:text-ink"
       >
