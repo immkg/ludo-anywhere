@@ -637,7 +637,11 @@ export default function GameView({ room }: { room: Room }) {
           edges (root scrolls instead of clipping, so sticky has a scroll
           context to stick within on short viewports); the player rows sit
           as ordinary flex siblings immediately against the board instead. */}
-      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 py-2 sm:px-4">
+      {/* pt- adds env(safe-area-inset-top) on top of (not instead of) the
+          normal py-2 top padding, so a notch/status-bar cutout in a
+          full-screen PWA/TWA never sits flush against the reaction bar —
+          see the matching pb- on bottomRowRef below. */}
+      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] sm:px-4">
         <ReactionBar
           onReact={handleReact}
           onMore={() => setGameMenuOpen(true)}
@@ -782,7 +786,15 @@ export default function GameView({ room }: { room: Room }) {
               : ""}
         </p>
 
-        <div ref={bottomRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pt-2 sm:px-4">
+        {/* pb- adds env(safe-area-inset-bottom) on top of a small floor
+              (max(), not a plain add — there's no existing bottom padding
+              here to add onto) so a home-indicator/gesture-bar cutout never
+              sits flush against this row — see the matching pt- on the
+              sticky top bar above. */}
+        <div
+          ref={bottomRowRef}
+          className="flex w-full shrink-0 items-center justify-between px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-4"
+        >
           <PlayerCorner
             seat={seatByArm.get(3) ?? null}
             isTurn={seatByArm.get(3)?.id === currentSeat?.id}
