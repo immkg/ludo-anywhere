@@ -1,8 +1,9 @@
-import type { OwnedSeat } from "@/types/room";
+import type { OwnedSeat, OwnedSpectator } from "@/types/room";
 
 const DEVICE_ID_KEY = "ludo:deviceId";
 const GUEST_NAME_KEY = "ludo:guestName";
 const seatsKey = (roomCode: string) => `ludo:seats:${roomCode.toUpperCase()}`;
+const spectatorKey = (roomCode: string) => `ludo:spectator:${roomCode.toUpperCase()}`;
 
 export function getDeviceId(): string {
   if (typeof window === "undefined") return "";
@@ -91,4 +92,27 @@ export function loadOwnedSeats(roomCode: string): OwnedSeat[] {
 export function clearOwnedSeats(roomCode: string) {
   if (typeof window === "undefined") return;
   localStorage.removeItem(seatsKey(roomCode));
+}
+
+// Same idea as saveOwnedSeats/loadOwnedSeats, but a single spectator slot
+// per room per device rather than a list — a device only ever watches one
+// room as one spectator at a time (see room:watch in server.js).
+export function saveSpectatorToken(roomCode: string, spectator: OwnedSpectator) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(spectatorKey(roomCode), JSON.stringify(spectator));
+}
+
+export function loadSpectatorToken(roomCode: string): OwnedSpectator | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(spectatorKey(roomCode));
+    return raw ? (JSON.parse(raw) as OwnedSpectator) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearSpectatorToken(roomCode: string) {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(spectatorKey(roomCode));
 }

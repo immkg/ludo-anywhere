@@ -20,7 +20,7 @@ import {
   rematch,
   sendReaction,
 } from "@/lib/socketActions";
-import { clearOwnedSeats } from "@/lib/identity";
+import { clearOwnedSeats, clearSpectatorToken } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { colorForArm, buildBoardLayout } from "@/game/board";
 import { moveToken as applyMoveToken, placementFor, DICE_HOLD_MS, timeoutsForLevel } from "@/game/engine";
@@ -41,6 +41,7 @@ import {
 import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
+import SpectateSettings from "@/components/lobby/SpectateSettings";
 import type { Room, Seat } from "@/types/room";
 import type { GameState } from "@/types/game";
 
@@ -68,7 +69,7 @@ function homePositionPercent(armIndex: number) {
   };
 }
 
-export default function GameView({ room }: { room: Room }) {
+export default function GameView({ room, isSpectator = false }: { room: Room; isSpectator?: boolean }) {
   const router = useRouter();
   const { data: session } = useSession();
   const { game, currentSeat, isMyTurn, validMoves } = useGame();
@@ -360,7 +361,8 @@ export default function GameView({ room }: { room: Room }) {
 
   const handleLeaveGame = () => {
     leaveRoom(room.code);
-    clearOwnedSeats(room.code);
+    if (isSpectator) clearSpectatorToken(room.code);
+    else clearOwnedSeats(room.code);
     resetRoomStore();
     router.push(session?.user ? "/" : "/play");
   };
@@ -603,7 +605,12 @@ export default function GameView({ room }: { room: Room }) {
           edges (root scrolls instead of clipping, so sticky has a scroll
           context to stick within on short viewports); the player rows sit
           as ordinary flex siblings immediately against the board instead. */}
-      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 py-2 sm:px-4">
+      <div className="sticky top-0 z-10 relative flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 py-2 sm:px-4">
+        {room.spectatorCount > 0 && (
+          <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-xs font-bold text-ink-muted sm:right-4">
+            👀 {room.spectatorCount}
+          </span>
+        )}
         <ReactionBar
           onReact={handleReact}
           onMore={() => setGameMenuOpen(true)}
@@ -615,8 +622,9 @@ export default function GameView({ room }: { room: Room }) {
       </div>
 
       {isHost && (
-        <div className="shrink-0 px-2 pt-2 sm:px-4">
+        <div className="shrink-0 flex flex-col gap-2 px-2 pt-2 sm:px-4">
           <IncomingJoinRequests roomCode={room.code} />
+          <SpectateSettings room={room} hostSeatId={room.hostSeatId!} />
         </div>
       )}
 

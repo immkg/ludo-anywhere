@@ -1,5 +1,12 @@
 export type RoomStatus = "lobby" | "playing" | "finished";
 
+// "private" (default): the host approves each watcher and their identity
+// never reaches other clients — only the host briefly sees a name at
+// approval time (see IncomingJoinRequests.tsx). "public": anyone with the
+// room's link can watch immediately, and everyone sees a live count (see
+// Room.spectatorCount) — but still never individual watchers' names.
+export type SpectatePolicy = "private" | "public";
+
 export type Seat = {
   id: string;
   name: string;
@@ -27,6 +34,8 @@ export type Room = {
   // True for a room matched via "Find Player Online" rather than created
   // directly — see matchmaking:join in server.js.
   matchmaking: boolean;
+  spectatePolicy: SpectatePolicy;
+  spectatorCount: number;
   seats: Seat[];
 };
 
@@ -37,4 +46,12 @@ export type OwnedSeat = {
   token: string;
   armIndex: number;
   name: string;
+};
+
+// Same idea as OwnedSeat, but for a spectator — no armIndex/name to
+// remember since a watcher isn't seated on the board (see room:watch in
+// server.js).
+export type OwnedSpectator = {
+  id: string;
+  token: string;
 };

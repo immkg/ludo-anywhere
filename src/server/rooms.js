@@ -88,6 +88,26 @@ export function createRoom({ maxPlayers }) {
     // join skips the approval step too, since the host already vouched for
     // them by name (see server.js's room:join handler).
     invitedUserIds: new Set(),
+    // Whether a viewer with no seat can watch without the host's say-so —
+    // "private" (default) needs host approval per watcher and keeps their
+    // identity out of anything broadcast to the room (see addSpectator);
+    // "public" admits anyone who asks and exposes a live count (see
+    // serializeRoom's spectatorCount) but never the individual watchers'
+    // names to non-host clients. See room:setSpectatePolicy in server.js.
+    spectatePolicy: "private",
+    // Joined-but-unseated viewers — never affects turn order/placements
+    // (see src/game/engine.js, which has no concept of these at all), just
+    // a live list the host/UI can count. Reconnected by token/userId the
+    // same shape as a seat (see reconnectSpectator), but with no
+    // disconnect-grace-period pruning mid-game — there's no game state at
+    // stake, so a disconnected one is just marked, not pruned (see
+    // handleSocketDisconnect).
+    spectators: [],
+    // Same shape/purpose as pendingRequests above, just for "watch" asks
+    // instead of "seat" asks — kept separate so the same person can have
+    // one of each pending at once without colliding (see room:watch in
+    // server.js).
+    pendingSpectateRequests: new Map(),
   };
   rooms.set(code, room);
   return room;
@@ -422,6 +442,52 @@ export function claimSeat(room, seatId, { name, profileId, userId, socketId, dev
   return { room, seat };
 }
 
+// Spectators: a joined-but-unseated viewer (see room:watch in server.js).
+// Reconnects in place rather than duplicating if this same account/device
+// is already watching (e.g. a second tab, or the approval push landing
+// after the requester's own client already sped ahead) — the same
+// one-identity-one-slot rule addSeats enforces for seats.
+export function addSpectator(room, { name, userId, deviceId, socketId }) {
+  if (!room) return { error: "Room not found" };
+  const existing = room.spectators.find((s) => (userId ? s.userId === userId : deviceId && s.deviceId === deviceId));
+  if (existing) {
+    Object.assign(existing, { socketId, connected: true });
+    return { room, spectator: existing };
+  }
+
+  const spectator = {
+    id: randomToken(),
+    token: randomToken(),
+    name: (name || "A guest").slice(0, 20),
+    userId: userId || null,
+    deviceId: deviceId || null,
+    socketId,
+    connected: true,
+  };
+  room.spectators.push(spectator);
+  return { room, spectator };
+}
+
+// Reattaches a previously-known spectator to a new socket — same
+// token-or-userId matching as reconnectSeats, just against room.spectators
+// instead of room.seats. Returns null (not an object) when nothing
+// matches, since there's no seat-shaped error path a caller needs here.
+export function reconnectSpectator(room, tokens, socketId, userId) {
+  if (!room) return null;
+  const spectator = room.spectators.find((s) => tokens.includes(s.token) || (userId && s.userId === userId));
+  if (!spectator) return null;
+  spectator.socketId = socketId;
+  spectator.connected = true;
+  return spectator;
+}
+
+export function setSpectatePolicy(room, policy) {
+  if (!room) return { error: "Room not found" };
+  if (policy !== "private" && policy !== "public") return { error: "Invalid setting" };
+  room.spectatePolicy = policy;
+  return { room };
+}
+
 export function findSeatBySocket(room, socketId) {
   return room.seats.find((s) => s.socketId === socketId);
 }
@@ -438,17 +504,40 @@ function clearDisconnectTimer(room, seatId) {
 // seat is dropped immediately (freeing the slot); mid-game it's kept, marked
 // disconnected, and pruned after a grace period so a refresh/reconnect can
 // resume the seat without losing tokens.
+//
+// A spectating socket is handled here too, with the same lobby-vs-mid-game
+// split as a seat (dropped outright in the lobby, just marked disconnected
+// mid-game) — but never pruned mid-game the way a seat eventually is: a
+// spectator holds no game state, so there's nothing at stake in leaving one
+// around disconnected indefinitely (it stops counting toward
+// serializeRoom's spectatorCount, and can reconnect by token/userId later —
+// see reconnectSpectator).
 export function handleSocketDisconnect(room, socketId, onChange) {
   if (!room) return;
+  const affectedSpectators = room.spectators.filter((s) => s.socketId === socketId);
+  if (affectedSpectators.length > 0) {
+    if (room.status === "lobby") {
+      room.spectators = room.spectators.filter((s) => s.socketId !== socketId);
+    } else {
+      affectedSpectators.forEach((s) => {
+        s.connected = false;
+        s.socketId = null;
+      });
+    }
+  }
+
   const affected = room.seats.filter((s) => s.socketId === socketId);
-  if (affected.length === 0) return;
+  if (affected.length === 0) {
+    if (affectedSpectators.length > 0) onChange();
+    return;
+  }
 
   if (room.status === "lobby") {
     room.seats = room.seats.filter((s) => s.socketId !== socketId);
     if (room.hostSeatId && !room.seats.find((s) => s.id === room.hostSeatId)) {
       room.hostSeatId = room.seats[0]?.id ?? null;
     }
-    if (room.seats.length === 0) rooms.delete(room.code);
+    if (room.seats.length === 0 && room.spectators.length === 0) rooms.delete(room.code);
     onChange();
     return;
   }
@@ -477,7 +566,9 @@ export function handleSocketDisconnect(room, socketId, onChange) {
     const timer = setTimeout(() => {
       room.seats = room.seats.filter((s) => s.id !== seat.id);
       room.disconnectTimers.delete(seat.id);
-      if (room.seats.every((s) => !s.connected)) rooms.delete(room.code);
+      if (room.seats.every((s) => !s.connected) && room.spectators.every((s) => !s.connected)) {
+        rooms.delete(room.code);
+      }
       // The seat is gone from room.seats now, but room.game doesn't know
       // that — if it's still their turn, nothing could ever resolve it
       // again (the seat lookup in currentAutoTarget would just keep
@@ -529,6 +620,12 @@ export function serializeRoom(room) {
     status: room.status,
     sponsored: room.sponsored,
     matchmaking: !!room.matchmaking,
+    // "private"/"public" (see setSpectatePolicy) — never who's actually
+    // watching, just the live count, so a private room's watchers stay
+    // anonymous to everyone but the host (who sees a name only transiently,
+    // at approval time — see room:watchRequest:incoming in server.js).
+    spectatePolicy: room.spectatePolicy,
+    spectatorCount: room.spectators.filter((s) => s.connected).length,
     seats: room.seats.map((s) => ({
       id: s.id,
       name: s.name,

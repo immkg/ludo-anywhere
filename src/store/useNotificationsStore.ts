@@ -1,7 +1,11 @@
 import { create } from "zustand";
 
 export type RoomInvite = { id: string; roomCode: string; fromName: string; fromUserId: string };
-export type JoinRequest = { id: string; roomCode: string; fromUserId: string; fromName: string };
+// `kind` distinguishes a seat request (room:joinRequest:incoming) from a
+// "watch" request (room:watchRequest:incoming) — see IncomingJoinRequests.tsx,
+// which renders/resolves both the same way, just against a different pair
+// of approve/decline actions.
+export type JoinRequest = { id: string; roomCode: string; fromUserId: string; fromName: string; kind: "seat" | "spectate" };
 // One invite recipient who explicitly declined (see room:invite:declined)
 // — keyed by roomCode+userId so InviteFriends can show "Rejected" instead
 // of leaving the invite looking permanently pending.

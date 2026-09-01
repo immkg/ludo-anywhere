@@ -18,7 +18,7 @@ import {
   requestBotFill,
 } from "@/lib/socketActions";
 import { shareRoomLink, roomJoinUrl } from "@/lib/share";
-import { saveOwnedSeats, clearOwnedSeats } from "@/lib/identity";
+import { saveOwnedSeats, clearOwnedSeats, clearSpectatorToken } from "@/lib/identity";
 import { generateDummyEmail, randomEmailSuffix } from "@/lib/dummyEmail";
 import { useFriends } from "@/hooks/useFriends";
 import { useProfiles } from "@/hooks/useProfiles";
@@ -33,6 +33,7 @@ import PlayerAvatar from "@/components/lobby/PlayerAvatar";
 import Wordmark from "@/components/brand/Wordmark";
 import AppIconMark from "@/components/brand/AppIconMark";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
+import SpectateSettings from "@/components/lobby/SpectateSettings";
 import { OccupiedSeatCard, EmptySeatCard } from "@/components/lobby/PlayerSeatCard";
 import {
   IconCheck,
@@ -65,7 +66,21 @@ function formatElapsed(totalSeconds: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: OwnedSeat[] }) {
+export default function WaitingRoom({
+  room,
+  mySeats,
+  isSpectator = false,
+}: {
+  room: Room;
+  mySeats: OwnedSeat[];
+  // A viewer with no seat here at all (see room:watch in server.js) —
+  // renders the same roster read-only, without any of the lobby-management
+  // actions below (nothing here needs an `isHost` check for those since a
+  // spectator is never the host, but the room-management-adjacent bits
+  // that any *player* would otherwise see — add a player, ask the host,
+  // invite friends — aren't relevant to someone who isn't seated at all).
+  isSpectator?: boolean;
+}) {
   const router = useRouter();
   const { data: session } = useSession();
   const [copied, setCopied] = useState(false);
@@ -154,7 +169,8 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
 
   const handleLeave = () => {
     leaveRoom(room.code);
-    clearOwnedSeats(room.code);
+    if (isSpectator) clearSpectatorToken(room.code);
+    else clearOwnedSeats(room.code);
     resetRoomStore();
     router.push(session?.user ? "/" : "/play");
   };
@@ -232,13 +248,21 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                 </Button>
               ) : (
                 <p className="flex items-center gap-1.5 text-sm font-semibold text-ink-muted">
-                  <IconClock className="h-4 w-4 shrink-0" /> Waiting for host to start…
+                  <IconClock className="h-4 w-4 shrink-0" />
+                  {isSpectator ? "Watching — waiting for the host to start…" : "Waiting for host to start…"}
                 </p>
               )}
-              <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-sm font-bold text-ink">
-                <IconUsers className="h-4 w-4 text-accent" />
-                {room.seats.length}/{room.maxPlayers}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-sm font-bold text-ink">
+                  <IconUsers className="h-4 w-4 text-accent" />
+                  {room.seats.length}/{room.maxPlayers}
+                </span>
+                {room.spectatorCount > 0 && (
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-bold text-ink-muted">
+                    👀 {room.spectatorCount}
+                  </span>
+                )}
+              </div>
             </div>
             {isHost && !canStart && (
               <p className="flex items-center gap-1.5 text-xs text-ink-muted">
@@ -335,17 +359,20 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                     )}
                   </span>
                 </Button>
-                <Button variant="secondary" className="flex-1" onClick={() => setInviteOpen((v) => !v)}>
-                  <span className="flex items-center justify-center gap-2">
-                    <IconUsers className="h-4 w-4" /> Friends
-                  </span>
-                </Button>
+                {!isSpectator && (
+                  <Button variant="secondary" className="flex-1" onClick={() => setInviteOpen((v) => !v)}>
+                    <span className="flex items-center justify-center gap-2">
+                      <IconUsers className="h-4 w-4" /> Friends
+                    </span>
+                  </Button>
+                )}
               </div>
 
               {inviteOpen && <InviteFriends roomCode={room.code} />}
             </div>
 
             {isHost && <IncomingJoinRequests roomCode={room.code} />}
+            {isHost && <SpectateSettings room={room} hostSeatId={room.hostSeatId!} />}
 
             <div className="flex flex-col gap-3">
               {isHost && openSlots > 0 && (
@@ -383,21 +410,22 @@ export default function WaitingRoom({ room, mySeats }: { room: Room; mySeats: Ow
                     />
                   );
                 })}
-                {Array.from({ length: openSlots }, (_, i) => {
-                  const arm = armForSeatIndex(room.seats.length + i, room.maxPlayers);
-                  return (
-                    <EmptySeatCard
-                      key={i}
-                      seatNumber={room.seats.length + i + 1}
-                      previewColorHex={colorForArm(arm).hex}
-                      onAdd={() => setAddPlayerOpen(true)}
-                    />
-                  );
-                })}
+                {!isSpectator &&
+                  Array.from({ length: openSlots }, (_, i) => {
+                    const arm = armForSeatIndex(room.seats.length + i, room.maxPlayers);
+                    return (
+                      <EmptySeatCard
+                        key={i}
+                        seatNumber={room.seats.length + i + 1}
+                        previewColorHex={colorForArm(arm).hex}
+                        onAdd={() => setAddPlayerOpen(true)}
+                      />
+                    );
+                  })}
               </div>
             </div>
 
-            {!isHost && room.matchmaking && room.seats.length < room.maxPlayers && (
+            {!isSpectator && !isHost && room.matchmaking && room.seats.length < room.maxPlayers && (
               <div className="flex gap-2">
                 <Button variant="secondary" className="flex-1" onClick={() => requestStart(room.code, myName)}>
                   Ask host to start
