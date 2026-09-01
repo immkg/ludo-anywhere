@@ -31,6 +31,7 @@ import {
   addSpectator,
   reconnectSpectator,
   setSpectatePolicy,
+  addSpectatorChatMessage,
 } from "./src/server/rooms.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
 import {
@@ -229,6 +230,11 @@ app.prepare().then(() => {
   }
 
   const userChannel = (userId) => `user:${userId}`;
+  // A room's spectators-only socket.io room — used to scope the spectator
+  // chat channel (spectator:chat:send/spectator:chat:message below) so it
+  // never reaches players or the host, keeping it structurally separate
+  // from the shared `room.code` channel everyone else broadcasts on.
+  const spectatorChannel = (roomCode) => `${roomCode}:spectators`;
 
   // Populated for the duration of each socket's connection-setup IIFE below
   // (auth lookup + userChannel join). A push that targets a specific user's
@@ -538,8 +544,10 @@ app.prepare().then(() => {
         const reconnected = reconnectSpectator(room, knownTokens || [], socket.id, reconnectUserId);
         if (reconnected) {
           socket.join(room.code);
+          socket.join(spectatorChannel(room.code));
           broadcastRoom(room);
           if (room.game) socket.emit("game:update", serializeGame(room));
+          socket.emit("spectator:chat:history", { messages: room.spectatorChat });
           return ack?.({ roomCode: room.code, spectator: { id: reconnected.id, token: reconnected.token } });
         }
 
@@ -560,8 +568,10 @@ app.prepare().then(() => {
             socketId: socket.id,
           });
           socket.join(room.code);
+          socket.join(spectatorChannel(room.code));
           broadcastRoom(room);
           if (room.game) socket.emit("game:update", serializeGame(room));
+          socket.emit("spectator:chat:history", { messages: room.spectatorChat });
           return ack?.({ roomCode: room.code, spectator: { id: spectator.id, token: spectator.token } });
         }
 
@@ -638,6 +648,32 @@ app.prepare().then(() => {
         if (error) return ack?.({ error });
 
         broadcastRoom(room);
+        ack?.({});
+      })
+    );
+
+    // Free-text spectator-only chat — a side channel for spectators to talk
+    // among themselves without cluttering the players' own reaction/quick-
+    // chat stream (game:reaction). Deliberately scoped to spectatorChannel,
+    // not room.code, so it never reaches players or the host — keeping a
+    // private room's watchers exactly as unnamed to the host here as
+    // everywhere else (see setSpectatePolicy/serializeRoom's spectatorCount
+    // comments). The sender is identified by their own socket (an actual
+    // room.spectators entry), never trusted from the payload, so this can't
+    // be spoofed as a different watcher. Validation/rate-limiting is
+    // addSpectatorChatMessage's job (see rooms.js).
+    socket.on(
+      "spectator:chat:send",
+      withAck(({ roomCode, text }, ack) => {
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        const spectator = room.spectators.find((s) => s.socketId === socket.id);
+        if (!spectator) return ack?.({ error: "Not watching this room" });
+
+        const { error, message } = addSpectatorChatMessage(room, spectator.id, text);
+        if (error) return ack?.({ error });
+
+        io.to(spectatorChannel(room.code)).emit("spectator:chat:message", message);
         ack?.({});
       })
     );

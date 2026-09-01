@@ -43,6 +43,7 @@ import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
 import SpectateSettings from "@/components/lobby/SpectateSettings";
+import SpectatorChat from "@/components/lobby/SpectatorChat";
 import type { Room, Seat } from "@/types/room";
 import type { GameState } from "@/types/game";
 
@@ -70,7 +71,19 @@ function homePositionPercent(armIndex: number) {
   };
 }
 
-export default function GameView({ room, isSpectator = false }: { room: Room; isSpectator?: boolean }) {
+export default function GameView({
+  room,
+  isSpectator = false,
+  spectatorId,
+}: {
+  room: Room;
+  isSpectator?: boolean;
+  // This device's own spectator id (see RoomPageClient.tsx) — only used to
+  // mount the spectator-only chat widget (SpectatorChat.tsx), kept
+  // structurally separate from ReactionBar/game:reaction so it never
+  // clutters the players' own reaction/quick-chat stream.
+  spectatorId?: string;
+}) {
   const router = useRouter();
   const { data: session } = useSession();
   const { game, currentSeat, isMyTurn, validMoves } = useGame();
@@ -515,6 +528,7 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
             {rematchLoading ? "Starting…" : "Play again with same players"}
           </Button>
         )}
+        {isSpectator && spectatorId && <SpectatorChat roomCode={room.code} spectatorId={spectatorId} />}
       </motion.div>
     );
   }
@@ -767,6 +781,8 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
           />
         </div>
       </div>
+
+      {isSpectator && spectatorId && <SpectatorChat roomCode={room.code} spectatorId={spectatorId} />}
     </div>
   );
 }

@@ -11,6 +11,18 @@ import {
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
 const DISCONNECT_GRACE_MS = 2 * 60 * 1000;
 
+// Spectator chat: a free-text side channel scoped to spectators only (see
+// spectator:chat:send in server.js), deliberately not the players' own
+// quick-chat/reaction stream (game:reaction) — a much smaller, lower-risk
+// audience than the full player base, so this just needs basic sanity
+// limits, not a moderation system. SPECTATOR_CHAT_BACKLOG bounds
+// room.spectatorChat itself so a long-running room's history can't grow
+// unboundedly; a spectator only ever sees this many past messages on
+// joining (see room:watch's spectator:chat:history push in server.js).
+export const SPECTATOR_CHAT_MAX_LENGTH = 240;
+const SPECTATOR_CHAT_BACKLOG = 50;
+const SPECTATOR_CHAT_MIN_INTERVAL_MS = 1200;
+
 // How far along a host's early end (see midGameEndGame) needs to be before
 // it declares a real winner/loser from the current board instead of
 // leaving it unresolved — both must hold, not just one, so neither a
@@ -108,6 +120,11 @@ export function createRoom({ maxPlayers }) {
     // one of each pending at once without colliding (see room:watch in
     // server.js).
     pendingSpectateRequests: new Map(),
+    // Bounded backlog for the spectator-only chat channel (see
+    // addSpectatorChatMessage below) — a spectator who joins mid-
+    // conversation gets this handed to them once (spectator:chat:history in
+    // server.js), then just listens for new ones like everyone else.
+    spectatorChat: [],
   };
   rooms.set(code, room);
   return room;
@@ -580,6 +597,36 @@ export function setSpectatePolicy(room, policy) {
   if (policy !== "private" && policy !== "public") return { error: "Invalid setting" };
   room.spectatePolicy = policy;
   return { room };
+}
+
+// Validates and appends one spectator chat message — see
+// spectator:chat:send in server.js. `spectatorId` must name a real entry in
+// room.spectators (not just any connected socket) so a message is always
+// attributable to a known watcher. Basic sanity limits only: trimmed,
+// non-empty, capped at SPECTATOR_CHAT_MAX_LENGTH, and a light per-spectator
+// rate limit (SPECTATOR_CHAT_MIN_INTERVAL_MS) tracked via the spectator's
+// own lastChatAt — this is a free-text channel for a small, low-risk
+// audience, not a moderation system. `now` is only a parameter so tests can
+// pass a fixed clock instead of racing Date.now().
+export function addSpectatorChatMessage(room, spectatorId, rawText, now = Date.now()) {
+  if (!room) return { error: "Room not found" };
+  const spectator = room.spectators.find((s) => s.id === spectatorId);
+  if (!spectator) return { error: "Not watching this room" };
+
+  const text = typeof rawText === "string" ? rawText.trim() : "";
+  if (!text) return { error: "Message can't be empty" };
+  if (text.length > SPECTATOR_CHAT_MAX_LENGTH) {
+    return { error: `Message is too long (max ${SPECTATOR_CHAT_MAX_LENGTH} characters)` };
+  }
+  if (spectator.lastChatAt != null && now - spectator.lastChatAt < SPECTATOR_CHAT_MIN_INTERVAL_MS) {
+    return { error: "You're sending messages too fast" };
+  }
+  spectator.lastChatAt = now;
+
+  const message = { id: randomToken(), fromId: spectator.id, fromName: spectator.name, text, ts: now };
+  room.spectatorChat.push(message);
+  if (room.spectatorChat.length > SPECTATOR_CHAT_BACKLOG) room.spectatorChat.shift();
+  return { room, message };
 }
 
 export function findSeatBySocket(room, socketId) {
