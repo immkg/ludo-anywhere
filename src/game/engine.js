@@ -75,6 +75,17 @@ export function placementFor(state, seatId) {
   return state.status === "finished" && !state.endedEarly ? state.seats.length : null;
 }
 
+// How many seats a friend could actually be invited into right now:
+// paused (suspended) or removed-and-never-won. Mirrors claimableSeats in
+// src/server/rooms.js, but working purely off GameState (no Room needed)
+// — every game seat has a corresponding room seat, so counting straight
+// from `state.seats` gives the same answer. Used client-side (see
+// GameView.tsx) to gate the in-game "invite a friend" action on there
+// being an open seat to invite them into.
+export function claimableSeatCount(state) {
+  return state.seats.filter((s) => s.suspended || (s.finished && !state.placements.includes(s.id))).length;
+}
+
 export function getCurrentSeat(state) {
   return state.seats[state.currentSeatIndex];
 }

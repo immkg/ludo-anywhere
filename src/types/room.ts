@@ -1,5 +1,19 @@
 export type RoomStatus = "lobby" | "playing" | "finished";
 
+// "private" (default): the host approves each watcher and their identity
+// never reaches other clients — only the host briefly sees a name at
+// approval time (see IncomingJoinRequests.tsx). "public": anyone with the
+// room's link can watch immediately, and everyone sees a live count (see
+// Room.spectatorCount) — but still never individual watchers' names.
+export type SpectatePolicy = "private" | "public";
+
+// A mid-game seat with no seat object left at all — its game.seats entry
+// survives (finished, unplaced) but it dropped out of room.seats via the
+// server's disconnect-grace-period prune. The host can still fill it with a
+// bot (see room:addBot in server.js) even though there's no normal seat row
+// anywhere in `Room.seats` to show/manage it.
+export type VacatedSeat = { id: string; armIndex: number };
+
 export type Seat = {
   id: string;
   name: string;
@@ -27,6 +41,9 @@ export type Room = {
   // True for a room matched via "Find Player Online" rather than created
   // directly — see matchmaking:join in server.js.
   matchmaking: boolean;
+  spectatePolicy: SpectatePolicy;
+  spectatorCount: number;
+  vacatedSeats: VacatedSeat[];
   seats: Seat[];
 };
 
@@ -37,4 +54,27 @@ export type OwnedSeat = {
   token: string;
   armIndex: number;
   name: string;
+};
+
+// Same idea as OwnedSeat, but for a spectator — no armIndex/name to
+// remember since a watcher isn't seated on the board (see room:watch in
+// server.js).
+export type OwnedSpectator = {
+  id: string;
+  token: string;
+};
+
+// One message on the spectator-only chat side channel (see
+// spectator:chat:send/spectator:chat:message in server.js) — deliberately
+// separate from the player-facing quick-chat/reaction stream (game:reaction)
+// so a spectator conversation never clutters players' view. Free text
+// (unlike the player-facing preset phrases), capped server-side at
+// SPECTATOR_CHAT_MAX_LENGTH (src/server/rooms.js) — spectators are a much
+// smaller, lower-risk audience than the full player base.
+export type SpectatorChatMessage = {
+  id: string;
+  fromId: string;
+  fromName: string;
+  text: string;
+  ts: number;
 };

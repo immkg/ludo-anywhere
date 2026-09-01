@@ -215,50 +215,51 @@ export default function PlayerCorner({
           more urgent state (this seat is actively being auto-played right
           now, not just paused). */}
       {!seat.connected ? <DisconnectedBadge /> : suspended && <SuspendedBadge />}
+      {/* Deliberately NOT in the dice slot below (see diceSlot) — that used
+          to be where this button lived (whenever this corner wasn't the
+          current roller), reusing the exact geometry player-management
+          deliberately moved off of because it caught mistaps meant for the
+          die (see the name row's comment further down). Anchored to the
+          avatar's own free corner instead (crown takes top-right,
+          suspended/disconnected take bottom-right), so it can never end up
+          where the die appears regardless of turn state. */}
+      {!dice && onSendSticker && (
+        <div className="absolute -top-1 -left-1">
+          <button
+            type="button"
+            onClick={() => setStickerPickerOpen((v) => !v)}
+            aria-label={`Send a sticker to ${seat.name}`}
+            aria-expanded={stickerPickerOpen}
+            className="flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface text-ink-muted shadow transition hover:text-ink"
+          >
+            <IconPalette className="h-3 w-3" />
+          </button>
+          <AnimatePresence>
+            {stickerPickerOpen && (
+              <ReactionPicker
+                mode="sticker"
+                align={diceFirst ? "right" : "left"}
+                vAlign={bottomRow ? "top" : "bottom"}
+                onSelect={(reaction) => onSendSticker(seat.id, reaction)}
+                onClose={() => setStickerPickerOpen(false)}
+              />
+            )}
+          </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 
   // Always-reserved footprint for the die, so a corner's box never resizes
-  // as the die arrives or leaves it. When this corner isn't the current
-  // roller, the same slot doubles as a sticker-picker trigger (rather than
-  // sitting blank) — picking one sends it to this seat's home on the board
-  // (see homeReactions in GameView.tsx) instead of the usual center-screen
-  // pop.
-  const diceSlot = dice ? (
+  // as the die arrives or leaves it — just the die-or-blank now that the
+  // per-player sticker trigger lives on the avatar instead (see above).
+  // diceSlotRef lets GameView track this corner's on-screen position for
+  // the dice handoff animation (issue #21), even while this corner is
+  // blank.
+  const diceSlot = (
     <div ref={diceSlotRef} className="shrink-0" style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE }}>
-      {/* `dice` is usually just `true` from GameView.tsx (a flag, not a
-          node — see the doc comment above) since it renders the actual
-          <Dice/> itself as a floating overlay instead; React renders a
-          bare `true` as nothing, so this only shows content for the older
-          TestModeView.tsx harness, which still passes a real node. */}
-      {dice === true ? null : dice}
+      {dice}
     </div>
-  ) : onSendSticker ? (
-    <div ref={diceSlotRef} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setStickerPickerOpen((v) => !v)}
-        aria-label={`Send a sticker to ${seat.name}`}
-        aria-expanded={stickerPickerOpen}
-        className="flex items-center justify-center rounded-xl transition hover:opacity-70"
-        style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE, color: color.hex }}
-      >
-        <IconPalette className="h-5 w-5" />
-      </button>
-      <AnimatePresence>
-        {stickerPickerOpen && (
-          <ReactionPicker
-            mode="sticker"
-            align={diceFirst ? "right" : "left"}
-            vAlign={bottomRow ? "top" : "bottom"}
-            onSelect={(reaction) => onSendSticker(seat.id, reaction)}
-            onClose={() => setStickerPickerOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-    </div>
-  ) : (
-    <div ref={diceSlotRef} className="shrink-0" style={{ width: DICE_SLOT_SIZE, height: DICE_SLOT_SIZE }} />
   );
 
   return (

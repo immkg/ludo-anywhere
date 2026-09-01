@@ -25,11 +25,22 @@ import {
   leaveRoom,
   rematch,
   sendReaction,
+  addBotToSeat,
+  setSpectatePolicy,
 } from "@/lib/socketActions";
-import { clearOwnedSeats } from "@/lib/identity";
+import { clearOwnedSeats, clearSpectatorToken } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
+import { cn } from "@/lib/utils";
 import { colorForArm, buildBoardLayout } from "@/game/board";
-import { moveToken as applyMoveToken, placementFor, DICE_HOLD_MS, timeoutsForLevel } from "@/game/engine";
+import {
+  moveToken as applyMoveToken,
+  placementFor,
+  claimableSeatCount,
+  DICE_HOLD_MS,
+  timeoutsForLevel,
+} from "@/game/engine";
+import { computeGameXp } from "@/lib/trophies";
+import { playVictoryFanfare } from "@/lib/sound";
 import Dice, { type ThrowStyle } from "@/components/game/Dice";
 import { arcKeyframes, playSettleBounces, randomBetween, type Point } from "@/lib/diceMotion";
 import PlayerCorner from "@/components/game/PlayerCorner";
@@ -48,6 +59,7 @@ import {
 import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
+import SpectatorChat from "@/components/lobby/SpectatorChat";
 import type { Room, Seat } from "@/types/room";
 import type { GameState } from "@/types/game";
 
@@ -65,6 +77,14 @@ const REACTION_DISPLAY_MS = 1600;
 // it shouldn't feel like it's dragging the pace of play down.
 const HANDOFF_ARC_MS = 550;
 
+// How long the results screen holds off the feedback-rating prompt (see
+// showSecondaryAsks below) — long enough for the primary "Play again"
+// moment (and the confetti/win callout) to land first, short enough that
+// it doesn't feel like a separate, disconnected ask. The flash-discount
+// splash needs no equivalent constant: it never opens on this timer, only
+// from handleBackHome, once the player has actually chosen to leave.
+const SECONDARY_ASK_DELAY_MS = 1400;
+
 // Where a per-player sticker (see homeReactions below) lands: the center
 // of that arm's "cage" — the same board-space rect Board.tsx draws the
 // yard on — expressed as a 0..100 percentage of the board's own square
@@ -81,7 +101,85 @@ function homePositionPercent(armIndex: number) {
   };
 }
 
-export default function GameView({ room }: { room: Room }) {
+// Rank (1-indexed) this device's own seat(s) finished in — null if none of
+// mySeatIds ever appear in game.placements at all (game still in progress
+// from this seat's perspective, or this device never had a seat in this
+// particular game, e.g. a spectator link). Pure and cheap, so it's safe to
+// call from a render as well as an effect.
+function myPlacementRank(game: GameState, mySeatIds: string[]): number | null {
+  for (const seatId of mySeatIds) {
+    const idx = game.placements.indexOf(seatId);
+    if (idx !== -1) return idx + 1;
+  }
+  return null;
+}
+
+// Unlike an emoji/sticker (anonymous — nobody needs to know who tapped
+// 🔥), a quick-chat phrase reads as somebody actually saying something, so
+// it's worth attributing — `fromName` is carried alongside the wire
+// `Reaction` only for display (see the `fromName` plumbing in
+// handleReact/the game:reaction listener below), never part of the
+// Reaction type itself.
+type DisplayReaction = Reaction & { fromName?: string };
+
+// Renders whichever reaction kind is currently showing, sized for either
+// the center-screen pop (emoji/sticker/chosen quick-chat, `size="center"`)
+// or a per-seat home pop (`size="home"`, see homeReactions below) — same
+// three kinds, same transport (game:reaction), just two on-screen scales.
+function ReactionVisual({ reaction, size }: { reaction: DisplayReaction; size: "center" | "home" }) {
+  if (reaction.kind === "emoji") {
+    return (
+      <span
+        className={cn(
+          "leading-none drop-shadow-lg",
+          size === "center" ? "text-[60cqmin]" : "text-[32cqmin]",
+        )}
+      >
+        {reaction.value}
+      </span>
+    );
+  }
+  if (reaction.kind === "sticker") {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={reaction.src}
+        alt={reaction.alt}
+        className={cn(
+          "object-contain drop-shadow-lg",
+          size === "center" ? "h-[60cqmin] w-[60cqmin]" : "h-[32cqmin] w-[32cqmin]",
+        )}
+      />
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "max-w-[70cqmin] rounded-2xl border border-line bg-surface px-3 py-1.5 text-center shadow-lg",
+        size === "home" && "max-w-[40cqmin]",
+      )}
+    >
+      {reaction.fromName && (
+        <p className="truncate text-[10px] font-semibold text-ink-muted">{reaction.fromName}</p>
+      )}
+      <p className={cn("font-bold text-ink", size === "center" ? "text-base" : "text-xs")}>{reaction.text}</p>
+    </div>
+  );
+}
+
+export default function GameView({
+  room,
+  isSpectator = false,
+  spectatorId,
+}: {
+  room: Room;
+  isSpectator?: boolean;
+  // This device's own spectator id (see RoomPageClient.tsx) — only used to
+  // mount the spectator-only chat widget (SpectatorChat.tsx), kept
+  // structurally separate from ReactionBar/game:reaction so it never
+  // clutters the players' own reaction/quick-chat stream.
+  spectatorId?: string;
+}) {
   const router = useRouter();
   const { data: session } = useSession();
   const { game, currentSeat, isMyTurn, validMoves } = useGame();
@@ -124,12 +222,12 @@ export default function GameView({ room }: { room: Room }) {
   useEffect(() => {
     gameStartRef.current = Date.now();
   }, []);
-  const [activeReaction, setActiveReaction] = useState<Reaction | null>(null);
+  const [activeReaction, setActiveReaction] = useState<DisplayReaction | null>(null);
   const reactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Per-seat stickers sent via a player card's own sticker button (see
   // PlayerCorner.tsx) — shown at that seat's home on the board instead of
   // center-screen, keyed by seatId so more than one can be up at once.
-  const [homeReactions, setHomeReactions] = useState<Record<string, Reaction>>({});
+  const [homeReactions, setHomeReactions] = useState<Record<string, DisplayReaction>>({});
   const homeReactionTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const reduceMotion = useReducedMotion();
 
@@ -380,17 +478,23 @@ export default function GameView({ room }: { room: Room }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasGame, diceArm, room.code, game?.status]);
 
-  const showReaction = (reaction: Reaction) => {
+  const showReaction = (reaction: DisplayReaction) => {
     setActiveReaction(reaction);
     if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
     reactionTimerRef.current = setTimeout(() => setActiveReaction(null), REACTION_DISPLAY_MS);
   };
   const handleReact = (reaction: Reaction) => {
-    showReaction(reaction);
-    sendReaction(room.code, reaction);
+    // Unlike an emoji/sticker, a quick-chat phrase reads as somebody
+    // actually saying something, so it's worth attributing to whichever
+    // seat this device plays as — a device that owns more than one seat
+    // (local pass-and-play) just attributes to the first, same
+    // simplification as elsewhere ("myName" isn't tracked per-seat).
+    const fromName = reaction.kind === "chat" ? (mySeats[0]?.name ?? "A player") : undefined;
+    showReaction(fromName ? { ...reaction, fromName } : reaction);
+    sendReaction(room.code, reaction, undefined, fromName);
   };
 
-  const showHomeReaction = (seatId: string, reaction: Reaction) => {
+  const showHomeReaction = (seatId: string, reaction: DisplayReaction) => {
     setHomeReactions((prev) => ({ ...prev, [seatId]: reaction }));
     if (homeReactionTimersRef.current[seatId]) clearTimeout(homeReactionTimersRef.current[seatId]);
     homeReactionTimersRef.current[seatId] = setTimeout(() => {
@@ -401,6 +505,8 @@ export default function GameView({ room }: { room: Room }) {
       });
     }, REACTION_DISPLAY_MS);
   };
+  // Only ever called with a sticker (see PlayerCorner.tsx's own picker,
+  // which is always mode="sticker") — never quick-chat, so no fromName.
   const handleSendPlayerSticker = (seatId: string, reaction: Reaction) => {
     showHomeReaction(seatId, reaction);
     sendReaction(room.code, reaction, seatId);
@@ -419,16 +525,18 @@ export default function GameView({ room }: { room: Room }) {
   // above, so this only ever fires for reactions someone else sent (see
   // game:reaction in server.js, which relays to everyone but the sender).
   // A targetSeatId (a per-player sticker — see PlayerCorner.tsx) routes it
-  // to that seat's home instead of the usual center-screen pop.
+  // to that seat's home instead of the usual center-screen pop. `fromName`
+  // is only ever set for a quick-chat phrase (see handleReact above).
   useEffect(() => {
     const socket = getSocket();
-    const onIncoming = (payload: Reaction & { targetSeatId?: string }) => {
-      const { targetSeatId, ...reaction } = payload;
+    const onIncoming = (payload: Reaction & { targetSeatId?: string; fromName?: string }) => {
+      const { targetSeatId, fromName, ...reaction } = payload;
+      const displayed: DisplayReaction = { ...(reaction as Reaction), fromName };
       if (targetSeatId) {
-        showHomeReaction(targetSeatId, reaction as Reaction);
+        showHomeReaction(targetSeatId, displayed);
         return;
       }
-      setActiveReaction(reaction as Reaction);
+      setActiveReaction(displayed);
       if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
       reactionTimerRef.current = setTimeout(() => setActiveReaction(null), REACTION_DISPLAY_MS);
     };
@@ -471,9 +579,27 @@ export default function GameView({ room }: { room: Room }) {
     emitEndGame(room.code, room.hostSeatId!).catch(() => {});
   };
 
+  // Compact host-only private/public toggle, replacing the old
+  // SpectateSettings info card — private (default, red) hides watchers from
+  // everyone but the host; public (green) admits anyone with the link with
+  // no approval step. Only offered for a room the host created directly —
+  // a matchmaking pairing has no invite link of its own to spectate via.
+  const [spectatorSaving, setSpectatorSaving] = useState(false);
+  const handleToggleSpectatePolicy = async () => {
+    setSpectatorSaving(true);
+    try {
+      await setSpectatePolicy(room.code, room.spectatePolicy === "public" ? "private" : "public", room.hostSeatId!);
+    } catch {
+      // room:update carries the authoritative policy either way.
+    } finally {
+      setSpectatorSaving(false);
+    }
+  };
+
   const handleLeaveGame = () => {
     leaveRoom(room.code);
-    clearOwnedSeats(room.code);
+    if (isSpectator) clearSpectatorToken(room.code);
+    else clearOwnedSeats(room.code);
     resetRoomStore();
     router.push(session?.user ? "/" : "/play");
   };
@@ -505,6 +631,45 @@ export default function GameView({ room }: { room: Room }) {
       // own body (see react-hooks/set-state-in-effect).
       Promise.resolve().then(() => setPendingSplashTrigger(trigger));
     }
+  }, [game?.status]);
+
+  // Confetti + a fanfare the instant the results screen appears — the
+  // game's one biggest emotional beat (issue #18), distinct from
+  // Token.tsx's per-token "victory" cue (which fires whenever *any* seat's
+  // last token reaches home, not necessarily this device's own win).
+  // celebratedRef caps this to once per finished game, same pattern as
+  // splashEvaluatedRef above. canvas-confetti is dynamically imported so a
+  // normal (non-finished) game screen never pays for it.
+  const celebratedRef = useRef(false);
+  useEffect(() => {
+    if (game?.status !== "finished" || celebratedRef.current) return;
+    celebratedRef.current = true;
+    const won = myPlacementRank(game, mySeats.map((s) => s.id)) === 1;
+    if (!reduceMotion) {
+      import("canvas-confetti")
+        .then(({ default: confetti }) => {
+          // Everyone gets a pop for the game wrapping up; the seat(s) that
+          // actually won this device also gets two side bursts on top of
+          // it, so the winner's own screen reads as materially bigger.
+          confetti({ particleCount: won ? 130 : 70, spread: won ? 100 : 60, origin: { y: 0.6 }, scalar: won ? 1 : 0.8 });
+          if (won) {
+            confetti({ particleCount: 60, angle: 60, spread: 55, origin: { x: 0, y: 0.65 } });
+            confetti({ particleCount: 60, angle: 120, spread: 55, origin: { x: 1, y: 0.65 } });
+          }
+        })
+        .catch(() => {});
+    }
+    if (won) playVictoryFanfare();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reduceMotion/mySeats read once at fire time; only game.status should re-trigger this
+  }, [game?.status]);
+
+  // Post-game asks are staggered instead of all appearing the instant the
+  // results screen mounts (issue #27) — see SECONDARY_ASK_DELAY_MS above.
+  const [showSecondaryAsks, setShowSecondaryAsks] = useState(false);
+  useEffect(() => {
+    if (game?.status !== "finished") return;
+    const timer = setTimeout(() => setShowSecondaryAsks(true), SECONDARY_ASK_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [game?.status]);
 
   const goHome = () => router.push(session?.user ? "/" : "/play");
@@ -562,10 +727,11 @@ export default function GameView({ room }: { room: Room }) {
     // Leads the share message with the viewer's own result rather than a
     // generic pitch — they're sharing *this* game, not just the app.
     const myPlacement = winners.find((w) => mySeats.some((s) => s.id === w.seatId));
+    const isWinnerView = myPlacement?.rank === 1;
     const playerCount = game.seats.length;
     const resultLine = game.endedEarly
       ? "Just played a game of Ludo on MyLudo!"
-      : myPlacement?.rank === 1
+      : isWinnerView
         ? `I just won a ${playerCount}-player Ludo game on MyLudo! 🏆`
         : myPlacement
           ? `I just came ${myPlacement.rank === 2 ? "2nd" : "3rd"} in a ${playerCount}-player Ludo game on MyLudo!`
@@ -573,39 +739,59 @@ export default function GameView({ room }: { room: Room }) {
     const buildShareMessage = (url: string, pct: number | null) =>
       pct ? `${resultLine} Play with me — sign up and we both get ${pct}% off! ${url}` : `${resultLine} Play with me! ${url}`;
 
+    // "XP earned this game" (issue #19) — only shown for a seat this device
+    // actually controlled, using the exact same counts-as-played rule
+    // src/app/page.tsx applies when folding a finished game into lifetime
+    // totals (see computeGameXp). gameStartRef anchors elapsed playtime,
+    // same as the splash-trigger effect above.
+    const myLoser = losers.find((l) => mySeats.some((s) => s.id === l.seatId));
+    const xpEarned =
+      myPlacement || myLoser
+        ? computeGameXp({
+            isWinner: isWinnerView,
+            endedEarly: game.endedEarly,
+            playTimeHours: (Date.now() - gameStartRef.current) / 3_600_000,
+          })
+        : null;
+
     return (
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         className="flex min-h-dvh flex-col items-center justify-center gap-3 overflow-y-auto px-8 py-4 text-center"
       >
-        <div className="flex w-full max-w-xs gap-2">
-          <ShareInviteButton source="post_game" variant="button" buildMessage={buildShareMessage} />
-          <Button variant="secondary" className="flex-1" onClick={handleBackHome} disabled={checkingSplash}>
-            Back home
-          </Button>
-        </div>
-        {(showFeedbackSample || game.endedEarly) && (
-          <FeedbackPrompt context="GAME_FINISHED" gameId={room.code} />
-        )}
-        {splashOpen && pendingSplashTrigger && (
-          <DiscountSplash
-            trigger={pendingSplashTrigger}
-            isSignedIn={!!session?.user}
-            onClose={() => {
-              setSplashOpen(false);
-              goHome();
-            }}
-          />
-        )}
         <div className="flex w-full max-w-xs flex-col gap-1.5">
-          {winners.map((r) => (
-            <div key={r.seatId} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-2.5">
-              <span className="w-5 shrink-0 text-lg font-extrabold text-ink-muted">{r.rank}</span>
-              {r.color && <span className="h-7 w-7 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
-              <span className="flex-1 truncate text-left font-semibold">{r.name}</span>
-            </div>
-          ))}
+          {winners.map((r) =>
+            r.rank === 1 ? (
+              // The one visually bigger, distinct callout on this screen
+              // (issue #18) — everything else on the results list stays
+              // the same small, calm row it always was.
+              <div
+                key={r.seatId}
+                className="flex items-center gap-3 rounded-2xl border-2 border-accent-2 bg-surface p-3 shadow-lg"
+              >
+                <span className="text-2xl leading-none" aria-hidden>
+                  🏆
+                </span>
+                {r.color && (
+                  <span
+                    className="h-9 w-9 shrink-0 rounded-full ring-2 ring-accent-2 ring-offset-2 ring-offset-surface"
+                    style={{ backgroundColor: r.color.hex }}
+                  />
+                )}
+                <span className="flex-1 truncate text-left text-lg font-extrabold text-ink">{r.name}</span>
+                <span className="shrink-0 rounded-full bg-accent-2 px-2.5 py-1 text-[11px] font-extrabold text-white">
+                  WINNER
+                </span>
+              </div>
+            ) : (
+              <div key={r.seatId} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-2.5">
+                <span className="w-5 shrink-0 text-lg font-extrabold text-ink-muted">{r.rank}</span>
+                {r.color && <span className="h-7 w-7 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
+                <span className="flex-1 truncate text-left font-semibold">{r.name}</span>
+              </div>
+            )
+          )}
           {losers.map((r) => (
             <div
               key={r.seatId}
@@ -619,11 +805,50 @@ export default function GameView({ room }: { room: Room }) {
             </div>
           ))}
         </div>
+        {xpEarned !== null && <p className="text-sm font-bold text-accent-2">+{xpEarned} XP earned</p>}
+
+        {/* The primary post-game ask — sequenced first and unmistakably so
+            (issue #27): the one full-width, high-emphasis button on this
+            screen, appearing before any of the secondary asks below. */}
         {rematchError && <p className="text-sm text-accent">{rematchError}</p>}
         {isHost && (
-          <Button onClick={handleRematch} disabled={rematchLoading}>
+          <Button onClick={handleRematch} disabled={rematchLoading} className="w-full max-w-xs">
             {rematchLoading ? "Starting…" : "Play again with same players"}
           </Button>
+        )}
+        <div className="flex w-full max-w-xs gap-2">
+          <ShareInviteButton source="post_game" variant="button" buildMessage={buildShareMessage} />
+          <Button variant="secondary" className="flex-1" onClick={handleBackHome} disabled={checkingSplash}>
+            Back home
+          </Button>
+        </div>
+
+        {/* Secondary asks — deliberately held back a beat (or, for the
+            splash, gated behind an explicit "Back home" tap in
+            handleBackHome above) so they never compete with "Play again"
+            for the first instant of attention, and never stack with each
+            other: the splash fully replaces the feedback prompt rather
+            than layering over it. */}
+        {showSecondaryAsks && !splashOpen && (showFeedbackSample || game.endedEarly) && (
+          <FeedbackPrompt context="GAME_FINISHED" gameId={room.code} />
+        )}
+        {splashOpen && pendingSplashTrigger && (
+          <DiscountSplash
+            trigger={pendingSplashTrigger}
+            isSignedIn={!!session?.user}
+            onClose={() => {
+              setSplashOpen(false);
+              goHome();
+            }}
+          />
+        )}
+        {isSpectator && spectatorId && (
+          <SpectatorChat
+            roomCode={room.code}
+            spectatorId={spectatorId}
+            spectatorCount={room.spectatorCount}
+            variant="floating"
+          />
         )}
       </motion.div>
     );
@@ -637,6 +862,12 @@ export default function GameView({ room }: { room: Room }) {
   const placementForArm = (seat: Seat | undefined) => (seat ? placementFor(game, seat.id) : null);
   const suspendedForArm = (seat: Seat | undefined) =>
     !!seat && !!game.seats.find((s) => s.id === seat.id)?.suspended;
+
+  // Paused or removed-and-unclaimed seats a friend could actually join
+  // right now (see claimableSeatCount in src/game/engine.js) — passed to
+  // GameMenu so its in-game "Invite a friend" list only shows once
+  // there's really a seat to put them in (Issue #24).
+  const openSeatCount = claimableSeatCount(game);
 
   const canRoll = isMyTurn && game.diceValue == null;
   const canMove = isMyTurn && game.diceValue != null && validMoves.length > 0;
@@ -722,7 +953,9 @@ export default function GameView({ room }: { room: Room }) {
           isHost={isHost}
           hostSeatId={room.hostSeatId}
           seats={room.seats}
+          vacatedSeats={room.vacatedSeats}
           canEndGame={canEndGame}
+          openSeatCount={openSeatCount}
           onLeaveGame={handleLeaveGame}
           onManagePlayer={handleManagePlayer}
           onClose={() => setGameMenuOpen(false)}
@@ -733,7 +966,31 @@ export default function GameView({ room }: { room: Room }) {
           edges (root scrolls instead of clipping, so sticky has a scroll
           context to stick within on short viewports); the player rows sit
           as ordinary flex siblings immediately against the board instead. */}
-      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 py-2 sm:px-4">
+      {/* pt- adds env(safe-area-inset-top) on top of (not instead of) the
+          normal py-2 top padding, so a notch/status-bar cutout in a
+          full-screen PWA/TWA never sits flush against the reaction bar —
+          see the matching pb- on bottomRowRef below. */}
+      <div className="sticky top-0 z-10 relative flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] sm:px-4">
+        {/* For a spectator, the same top-right slot that would otherwise
+            just show the watching-count badge doubles as the spectator
+            chat trigger — merging the two instead of a separate floating
+            button (which used to collide with the bottom-right player
+            corner on the live board, see SpectatorChat.tsx's own history).
+            Hosts/players still just see the plain count. */}
+        {isSpectator && spectatorId ? (
+          <SpectatorChat
+            roomCode={room.code}
+            spectatorId={spectatorId}
+            spectatorCount={room.spectatorCount}
+            variant="badge"
+          />
+        ) : (
+          room.spectatorCount > 0 && (
+            <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-xs font-bold text-ink-muted sm:right-4">
+              👀 {room.spectatorCount}
+            </span>
+          )
+        )}
         <ReactionBar
           onReact={handleReact}
           onMore={() => setGameMenuOpen(true)}
@@ -741,16 +998,20 @@ export default function GameView({ room }: { room: Room }) {
           canEndGame={canEndGame}
           onEndGame={handleBarEndGame}
           onLeaveGame={handleLeaveGame}
+          showSpectatorsToggle={isHost && !room.matchmaking}
+          spectatePolicy={room.spectatePolicy}
+          spectatorSaving={spectatorSaving}
+          onToggleSpectatePolicy={handleToggleSpectatePolicy}
         />
       </div>
 
       {isHost && (
-        <div className="shrink-0 px-2 pt-2 sm:px-4">
+        <div className="shrink-0 flex flex-col gap-2 px-2 pt-2 sm:px-4">
           <IncomingJoinRequests roomCode={room.code} />
         </div>
       )}
 
-      <div ref={boardAreaRef} className="flex min-h-0 flex-1 flex-col items-center justify-center">
+      <div ref={boardAreaRef} className="relative flex min-h-0 flex-1 flex-col items-center justify-center">
         <div ref={topRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pb-2 sm:px-4">
           <PlayerCorner
             seat={seatByArm.get(0) ?? null}
@@ -801,16 +1062,7 @@ export default function GameView({ room }: { room: Room }) {
                 transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
                 className="pointer-events-none absolute inset-0 flex items-center justify-center"
               >
-                {activeReaction.kind === "emoji" ? (
-                  <span className="text-[60cqmin] leading-none drop-shadow-lg">{activeReaction.value}</span>
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={activeReaction.src}
-                    alt={activeReaction.alt}
-                    className="h-[60cqmin] w-[60cqmin] object-contain drop-shadow-lg"
-                  />
-                )}
+                <ReactionVisual reaction={activeReaction} size="center" />
               </motion.div>
             )}
             {Object.entries(homeReactions).map(([seatId, reaction]) => {
@@ -834,16 +1086,7 @@ export default function GameView({ room }: { room: Room }) {
                   // uncentered.
                   style={{ left: `${pos.left}%`, top: `${pos.top}%`, x: "-50%", y: "-50%" }}
                 >
-                  {reaction.kind === "emoji" ? (
-                    <span className="text-[32cqmin] leading-none drop-shadow-lg">{reaction.value}</span>
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={reaction.src}
-                      alt={reaction.alt}
-                      className="h-[32cqmin] w-[32cqmin] object-contain drop-shadow-lg"
-                    />
-                  )}
+                  <ReactionVisual reaction={reaction} size="home" />
                 </motion.div>
               );
             })}
@@ -861,7 +1104,15 @@ export default function GameView({ room }: { room: Room }) {
               : ""}
         </p>
 
-        <div ref={bottomRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pt-2 sm:px-4">
+        {/* pb- adds env(safe-area-inset-bottom) on top of a small floor
+              (max(), not a plain add — there's no existing bottom padding
+              here to add onto) so a home-indicator/gesture-bar cutout never
+              sits flush against this row — see the matching pt- on the
+              sticky top bar above. */}
+        <div
+          ref={bottomRowRef}
+          className="flex w-full shrink-0 items-center justify-between px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-4"
+        >
           <PlayerCorner
             seat={seatByArm.get(3) ?? null}
             isTurn={seatByArm.get(3)?.id === currentSeat?.id}
@@ -926,6 +1177,12 @@ function PlayerActionsModal({
   const suspended = !!gameSeat?.suspended;
   const isHostSeat = seatId === room.hostSeatId;
   const color = gameSeat ? colorForArm(gameSeat.armIndex) : null;
+  // A seat mid-disconnect-grace (see handleSocketDisconnect in rooms.js) is
+  // already being auto-played like a bot, but its seat object is still
+  // here (not yet pruned) — the host can convert it to a real bot outright
+  // rather than waiting the grace period out (see midGameAddBot).
+  const disconnectedVacant = !seat.connected && !suspended && !removed && !won;
+  const canAddBot = !seat.bot && (suspended || removed || disconnectedVacant);
 
   const handleEndGame = async () => {
     setEndGameLoading(true);
@@ -983,7 +1240,19 @@ function PlayerActionsModal({
         ) : (
           <>
             {won && <p className="text-sm text-ink-muted">Already finished — nothing to manage.</p>}
-            {removed && <p className="text-sm text-ink-muted">Removed from this game.</p>}
+            {removed && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm text-ink-muted">Removed from this game.</p>
+                {canAddBot && (
+                  <button
+                    onClick={() => addBotToSeat(room.code, seatId, room.hostSeatId!).catch(() => {})}
+                    className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+                  >
+                    Add bot
+                  </button>
+                )}
+              </div>
+            )}
             {!won && !removed && (
               <div className="flex flex-wrap gap-2">
                 <button
@@ -992,6 +1261,14 @@ function PlayerActionsModal({
                 >
                   {suspended ? "Resume" : "Pause"}
                 </button>
+                {canAddBot && (
+                  <button
+                    onClick={() => addBotToSeat(room.code, seatId, room.hostSeatId!).catch(() => {})}
+                    className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
+                  >
+                    Add bot
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     removeSeat(room.code, seatId, room.hostSeatId!).catch(() => {});
@@ -999,9 +1276,9 @@ function PlayerActionsModal({
                   }}
                   className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-accent"
                 >
-                  Remove
+                  {seat.bot ? "Remove bot" : "Remove"}
                 </button>
-                {seat.connected && !suspended && (
+                {seat.connected && !suspended && !seat.bot && (
                   <button
                     onClick={() => transferHost(room.code, seatId, room.hostSeatId!).catch(() => {})}
                     className="rounded-full border border-line px-3 py-1.5 text-sm font-semibold text-ink-muted"

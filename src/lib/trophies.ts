@@ -37,6 +37,34 @@ export function computeXp({
   return gamesWon * 50 + gamesPlayed * 10 + Math.round(playTimeHours * 5);
 }
 
+// XP contributed by a single just-finished game — used on the results
+// screen (see GameView.tsx) to show "XP earned this game" without waiting
+// for a fresh page load's totals. Mirrors the exact counting rule
+// src/app/page.tsx applies when folding a GamePlayer row into the
+// lifetime totals fed to computeXp: playtime always counts, but a game
+// that ended early only counts toward gamesWon/gamesPlayed if this seat
+// won it anyway (an early loss doesn't count as "played"). Because
+// computeXp is linear, calling it with just this game's own numbers gives
+// exactly this game's own share of the total (modulo the total's single
+// final Math.round, which this can't reproduce exactly — an acceptable
+// approximation for an in-the-moment callout).
+export function computeGameXp({
+  isWinner,
+  endedEarly,
+  playTimeHours,
+}: {
+  isWinner: boolean;
+  endedEarly: boolean;
+  playTimeHours: number;
+}): number {
+  const countsAsPlayed = isWinner || !endedEarly;
+  return computeXp({
+    gamesWon: isWinner ? 1 : 0,
+    gamesPlayed: countsAsPlayed ? 1 : 0,
+    playTimeHours,
+  });
+}
+
 export function getTrophyTier(xp: number): TrophyTier {
   let tier = TROPHY_TIERS[0];
   for (const t of TROPHY_TIERS) {

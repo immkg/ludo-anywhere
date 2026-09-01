@@ -27,6 +27,11 @@ import {
   guestKeyFor,
   isGuestKey,
   allRooms,
+  midGameAddBot,
+  addSpectator,
+  reconnectSpectator,
+  setSpectatePolicy,
+  addSpectatorChatMessage,
 } from "./src/server/rooms.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
 import {
@@ -38,6 +43,7 @@ import {
   resetInactivity,
   advanceInactivity,
 } from "./src/game/engine.js";
+import { isQuickChatPhrase } from "./src/game/quickChat.js";
 import { saveGameHistory } from "./src/server/history.js";
 import { getAuthenticatedUserId } from "./src/server/auth.js";
 import { resolveSeatProfiles, resolveGuestSeats } from "./src/server/profiles.js";
@@ -225,6 +231,11 @@ app.prepare().then(() => {
   }
 
   const userChannel = (userId) => `user:${userId}`;
+  // A room's spectators-only socket.io room — used to scope the spectator
+  // chat channel (spectator:chat:send/spectator:chat:message below) so it
+  // never reaches players or the host, keeping it structurally separate
+  // from the shared `room.code` channel everyone else broadcasts on.
+  const spectatorChannel = (roomCode) => `${roomCode}:spectators`;
 
   // Populated for the duration of each socket's connection-setup IIFE below
   // (auth lookup + userChannel join). A push that targets a specific user's
@@ -513,6 +524,158 @@ app.prepare().then(() => {
         };
         logEvent("player_joined", seatUserId, joinProps);
         trackPosthog("player_joined", joinProps, seatUserId);
+      })
+    );
+
+    // Joins as a spectator — no seat, never affects turn order/placements.
+    // Reconnects in place if this device/account already watched (same
+    // token-or-userId matching as room:join's reconnect branch); otherwise
+    // either seats them immediately (a "public" room) or files a
+    // host-approval request exactly like room:join's own pendingRequests,
+    // just in a separate map so a "join as a player" and a "watch" request
+    // from the same person can't collide (see pendingSpectateRequests in
+    // rooms.js).
+    socket.on(
+      "room:watch",
+      withAck(async ({ roomCode, deviceId, name, knownTokens }, ack) => {
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+
+        const reconnectUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const reconnected = reconnectSpectator(room, knownTokens || [], socket.id, reconnectUserId);
+        if (reconnected) {
+          socket.join(room.code);
+          socket.join(spectatorChannel(room.code));
+          broadcastRoom(room);
+          if (room.game) socket.emit("game:update", serializeGame(room));
+          socket.emit("spectator:chat:history", { messages: room.spectatorChat });
+          return ack?.({ roomCode: room.code, spectator: { id: reconnected.id, token: reconnected.token } });
+        }
+
+        const joinerKey = reconnectUserId ?? (deviceId ? guestKeyFor(deviceId) : null);
+        if (!joinerKey) return ack?.({ error: "Could not identify you to watch this room" });
+        const alreadySeated = reconnectUserId
+          ? room.seats.some((s) => s.userId === reconnectUserId)
+          : room.seats.some((s) => !s.userId && s.deviceId === deviceId);
+        if (alreadySeated) return ack?.({ error: "You're already playing in this room" });
+
+        const displayName = typeof name === "string" && name.trim() ? name.trim().slice(0, 20) : "A guest";
+
+        if (room.spectatePolicy !== "private") {
+          const { spectator } = addSpectator(room, {
+            name: displayName,
+            userId: reconnectUserId ?? null,
+            deviceId,
+            socketId: socket.id,
+          });
+          socket.join(room.code);
+          socket.join(spectatorChannel(room.code));
+          broadcastRoom(room);
+          if (room.game) socket.emit("game:update", serializeGame(room));
+          socket.emit("spectator:chat:history", { messages: room.spectatorChat });
+          return ack?.({ roomCode: room.code, spectator: { id: spectator.id, token: spectator.token } });
+        }
+
+        room.pendingSpectateRequests.set(joinerKey, { name: displayName });
+        // A signed-in socket already joined its user channel on connect
+        // (see io.on("connection") above) — a guest never did, so it has
+        // to join its synthetic one now to receive the eventual approval.
+        if (!reconnectUserId) socket.join(userChannel(joinerKey));
+        const hostId = hostUserId(room);
+        if (hostId) {
+          io.to(userChannel(hostId)).emit("room:watchRequest:incoming", {
+            roomCode: room.code,
+            fromUserId: joinerKey,
+            fromName: displayName,
+          });
+        }
+        ack?.({ pending: true, roomCode: room.code });
+      })
+    );
+
+    // Fire-and-forget, same pattern as room:joinRequest:decline.
+    socket.on("room:watchRequest:decline", ({ roomCode, toUserId }) => {
+      getRoom(roomCode)?.pendingSpectateRequests.delete(toUserId);
+      io.to(userChannel(toUserId)).emit("room:watchRequest:declined", { roomCode });
+    });
+
+    socket.on(
+      "room:watchRequest:approve",
+      withAck(async ({ roomCode, toUserId }, ack) => {
+        const approverUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        const hostSeat = room.seats.find((s) => s.id === room.hostSeatId);
+        if (!approverUserId || hostSeat?.userId !== approverUserId) {
+          return ack?.({ error: "Only the host can approve requests" });
+        }
+
+        const pending = room.pendingSpectateRequests.get(toUserId);
+        room.pendingSpectateRequests.delete(toUserId);
+        if (!pending) return ack?.({ error: "That request is no longer pending" });
+
+        // toUserId may be a guest's synthetic device key (see room:join) —
+        // never let that leak into a spectator's real `userId` field.
+        const seatUserId = isGuestKey(toUserId) ? null : toUserId;
+        const { spectator } = addSpectator(room, {
+          name: pending.name,
+          userId: seatUserId,
+          deviceId: null,
+          socketId: null,
+        });
+
+        broadcastRoom(room);
+        io.to(userChannel(toUserId)).emit("room:watchApproved", {
+          roomCode: room.code,
+          spectator: { id: spectator.id, token: spectator.token },
+        });
+        ack?.({});
+      })
+    );
+
+    // Host-only: toggles whether watching needs approval ("private") or is
+    // open to anyone with the room's link ("public") — see
+    // setSpectatePolicy in rooms.js.
+    socket.on(
+      "room:setSpectatePolicy",
+      withAck(async ({ roomCode, policy, callerSeatId }, ack) => {
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!room.hostSeatId || room.hostSeatId !== callerSeatId) {
+          return ack?.({ error: "Only the host can change who can watch" });
+        }
+
+        const { error } = setSpectatePolicy(room, policy);
+        if (error) return ack?.({ error });
+
+        broadcastRoom(room);
+        ack?.({});
+      })
+    );
+
+    // Free-text spectator-only chat — a side channel for spectators to talk
+    // among themselves without cluttering the players' own reaction/quick-
+    // chat stream (game:reaction). Deliberately scoped to spectatorChannel,
+    // not room.code, so it never reaches players or the host — keeping a
+    // private room's watchers exactly as unnamed to the host here as
+    // everywhere else (see setSpectatePolicy/serializeRoom's spectatorCount
+    // comments). The sender is identified by their own socket (an actual
+    // room.spectators entry), never trusted from the payload, so this can't
+    // be spoofed as a different watcher. Validation/rate-limiting is
+    // addSpectatorChatMessage's job (see rooms.js).
+    socket.on(
+      "spectator:chat:send",
+      withAck(({ roomCode, text }, ack) => {
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        const spectator = room.spectators.find((s) => s.socketId === socket.id);
+        if (!spectator) return ack?.({ error: "Not watching this room" });
+
+        const { error, message } = addSpectatorChatMessage(room, spectator.id, text);
+        if (error) return ack?.({ error });
+
+        io.to(spectatorChannel(room.code)).emit("spectator:chat:message", message);
+        ack?.({});
       })
     );
 
@@ -819,12 +982,15 @@ app.prepare().then(() => {
     // Ephemeral emoji/sticker reaction — fire-and-forget, no game-state
     // change, just relayed to everyone else currently viewing this room.
     // Payload shape is validated (not just trusted) since a hand-crafted
-    // client could otherwise broadcast arbitrary strings/paths to others.
+    // client could otherwise broadcast arbitrary strings/paths to others —
+    // in particular, a "chat" reaction is only ever one of the fixed
+    // QUICK_CHAT_PHRASES, never free text (see src/game/quickChat.js); a
+    // hand-crafted client can't smuggle anything else through this event.
     // An optional targetSeatId (from a per-player sticker button — see
     // PlayerCorner.tsx) pins it to that seat's home on the board instead of
     // the usual center-screen pop; only relayed if it actually names a seat
     // still in this room.
-    socket.on("game:reaction", ({ roomCode, reaction, targetSeatId } = {}) => {
+    socket.on("game:reaction", ({ roomCode, reaction, targetSeatId, fromName } = {}) => {
       const room = getRoom(roomCode);
       if (!room || !socket.rooms.has(roomCode)) return;
       const target =
@@ -841,6 +1007,13 @@ app.prepare().then(() => {
           src: reaction.src,
           alt: typeof reaction.alt === "string" ? reaction.alt.slice(0, 60) : "",
           targetSeatId: target,
+        });
+      } else if (reaction?.kind === "chat" && typeof reaction.text === "string" && isQuickChatPhrase(reaction.text)) {
+        socket.to(roomCode).emit("game:reaction", {
+          kind: "chat",
+          text: reaction.text,
+          targetSeatId: target,
+          fromName: typeof fromName === "string" ? fromName.slice(0, 20) : "A player",
         });
       }
     });
@@ -873,6 +1046,27 @@ app.prepare().then(() => {
         if (error) return ack?.({ error });
 
         broadcastRoom(room);
+        ack?.({});
+      })
+    );
+
+    // Host-only, mid-game: fills a paused/removed/disconnected/fully-vacated
+    // seat with a bot (see midGameAddBot in rooms.js) — pulling it back out
+    // later is just the existing room:removeSeat, no separate event needed.
+    socket.on(
+      "room:addBot",
+      withAck(async ({ roomCode, seatId, callerSeatId }, ack) => {
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        if (!room.hostSeatId || room.hostSeatId !== callerSeatId) {
+          return ack?.({ error: "Only the host can add a bot" });
+        }
+
+        const { error } = midGameAddBot(room, seatId);
+        if (error) return ack?.({ error });
+
+        broadcastRoom(room);
+        broadcastGame(room);
         ack?.({});
       })
     );
@@ -1212,15 +1406,17 @@ app.prepare().then(() => {
     socket.on("disconnecting", () => {
       for (const roomCode of socket.rooms) {
         const room = getRoom(roomCode);
-        const seat = room && findSeatBySocket(room, socket.id);
-        if (!room || !seat) continue;
+        if (!room) continue;
+        const seat = findSeatBySocket(room, socket.id);
+        const isSpectator = room.spectators.some((s) => s.socketId === socket.id);
+        if (!seat && !isSpectator) continue;
         const wasLobby = room.status === "lobby";
         handleSocketDisconnect(room, socket.id, () => {
           broadcastRoom(room);
           broadcastGame(room);
           finishRoomIfNeeded(room);
         });
-        if (wasLobby && seat.userId) {
+        if (wasLobby && seat?.userId) {
           clearUserRoom(seat.userId, room.code);
           broadcastPresence(seat.userId).catch(logPresenceError("disconnect presence update"));
         }

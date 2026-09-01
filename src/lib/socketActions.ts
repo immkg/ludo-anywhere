@@ -1,6 +1,6 @@
 import { getSocket } from "@/lib/socket";
 import { getDeviceId } from "@/lib/identity";
-import type { OwnedSeat } from "@/types/room";
+import type { OwnedSeat, OwnedSpectator, SpectatePolicy } from "@/types/room";
 import type { Reaction } from "@/components/game/ReactionPicker";
 
 export type SeatRequest = { profileId: string };
@@ -11,7 +11,8 @@ export type ClaimableSeat = { id: string; name: string };
 // `pending` means the join needs host approval — see room:join in
 // server.js. `seats` is absent until room:joinApproved arrives later.
 // `midGame` means the room's already playing — nothing was joined; pick
-// one of `claimableSeats` and call claimSeat() instead.
+// one of `claimableSeats` and call claimSeat() instead. `spectator` is only
+// ever set by room:watch (see watchRoom below).
 type Ack = {
   error?: string;
   roomCode?: string;
@@ -19,6 +20,7 @@ type Ack = {
   pending?: boolean;
   midGame?: boolean;
   claimableSeats?: ClaimableSeat[];
+  spectator?: OwnedSpectator;
 };
 
 const ACK_TIMEOUT_MS = 12_000;
@@ -123,6 +125,41 @@ export function claimSeat(roomCode: string, seatId: string, profileId: string) {
   return emitWithAck("room:claimSeat", { roomCode, seatId, profileId });
 }
 
+// Host-only, mid-game: fills a paused/removed/disconnected/fully-vacated
+// seat with a bot (see room:addBot in server.js) — `seatId` can be one of
+// `Room.vacatedSeats`' ids as well as a normal seat's. Pulling the bot back
+// out later is just removeSeat() above, same as removing any other seat.
+export function addBotToSeat(roomCode: string, seatId: string, hostSeatId: string) {
+  return emitWithAck("room:addBot", { roomCode, seatId, callerSeatId: hostSeatId });
+}
+
+// Joins as a spectator — no seat, just a live viewer. Resolves once this
+// device is either watching outright (`spectator` set, a "public" room or a
+// successful reconnect) or waiting on host approval (`pending`, a "private"
+// room — see room:watchRequest:incoming/room:watchApproved).
+export function watchRoom(roomCode: string, name: string, knownTokens: string[] = []) {
+  return emitWithAck("room:watch", {
+    roomCode: roomCode.toUpperCase(),
+    name,
+    knownTokens,
+    deviceId: getDeviceId(),
+  });
+}
+
+export function approveWatchRequest(roomCode: string, toUserId: string) {
+  return emitWithAck("room:watchRequest:approve", { roomCode, toUserId });
+}
+
+export function declineWatchRequest(roomCode: string, toUserId: string) {
+  getSocket().emit("room:watchRequest:decline", { roomCode, toUserId });
+}
+
+// Host-only — same seatId-based proof of host-ness as fillBotSeats/
+// suspendSeat (a guest host has no account for a cookie-based check).
+export function setSpectatePolicy(roomCode: string, policy: SpectatePolicy, hostSeatId: string) {
+  return emitWithAck("room:setSpectatePolicy", { roomCode, policy, callerSeatId: hostSeatId });
+}
+
 // Resolves to the new room's code once it's actually started — the seats
 // themselves arrive separately via the room:rematchReady push (see
 // useSocketConnection), same as an approved join.
@@ -186,7 +223,18 @@ export function refreshPresence(): Promise<{ presence: Record<string, { online: 
 // (GameView.tsx), this just relays it to everyone else in the room.
 // `targetSeatId` (from a per-player sticker button — see PlayerCorner.tsx)
 // pins the reaction to that seat's home on the board instead of the usual
-// center-screen pop.
-export function sendReaction(roomCode: string, reaction: Reaction, targetSeatId?: string) {
-  getSocket().emit("game:reaction", { roomCode, reaction, targetSeatId });
+// center-screen pop. `fromName` is only ever set for a quick-chat phrase
+// (see handleReact in GameView.tsx) — an emoji/sticker reaction stays
+// anonymous, same as before.
+export function sendReaction(roomCode: string, reaction: Reaction, targetSeatId?: string, fromName?: string) {
+  getSocket().emit("game:reaction", { roomCode, reaction, targetSeatId, fromName });
+}
+
+// Free-text spectator-only chat (see spectator:chat:send in server.js) —
+// deliberately not sendReaction/game:reaction, so it never lands in the
+// players' own reaction/quick-chat stream. Rejects (via emitWithAck) with
+// the server's validation error — too long, empty, or too fast — so
+// SpectatorChat.tsx can show it inline instead of silently dropping it.
+export function sendSpectatorChat(roomCode: string, text: string) {
+  return emitWithAck("spectator:chat:send", { roomCode, text });
 }

@@ -11,6 +11,18 @@ import {
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
 const DISCONNECT_GRACE_MS = 2 * 60 * 1000;
 
+// Spectator chat: a free-text side channel scoped to spectators only (see
+// spectator:chat:send in server.js), deliberately not the players' own
+// quick-chat/reaction stream (game:reaction) — a much smaller, lower-risk
+// audience than the full player base, so this just needs basic sanity
+// limits, not a moderation system. SPECTATOR_CHAT_BACKLOG bounds
+// room.spectatorChat itself so a long-running room's history can't grow
+// unboundedly; a spectator only ever sees this many past messages on
+// joining (see room:watch's spectator:chat:history push in server.js).
+export const SPECTATOR_CHAT_MAX_LENGTH = 240;
+const SPECTATOR_CHAT_BACKLOG = 50;
+const SPECTATOR_CHAT_MIN_INTERVAL_MS = 1200;
+
 // How far along a host's early end (see midGameEndGame) needs to be before
 // it declares a real winner/loser from the current board instead of
 // leaving it unresolved — both must hold, not just one, so neither a
@@ -88,6 +100,31 @@ export function createRoom({ maxPlayers }) {
     // join skips the approval step too, since the host already vouched for
     // them by name (see server.js's room:join handler).
     invitedUserIds: new Set(),
+    // Whether a viewer with no seat can watch without the host's say-so —
+    // "private" (default) needs host approval per watcher and keeps their
+    // identity out of anything broadcast to the room (see addSpectator);
+    // "public" admits anyone who asks and exposes a live count (see
+    // serializeRoom's spectatorCount) but never the individual watchers'
+    // names to non-host clients. See room:setSpectatePolicy in server.js.
+    spectatePolicy: "private",
+    // Joined-but-unseated viewers — never affects turn order/placements
+    // (see src/game/engine.js, which has no concept of these at all), just
+    // a live list the host/UI can count. Reconnected by token/userId the
+    // same shape as a seat (see reconnectSpectator), but with no
+    // disconnect-grace-period pruning mid-game — there's no game state at
+    // stake, so a disconnected one is just marked, not pruned (see
+    // handleSocketDisconnect).
+    spectators: [],
+    // Same shape/purpose as pendingRequests above, just for "watch" asks
+    // instead of "seat" asks — kept separate so the same person can have
+    // one of each pending at once without colliding (see room:watch in
+    // server.js).
+    pendingSpectateRequests: new Map(),
+    // Bounded backlog for the spectator-only chat channel (see
+    // addSpectatorChatMessage below) — a spectator who joins mid-
+    // conversation gets this handed to them once (spectator:chat:history in
+    // server.js), then just listens for new ones like everyone else.
+    spectatorChat: [],
   };
   rooms.set(code, room);
   return room;
@@ -175,13 +212,23 @@ export function addSeats(room, requests, { socketId, deviceId, userId, bot } = {
   return { room, seats: newSeats };
 }
 
-// Host-only, lobby-only: fills every remaining open seat with a bot,
-// numbered after whatever bots (if any) are already seated so a second fill
-// (e.g. after removing one) doesn't repeat a name. A bot seat has no
-// deviceId/profileId/userId/socketId behind it — it's never reconnected to,
-// never charged (see checkGameStart, which only charges seats with a
-// userId), and plays itself server-side once it's its turn (see
-// scheduleBotTurn in server.js).
+// Shared by fillWithBots (lobby, possibly several at once) and
+// midGameAddBot (mid-game, always one) — numbered after whatever bots (if
+// any) are already seated so a second fill (e.g. after removing one)
+// doesn't repeat a name.
+function nextBotNumber(room) {
+  const existingBotNumbers = room.seats
+    .filter((s) => s.bot)
+    .map((s) => Number(s.name.replace("Bot ", "")))
+    .filter((n) => Number.isFinite(n));
+  return existingBotNumbers.length > 0 ? Math.max(...existingBotNumbers) + 1 : 1;
+}
+
+// Host-only, lobby-only: fills every remaining open seat with a bot. A bot
+// seat has no deviceId/profileId/userId/socketId behind it — it's never
+// reconnected to, never charged (see checkGameStart, which only charges
+// seats with a userId), and plays itself server-side once it's its turn
+// (see scheduleBotTurn in server.js).
 export function fillWithBots(room) {
   if (!room) return { error: "Room not found" };
   if (room.status !== "lobby") return { error: "Game already started" };
@@ -189,17 +236,12 @@ export function fillWithBots(room) {
   const openSlots = room.maxPlayers - room.seats.length;
   if (openSlots <= 0) return { error: "Room is full" };
 
-  const existingBotNumbers = room.seats
-    .filter((s) => s.bot)
-    .map((s) => Number(s.name.replace("Bot ", "")))
-    .filter((n) => Number.isFinite(n));
-  let nextBotNumber = existingBotNumbers.length > 0 ? Math.max(...existingBotNumbers) + 1 : 1;
-
+  const startingNumber = nextBotNumber(room);
   const startIndex = room.seats.length;
   const newSeats = Array.from({ length: openSlots }, (_, i) => ({
     id: randomToken(),
     token: randomToken(),
-    name: `Bot ${nextBotNumber + i}`,
+    name: `Bot ${startingNumber + i}`,
     armIndex: armForSeatIndex(startIndex + i, room.maxPlayers),
     deviceId: null,
     profileId: null,
@@ -351,6 +393,90 @@ export function midGameRemoveSeat(room, seatId) {
   return { room };
 }
 
+// Mid-game seats with no living owner at all: their game.seats entry
+// survives (finished, never placed) but the seat itself already dropped out
+// of room.seats via handleSocketDisconnect's grace-period prune — the arm
+// just sits empty on the board with nothing left for the usual
+// pause/remove/claim UI (which all key off room.seats) to target. Exposed
+// on serializeRoom so the host can still fill one with a bot (see
+// midGameAddBot).
+export function vacatedSeats(room) {
+  if (!room?.game) return [];
+  const seatedIds = new Set(room.seats.map((s) => s.id));
+  return room.game.seats
+    .filter((s) => s.finished && !room.game.placements.includes(s.id) && !seatedIds.has(s.id))
+    .map((s) => ({ id: s.id, armIndex: s.armIndex }));
+}
+
+// Host-only, mid-game: fills a currently-unoccupied seat with a bot — one
+// that's paused, host-removed-and-unclaimed, still mid-disconnect-grace
+// (connected: false, not yet pruned), or fully vacated (see vacatedSeats
+// above). Reuses reactivateSeat (src/game/engine.js) the same way
+// claimSeat/resumeSeat do — bot-filling isn't a new resolution kind, just a
+// new *occupant* for an already-supported one, so turn order/whose-turn
+// logic there needs no changes. Pulling the bot back out later is just the
+// existing room:removeSeat/midGameRemoveSeat path (see server.js) — no
+// different from removing a human seat — which leaves the seat claimable
+// again for a human via claimSeat (see room:claimSeat), same as any other
+// removed seat.
+export function midGameAddBot(room, seatId) {
+  if (!room?.game || room.status !== "playing") return { error: "Game not in progress" };
+
+  const seat = room.seats.find((s) => s.id === seatId);
+  const gameSeat = room.game.seats.find((s) => s.id === seatId);
+
+  if (seat) {
+    if (!gameSeat) return { error: "Player not found" };
+    const removedUnclaimed = gameSeat.finished && !room.game.placements.includes(seatId);
+    // A connected, still-in-play seat isn't up for grabs — the host has to
+    // pause or remove it first (see midGameSuspendSeat/midGameRemoveSeat),
+    // same as claimableSeats requires for a human to take it over.
+    const vacant = gameSeat.suspended || removedUnclaimed || (!seat.connected && !gameSeat.finished);
+    if (!vacant) return { error: "That seat is occupied" };
+
+    // The seat's identity is being replaced by a bot — a pending
+    // disconnect-grace timer for it must not fire later and prune what is
+    // now a bot seat out from under it (see handleSocketDisconnect).
+    clearDisconnectTimer(room, seatId);
+    Object.assign(seat, {
+      name: `Bot ${nextBotNumber(room)}`,
+      token: randomToken(),
+      deviceId: null,
+      profileId: null,
+      userId: null,
+      socketId: null,
+      connected: true,
+      bot: true,
+      simulated: false,
+    });
+    room.game = reactivateSeat(room.game, seatId);
+    return { room, seat };
+  }
+
+  // Not in room.seats at all — fully vacated. Reconstruct a seat around the
+  // same id so reactivateSeat's change actually attaches to something real
+  // again (see vacatedSeats above).
+  if (!gameSeat || !gameSeat.finished || room.game.placements.includes(seatId)) {
+    return { error: "Seat not found" };
+  }
+
+  const newSeat = {
+    id: seatId,
+    token: randomToken(),
+    name: `Bot ${nextBotNumber(room)}`,
+    armIndex: gameSeat.armIndex,
+    deviceId: null,
+    profileId: null,
+    userId: null,
+    socketId: null,
+    connected: true,
+    bot: true,
+  };
+  room.seats.push(newSeat);
+  room.game = reactivateSeat(room.game, seatId);
+  return { room, seat: newSeat };
+}
+
 // Host-only: stops the game outright — see engine.js's endGame. Unlike
 // midGameRemoveSeat, this doesn't require narrowing down to one seat
 // first; the host can call it any time mid-game. Once the room has been
@@ -401,6 +527,9 @@ export function claimableSeats(room) {
 // place instead of appending one, and reactivates the underlying game
 // seat so the new occupant actually gets turns. A fresh reconnect token
 // is issued since this is a new occupant, not the seat's original owner.
+// Also explicitly clears bot/simulated — a claimable seat can now be a bot
+// mid-game hosted itself (see midGameAddBot), and without this a human who
+// claims it back would silently stay flagged as a bot forever.
 export function claimSeat(room, seatId, { name, profileId, userId, socketId, deviceId }) {
   if (!room?.game) return { error: "Game not in progress" };
   const seat = room.seats.find((s) => s.id === seatId);
@@ -417,9 +546,87 @@ export function claimSeat(room, seatId, { name, profileId, userId, socketId, dev
     deviceId,
     connected: true,
     token: randomToken(),
+    bot: false,
+    simulated: false,
   });
   room.game = reactivateSeat(room.game, seatId);
   return { room, seat };
+}
+
+// Spectators: a joined-but-unseated viewer (see room:watch in server.js).
+// Reconnects in place rather than duplicating if this same account/device
+// is already watching (e.g. a second tab, or the approval push landing
+// after the requester's own client already sped ahead) — the same
+// one-identity-one-slot rule addSeats enforces for seats.
+export function addSpectator(room, { name, userId, deviceId, socketId }) {
+  if (!room) return { error: "Room not found" };
+  const existing = room.spectators.find((s) => (userId ? s.userId === userId : deviceId && s.deviceId === deviceId));
+  if (existing) {
+    Object.assign(existing, { socketId, connected: true });
+    return { room, spectator: existing };
+  }
+
+  const spectator = {
+    id: randomToken(),
+    token: randomToken(),
+    name: (name || "A guest").slice(0, 20),
+    userId: userId || null,
+    deviceId: deviceId || null,
+    socketId,
+    connected: true,
+  };
+  room.spectators.push(spectator);
+  return { room, spectator };
+}
+
+// Reattaches a previously-known spectator to a new socket — same
+// token-or-userId matching as reconnectSeats, just against room.spectators
+// instead of room.seats. Returns null (not an object) when nothing
+// matches, since there's no seat-shaped error path a caller needs here.
+export function reconnectSpectator(room, tokens, socketId, userId) {
+  if (!room) return null;
+  const spectator = room.spectators.find((s) => tokens.includes(s.token) || (userId && s.userId === userId));
+  if (!spectator) return null;
+  spectator.socketId = socketId;
+  spectator.connected = true;
+  return spectator;
+}
+
+export function setSpectatePolicy(room, policy) {
+  if (!room) return { error: "Room not found" };
+  if (policy !== "private" && policy !== "public") return { error: "Invalid setting" };
+  room.spectatePolicy = policy;
+  return { room };
+}
+
+// Validates and appends one spectator chat message — see
+// spectator:chat:send in server.js. `spectatorId` must name a real entry in
+// room.spectators (not just any connected socket) so a message is always
+// attributable to a known watcher. Basic sanity limits only: trimmed,
+// non-empty, capped at SPECTATOR_CHAT_MAX_LENGTH, and a light per-spectator
+// rate limit (SPECTATOR_CHAT_MIN_INTERVAL_MS) tracked via the spectator's
+// own lastChatAt — this is a free-text channel for a small, low-risk
+// audience, not a moderation system. `now` is only a parameter so tests can
+// pass a fixed clock instead of racing Date.now().
+export function addSpectatorChatMessage(room, spectatorId, rawText, now = Date.now()) {
+  if (!room) return { error: "Room not found" };
+  const spectator = room.spectators.find((s) => s.id === spectatorId);
+  if (!spectator) return { error: "Not watching this room" };
+
+  const text = typeof rawText === "string" ? rawText.trim() : "";
+  if (!text) return { error: "Message can't be empty" };
+  if (text.length > SPECTATOR_CHAT_MAX_LENGTH) {
+    return { error: `Message is too long (max ${SPECTATOR_CHAT_MAX_LENGTH} characters)` };
+  }
+  if (spectator.lastChatAt != null && now - spectator.lastChatAt < SPECTATOR_CHAT_MIN_INTERVAL_MS) {
+    return { error: "You're sending messages too fast" };
+  }
+  spectator.lastChatAt = now;
+
+  const message = { id: randomToken(), fromId: spectator.id, fromName: spectator.name, text, ts: now };
+  room.spectatorChat.push(message);
+  if (room.spectatorChat.length > SPECTATOR_CHAT_BACKLOG) room.spectatorChat.shift();
+  return { room, message };
 }
 
 export function findSeatBySocket(room, socketId) {
@@ -438,17 +645,40 @@ function clearDisconnectTimer(room, seatId) {
 // seat is dropped immediately (freeing the slot); mid-game it's kept, marked
 // disconnected, and pruned after a grace period so a refresh/reconnect can
 // resume the seat without losing tokens.
+//
+// A spectating socket is handled here too, with the same lobby-vs-mid-game
+// split as a seat (dropped outright in the lobby, just marked disconnected
+// mid-game) — but never pruned mid-game the way a seat eventually is: a
+// spectator holds no game state, so there's nothing at stake in leaving one
+// around disconnected indefinitely (it stops counting toward
+// serializeRoom's spectatorCount, and can reconnect by token/userId later —
+// see reconnectSpectator).
 export function handleSocketDisconnect(room, socketId, onChange) {
   if (!room) return;
+  const affectedSpectators = room.spectators.filter((s) => s.socketId === socketId);
+  if (affectedSpectators.length > 0) {
+    if (room.status === "lobby") {
+      room.spectators = room.spectators.filter((s) => s.socketId !== socketId);
+    } else {
+      affectedSpectators.forEach((s) => {
+        s.connected = false;
+        s.socketId = null;
+      });
+    }
+  }
+
   const affected = room.seats.filter((s) => s.socketId === socketId);
-  if (affected.length === 0) return;
+  if (affected.length === 0) {
+    if (affectedSpectators.length > 0) onChange();
+    return;
+  }
 
   if (room.status === "lobby") {
     room.seats = room.seats.filter((s) => s.socketId !== socketId);
     if (room.hostSeatId && !room.seats.find((s) => s.id === room.hostSeatId)) {
       room.hostSeatId = room.seats[0]?.id ?? null;
     }
-    if (room.seats.length === 0) rooms.delete(room.code);
+    if (room.seats.length === 0 && room.spectators.length === 0) rooms.delete(room.code);
     onChange();
     return;
   }
@@ -477,7 +707,9 @@ export function handleSocketDisconnect(room, socketId, onChange) {
     const timer = setTimeout(() => {
       room.seats = room.seats.filter((s) => s.id !== seat.id);
       room.disconnectTimers.delete(seat.id);
-      if (room.seats.every((s) => !s.connected)) rooms.delete(room.code);
+      if (room.seats.every((s) => !s.connected) && room.spectators.every((s) => !s.connected)) {
+        rooms.delete(room.code);
+      }
       // The seat is gone from room.seats now, but room.game doesn't know
       // that — if it's still their turn, nothing could ever resolve it
       // again (the seat lookup in currentAutoTarget would just keep
@@ -529,6 +761,16 @@ export function serializeRoom(room) {
     status: room.status,
     sponsored: room.sponsored,
     matchmaking: !!room.matchmaking,
+    // "private"/"public" (see setSpectatePolicy) — never who's actually
+    // watching, just the live count, so a private room's watchers stay
+    // anonymous to everyone but the host (who sees a name only transiently,
+    // at approval time — see room:watchRequest:incoming in server.js).
+    spectatePolicy: room.spectatePolicy,
+    spectatorCount: room.spectators.filter((s) => s.connected).length,
+    // Mid-game seats with no seat object left at all (see vacatedSeats) —
+    // the host's only way to know an arm is fillable with a bot, since
+    // there's no seat row anywhere else in this payload to show it.
+    vacatedSeats: vacatedSeats(room),
     seats: room.seats.map((s) => ({
       id: s.id,
       name: s.name,
