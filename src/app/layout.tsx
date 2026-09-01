@@ -3,6 +3,7 @@ import "./globals.css";
 import SocketProvider from "@/components/SocketProvider";
 import AuthProvider from "@/components/AuthProvider";
 import ThemeProvider from "@/components/ThemeProvider";
+import CosmeticsProvider from "@/components/CosmeticsProvider";
 import PosthogProvider from "@/components/PosthogProvider";
 import RouteTracker from "@/components/RouteTracker";
 import JsonLd from "@/components/seo/JsonLd";
@@ -92,12 +93,14 @@ export default function RootLayout({
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <ThemeProvider>
-          <PosthogProvider>
-            <RouteTracker />
-            <AuthProvider>
-              <SocketProvider>{children}</SocketProvider>
-            </AuthProvider>
-          </PosthogProvider>
+          <CosmeticsProvider>
+            <PosthogProvider>
+              <RouteTracker />
+              <AuthProvider>
+                <SocketProvider>{children}</SocketProvider>
+              </AuthProvider>
+            </PosthogProvider>
+          </CosmeticsProvider>
         </ThemeProvider>
       </body>
     </html>
