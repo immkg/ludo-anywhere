@@ -229,3 +229,12 @@ export function refreshPresence(): Promise<{ presence: Record<string, { online: 
 export function sendReaction(roomCode: string, reaction: Reaction, targetSeatId?: string, fromName?: string) {
   getSocket().emit("game:reaction", { roomCode, reaction, targetSeatId, fromName });
 }
+
+// Free-text spectator-only chat (see spectator:chat:send in server.js) —
+// deliberately not sendReaction/game:reaction, so it never lands in the
+// players' own reaction/quick-chat stream. Rejects (via emitWithAck) with
+// the server's validation error — too long, empty, or too fast — so
+// SpectatorChat.tsx can show it inline instead of silently dropping it.
+export function sendSpectatorChat(roomCode: string, text: string) {
+  return emitWithAck("spectator:chat:send", { roomCode, text });
+}

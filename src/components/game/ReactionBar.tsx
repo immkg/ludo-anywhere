@@ -18,6 +18,10 @@ export default function ReactionBar({
   canEndGame,
   onEndGame,
   onLeaveGame,
+  showSpectatorsToggle,
+  spectatePolicy,
+  spectatorSaving,
+  onToggleSpectatePolicy,
 }: {
   onReact: (reaction: Reaction) => void;
   onMore: () => void;
@@ -29,6 +33,13 @@ export default function ReactionBar({
   canEndGame: boolean;
   onEndGame: () => void;
   onLeaveGame: () => void;
+  // Host-only, private (non-matchmaking) rooms only — see showSpectatorsToggle
+  // in GameView.tsx. Replaces the old standalone SpectateSettings card with
+  // a single compact color-coded toggle, first in this bar.
+  showSpectatorsToggle?: boolean;
+  spectatePolicy?: "private" | "public";
+  spectatorSaving?: boolean;
+  onToggleSpectatePolicy?: () => void;
 }) {
   const [openPicker, setOpenPicker] = useState<"emoji" | "sticker" | "chat" | "confirm" | null>(null);
   const reduceMotion = useReducedMotion();
@@ -36,6 +47,19 @@ export default function ReactionBar({
 
   return (
     <div className="relative flex items-center gap-1 rounded-2xl border border-line bg-surface px-1.5 py-1 shadow-sm">
+      {showSpectatorsToggle && (
+        <button
+          onClick={onToggleSpectatePolicy}
+          disabled={spectatorSaving}
+          className={
+            "flex min-h-11 items-center justify-center rounded-xl px-2 text-sm font-bold transition hover:bg-surface-2 disabled:opacity-50 " +
+            (spectatePolicy === "public" ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400")
+          }
+        >
+          Spectators
+        </button>
+      )}
+
       <div className="relative">
         <button
           onClick={() => setOpenPicker(openPicker === "emoji" ? null : "emoji")}

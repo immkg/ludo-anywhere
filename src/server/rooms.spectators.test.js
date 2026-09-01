@@ -8,6 +8,8 @@ import {
   setSpectatePolicy,
   handleSocketDisconnect,
   serializeRoom,
+  addSpectatorChatMessage,
+  SPECTATOR_CHAT_MAX_LENGTH,
 } from "./rooms.js";
 
 function makeStartedRoom(n) {
@@ -73,5 +75,77 @@ describe("spectators", () => {
     const room = createRoom({ maxPlayers: 2 });
     expect(setSpectatePolicy(room, "public").room.spectatePolicy).toBe("public");
     expect(setSpectatePolicy(room, "not-a-policy").error).toBeTruthy();
+  });
+});
+
+describe("spectator chat", () => {
+  it("rejects a message from someone not currently spectating", () => {
+    const room = createRoom({ maxPlayers: 2 });
+    expect(addSpectatorChatMessage(room, "not-a-spectator", "hi").error).toBeTruthy();
+    expect(room.spectatorChat).toHaveLength(0);
+  });
+
+  it("trims and appends a message, attributing it to the spectator's own name", () => {
+    const room = createRoom({ maxPlayers: 2 });
+    const { spectator } = addSpectator(room, { name: "Watcher", userId: "user-1", deviceId: null, socketId: "s1" });
+
+    const { message } = addSpectatorChatMessage(room, spectator.id, "  hello everyone  ", 1000);
+    expect(message.text).toBe("hello everyone");
+    expect(message.fromId).toBe(spectator.id);
+    expect(message.fromName).toBe("Watcher");
+    expect(room.spectatorChat).toEqual([message]);
+  });
+
+  it("rejects an empty message (including one that's all whitespace)", () => {
+    const room = createRoom({ maxPlayers: 2 });
+    const { spectator } = addSpectator(room, { name: "Watcher", userId: "user-1", deviceId: null, socketId: "s1" });
+
+    expect(addSpectatorChatMessage(room, spectator.id, "   ", 1000).error).toBeTruthy();
+    expect(addSpectatorChatMessage(room, spectator.id, "", 1000).error).toBeTruthy();
+    expect(room.spectatorChat).toHaveLength(0);
+  });
+
+  it("rejects a message over the max length", () => {
+    const room = createRoom({ maxPlayers: 2 });
+    const { spectator } = addSpectator(room, { name: "Watcher", userId: "user-1", deviceId: null, socketId: "s1" });
+
+    const tooLong = "a".repeat(SPECTATOR_CHAT_MAX_LENGTH + 1);
+    const { error } = addSpectatorChatMessage(room, spectator.id, tooLong, 1000);
+    expect(error).toBeTruthy();
+    expect(room.spectatorChat).toHaveLength(0);
+
+    const exactlyMax = "a".repeat(SPECTATOR_CHAT_MAX_LENGTH);
+    expect(addSpectatorChatMessage(room, spectator.id, exactlyMax, 1000).message).toBeTruthy();
+  });
+
+  it("rate-limits messages sent too soon after the same spectator's last one", () => {
+    const room = createRoom({ maxPlayers: 2 });
+    const { spectator } = addSpectator(room, { name: "Watcher", userId: "user-1", deviceId: null, socketId: "s1" });
+
+    expect(addSpectatorChatMessage(room, spectator.id, "first", 1000).message).toBeTruthy();
+    expect(addSpectatorChatMessage(room, spectator.id, "too soon", 1100).error).toBeTruthy();
+    expect(addSpectatorChatMessage(room, spectator.id, "later", 5000).message).toBeTruthy();
+    expect(room.spectatorChat.map((m) => m.text)).toEqual(["first", "later"]);
+  });
+
+  it("doesn't let one spectator's rate limit block another's message", () => {
+    const room = createRoom({ maxPlayers: 2 });
+    const { spectator: a } = addSpectator(room, { name: "A", userId: "user-a", deviceId: null, socketId: "s1" });
+    const { spectator: b } = addSpectator(room, { name: "B", userId: "user-b", deviceId: null, socketId: "s2" });
+
+    expect(addSpectatorChatMessage(room, a.id, "hi", 1000).message).toBeTruthy();
+    expect(addSpectatorChatMessage(room, b.id, "hey", 1050).message).toBeTruthy();
+  });
+
+  it("bounds the backlog to the most recent 50 messages", () => {
+    const room = createRoom({ maxPlayers: 2 });
+    const { spectator } = addSpectator(room, { name: "Watcher", userId: "user-1", deviceId: null, socketId: "s1" });
+
+    for (let i = 0; i < 55; i++) {
+      addSpectatorChatMessage(room, spectator.id, `msg-${i}`, 1000 + i * 2000);
+    }
+    expect(room.spectatorChat).toHaveLength(50);
+    expect(room.spectatorChat[0].text).toBe("msg-5");
+    expect(room.spectatorChat.at(-1).text).toBe("msg-54");
   });
 });

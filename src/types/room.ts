@@ -63,3 +63,18 @@ export type OwnedSpectator = {
   id: string;
   token: string;
 };
+
+// One message on the spectator-only chat side channel (see
+// spectator:chat:send/spectator:chat:message in server.js) — deliberately
+// separate from the player-facing quick-chat/reaction stream (game:reaction)
+// so a spectator conversation never clutters players' view. Free text
+// (unlike the player-facing preset phrases), capped server-side at
+// SPECTATOR_CHAT_MAX_LENGTH (src/server/rooms.js) — spectators are a much
+// smaller, lower-risk audience than the full player base.
+export type SpectatorChatMessage = {
+  id: string;
+  fromId: string;
+  fromName: string;
+  text: string;
+  ts: number;
+};

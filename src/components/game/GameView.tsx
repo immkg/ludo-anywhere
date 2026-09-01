@@ -20,6 +20,7 @@ import {
   rematch,
   sendReaction,
   addBotToSeat,
+  setSpectatePolicy,
 } from "@/lib/socketActions";
 import { clearOwnedSeats, clearSpectatorToken } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
@@ -51,7 +52,7 @@ import {
 import type { Reaction } from "@/components/game/ReactionPicker";
 import Button from "@/components/ui/Button";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
-import SpectateSettings from "@/components/lobby/SpectateSettings";
+import SpectatorChat from "@/components/lobby/SpectatorChat";
 import type { Room, Seat } from "@/types/room";
 import type { GameState } from "@/types/game";
 
@@ -69,16 +70,6 @@ const REACTION_DISPLAY_MS = 1600;
 // splash needs no equivalent constant: it never opens on this timer, only
 // from handleBackHome, once the player has actually chosen to leave.
 const SECONDARY_ASK_DELAY_MS = 1400;
-
-// How long the "Your turn"/"<Player>'s turn" callout stays up (see
-// turnToast below) — a stopgap independent of the single relocating die
-// (diceArm/diceMount), which reads as ambiguous whose-turn-it-is across
-// multi-device sessions since it's just one small object hopping between
-// four corners. Ahead of actually animating the handoff itself (a separate,
-// bigger piece of work), this gives an unmistakable signal every time the
-// turn changes. Close to REACTION_DISPLAY_MS — long enough to register,
-// short enough to not linger over the board.
-const TURN_TOAST_MS = 1800;
 
 // Where a per-player sticker (see homeReactions below) lands: the center
 // of that arm's "cage" — the same board-space rect Board.tsx draws the
@@ -162,10 +153,22 @@ function ReactionVisual({ reaction, size }: { reaction: DisplayReaction; size: "
   );
 }
 
-export default function GameView({ room, isSpectator = false }: { room: Room; isSpectator?: boolean }) {
+export default function GameView({
+  room,
+  isSpectator = false,
+  spectatorId,
+}: {
+  room: Room;
+  isSpectator?: boolean;
+  // This device's own spectator id (see RoomPageClient.tsx) — only used to
+  // mount the spectator-only chat widget (SpectatorChat.tsx), kept
+  // structurally separate from ReactionBar/game:reaction so it never
+  // clutters the players' own reaction/quick-chat stream.
+  spectatorId?: string;
+}) {
   const router = useRouter();
   const { data: session } = useSession();
-  const { game, currentSeat, currentRoomSeat, isMyTurn, validMoves } = useGame();
+  const { game, currentSeat, isMyTurn, validMoves } = useGame();
   const setGame = useGameStore((s) => s.setGame);
   const mySeats = useRoomStore((s) => s.mySeats);
   const resetRoomStore = useRoomStore((s) => s.reset);
@@ -212,15 +215,6 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
   // center-screen, keyed by seatId so more than one can be up at once.
   const [homeReactions, setHomeReactions] = useState<Record<string, DisplayReaction>>({});
   const homeReactionTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  // A center-screen "Your turn"/"<Player>'s turn" callout — an unmistakable,
-  // independent turn-clarity signal alongside the single relocating die
-  // (diceArm below), which across multi-device sessions can otherwise read
-  // as ambiguous whose-turn-it-is. `key` forces AnimatePresence to replay
-  // the pop-in even if the same text repeats (e.g. back to a 2-player game's
-  // other seat).
-  const [turnToast, setTurnToast] = useState<{ key: string; text: string; color: string } | null>(null);
-  const turnToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const announcedSeatIdRef = useRef<string | null>(null);
   const reduceMotion = useReducedMotion();
 
   // Geometry for the board square and the dice's "flick" throw (see
@@ -408,24 +402,9 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
     () => () => {
       if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
       Object.values(homeReactionTimersRef.current).forEach(clearTimeout);
-      if (turnToastTimerRef.current) clearTimeout(turnToastTimerRef.current);
     },
     [],
   );
-
-  // Fires the turn-clarity toast once per actual turn change (not per
-  // render) — keyed off the current seat's id rather than diceArm/rollSeq,
-  // since it's meant to announce whose turn it *actually* is right away,
-  // independent of the die's own held/relocate animation (see diceArm
-  // below).
-  useEffect(() => {
-    if (!currentSeat || currentSeat.id === announcedSeatIdRef.current) return;
-    announcedSeatIdRef.current = currentSeat.id;
-    const text = isMyTurn ? "Your turn" : `${currentRoomSeat?.name ?? "Opponent"}'s turn`;
-    setTurnToast({ key: `${currentSeat.id}-${Date.now()}`, text, color: colorForArm(currentSeat.armIndex).hex });
-    if (turnToastTimerRef.current) clearTimeout(turnToastTimerRef.current);
-    turnToastTimerRef.current = setTimeout(() => setTurnToast(null), TURN_TOAST_MS);
-  }, [currentSeat, isMyTurn, currentRoomSeat?.name]);
 
   // Reactions broadcast from other seats/spectators in the same room — the
   // sender already shows theirs locally via handleReact/handleSendPlayerSticker
@@ -484,6 +463,23 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
   // one click + a confirm, instead of burying them in the "more" menu.
   const handleBarEndGame = () => {
     emitEndGame(room.code, room.hostSeatId!).catch(() => {});
+  };
+
+  // Compact host-only private/public toggle, replacing the old
+  // SpectateSettings info card — private (default, red) hides watchers from
+  // everyone but the host; public (green) admits anyone with the link with
+  // no approval step. Only offered for a room the host created directly —
+  // a matchmaking pairing has no invite link of its own to spectate via.
+  const [spectatorSaving, setSpectatorSaving] = useState(false);
+  const handleToggleSpectatePolicy = async () => {
+    setSpectatorSaving(true);
+    try {
+      await setSpectatePolicy(room.code, room.spectatePolicy === "public" ? "private" : "public", room.hostSeatId!);
+    } catch {
+      // room:update carries the authoritative policy either way.
+    } finally {
+      setSpectatorSaving(false);
+    }
   };
 
   const handleLeaveGame = () => {
@@ -732,6 +728,14 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
             }}
           />
         )}
+        {isSpectator && spectatorId && (
+          <SpectatorChat
+            roomCode={room.code}
+            spectatorId={spectatorId}
+            spectatorCount={room.spectatorCount}
+            variant="floating"
+          />
+        )}
       </motion.div>
     );
   }
@@ -836,10 +840,25 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
           full-screen PWA/TWA never sits flush against the reaction bar —
           see the matching pb- on bottomRowRef below. */}
       <div className="sticky top-0 z-10 relative flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] sm:px-4">
-        {room.spectatorCount > 0 && (
-          <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-xs font-bold text-ink-muted sm:right-4">
-            👀 {room.spectatorCount}
-          </span>
+        {/* For a spectator, the same top-right slot that would otherwise
+            just show the watching-count badge doubles as the spectator
+            chat trigger — merging the two instead of a separate floating
+            button (which used to collide with the bottom-right player
+            corner on the live board, see SpectatorChat.tsx's own history).
+            Hosts/players still just see the plain count. */}
+        {isSpectator && spectatorId ? (
+          <SpectatorChat
+            roomCode={room.code}
+            spectatorId={spectatorId}
+            spectatorCount={room.spectatorCount}
+            variant="badge"
+          />
+        ) : (
+          room.spectatorCount > 0 && (
+            <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-xs font-bold text-ink-muted sm:right-4">
+              👀 {room.spectatorCount}
+            </span>
+          )
         )}
         <ReactionBar
           onReact={handleReact}
@@ -848,36 +867,20 @@ export default function GameView({ room, isSpectator = false }: { room: Room; is
           canEndGame={canEndGame}
           onEndGame={handleBarEndGame}
           onLeaveGame={handleLeaveGame}
+          showSpectatorsToggle={isHost && !room.matchmaking}
+          spectatePolicy={room.spectatePolicy}
+          spectatorSaving={spectatorSaving}
+          onToggleSpectatePolicy={handleToggleSpectatePolicy}
         />
       </div>
 
       {isHost && (
         <div className="shrink-0 flex flex-col gap-2 px-2 pt-2 sm:px-4">
           <IncomingJoinRequests roomCode={room.code} />
-          <SpectateSettings room={room} hostSeatId={room.hostSeatId!} />
         </div>
       )}
 
       <div ref={boardAreaRef} className="relative flex min-h-0 flex-1 flex-col items-center justify-center">
-        {/* A stopgap, independent-of-the-die turn-clarity signal (see
-            turnToast above) — the actual handoff animation for the single
-            relocating die is a separate piece of work (issue #21). */}
-        <AnimatePresence>
-          {turnToast && (
-            <motion.div
-              key={turnToast.key}
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="pointer-events-none absolute left-1/2 top-1 z-10 -translate-x-1/2 rounded-full border border-line bg-surface px-4 py-1.5 text-sm font-bold shadow-lg"
-              style={{ color: turnToast.color }}
-            >
-              {turnToast.text}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         <div ref={topRowRef} className="flex w-full shrink-0 items-center justify-between px-2 pb-2 sm:px-4">
           <PlayerCorner
             seat={seatByArm.get(0) ?? null}

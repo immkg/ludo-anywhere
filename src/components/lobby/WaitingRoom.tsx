@@ -30,6 +30,7 @@ import Wordmark from "@/components/brand/Wordmark";
 import AppIconMark from "@/components/brand/AppIconMark";
 import IncomingJoinRequests from "@/components/lobby/IncomingJoinRequests";
 import SpectateSettings from "@/components/lobby/SpectateSettings";
+import SpectatorChat from "@/components/lobby/SpectatorChat";
 import { OccupiedSeatCard, EmptySeatCard } from "@/components/lobby/PlayerSeatCard";
 import {
   IconCheck,
@@ -66,6 +67,7 @@ export default function WaitingRoom({
   room,
   mySeats,
   isSpectator = false,
+  spectatorId,
 }: {
   room: Room;
   mySeats: OwnedSeat[];
@@ -76,6 +78,10 @@ export default function WaitingRoom({
   // that any *player* would otherwise see — add a player, ask the host,
   // invite friends — aren't relevant to someone who isn't seated at all).
   isSpectator?: boolean;
+  // This device's own spectator id (see RoomPageClient.tsx) — only used to
+  // mount the spectator-only chat widget (SpectatorChat.tsx) and to tell
+  // this viewer's own messages apart from other watchers' there.
+  spectatorId?: string;
 }) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -456,6 +462,15 @@ export default function WaitingRoom({
           roomCode={room.code}
           seatedProfileIds={new Set(room.seats.map((s) => s.profileId).filter((id) => id != null))}
           onClose={() => setAddPlayerOpen(false)}
+        />
+      )}
+
+      {isSpectator && spectatorId && (
+        <SpectatorChat
+          roomCode={room.code}
+          spectatorId={spectatorId}
+          spectatorCount={room.spectatorCount}
+          variant="floating"
         />
       )}
     </div>

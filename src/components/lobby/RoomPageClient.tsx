@@ -153,8 +153,8 @@ export default function RoomPageClient() {
   }
 
   return room.status === "lobby" ? (
-    <WaitingRoom room={room} mySeats={[]} isSpectator />
+    <WaitingRoom room={room} mySeats={[]} isSpectator spectatorId={spectator?.id} />
   ) : (
-    <GameView room={room} isSpectator />
+    <GameView room={room} isSpectator spectatorId={spectator?.id} />
   );
 }
