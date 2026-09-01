@@ -3,6 +3,9 @@
   "target": {
     "namespace": "android_app",
     "package_name": "life.myludo.twa",
-    "sha256_cert_fingerprints": ["A8:05:87:C7:2E:F6:A2:AC:D9:A3:5A:28:A3:96:CA:D2:CA:8F:5D:49:A0:C5:7B:51:D5:4E:84:07:6F:4E:9E:D4"]
+    "sha256_cert_fingerprints": [
+      "CC:24:22:86:E6:25:B2:FD:E7:5A:76:8A:16:DD:A4:22:51:E0:CE:A3:25:C4:A7:9C:2A:DB:7C:BE:04:7B:2A:42",
+      "A8:05:87:C7:2E:F6:A2:AC:D9:A3:5A:28:A3:96:CA:D2:CA:8F:5D:49:A0:C5:7B:51:D5:4E:84:07:6F:4E:9E:D4"
+    ]
   }
 }]
