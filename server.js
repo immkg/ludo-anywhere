@@ -226,6 +226,13 @@ app.prepare().then(() => {
 
   const userChannel = (userId) => `user:${userId}`;
 
+  // Populated for the duration of each socket's connection-setup IIFE below
+  // (auth lookup + userChannel join). A push that targets a specific user's
+  // channel — e.g. room:rematch's room:rematchReady — awaits this first, so
+  // a socket that's mid-reconnect right when the push fires still gets it,
+  // instead of missing it because its userChannel join hadn't landed yet.
+  const pendingConnections = new Set();
+
   // What a freshly-connected (or freshly-friended) socket needs to paint
   // presence: for each friend, whether they're online and — if they are —
   // which lobby room (if any) they're currently sitting in.
@@ -317,7 +324,7 @@ app.prepare().then(() => {
     // disconnect handler below; every other handler still resolves its own
     // userId from the cookie, unchanged, since that's what actually
     // authorizes each action.
-    (async () => {
+    const connectionSetup = (async () => {
       const userId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
       if (!userId) return;
       socket.data.userId = userId;
@@ -326,6 +333,8 @@ app.prepare().then(() => {
       socket.emit("presence:snapshot", await presenceSnapshotFor(userId));
       if (wasOffline) await broadcastPresence(userId, { online: true });
     })().catch(logPresenceError("connection setup"));
+    pendingConnections.add(connectionSetup);
+    connectionSetup.finally(() => pendingConnections.delete(connectionSetup));
 
     // Callable any time a client's friend list may have changed underneath
     // it (e.g. right after accepting a request) to get a fresh snapshot
@@ -1146,6 +1155,10 @@ app.prepare().then(() => {
           list.push({ id: seat.id, token: seat.token, armIndex: seat.armIndex, name: seat.name });
           seatsByUser.set(seat.userId, list);
         }
+        // Let any socket that's mid-reconnect right now finish joining its
+        // userChannel first — otherwise a just-reconnected player can miss
+        // this push entirely (see pendingConnections above).
+        if (pendingConnections.size) await Promise.allSettled([...pendingConnections]);
         for (const [userId, seatsForUser] of seatsByUser) {
           io.to(userChannel(userId)).emit("room:rematchReady", { roomCode: newRoom.code, seats: seatsForUser });
         }
