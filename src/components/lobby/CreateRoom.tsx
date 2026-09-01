@@ -10,6 +10,8 @@ import { useRoomStore } from "@/store/useRoomStore";
 import { useProfiles } from "@/hooks/useProfiles";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
+import MobileTabBar from "@/components/nav/MobileTabBar";
+import { NAV_ITEMS, getHomeItem } from "@/components/nav/navItems";
 import { cn } from "@/lib/utils";
 import type { EntitlementStatus } from "@/types/billing";
 
@@ -123,8 +125,13 @@ export default function CreateRoom() {
     }
   };
 
+  // Guests bounce out of this form with no escape but the small back
+  // arrow above — this gives mobile visitors a real way to Home/Friends/
+  // Leaderboard without losing the room-code/player-count they've set up.
+  const homeHref = session?.user ? "/" : "/play";
+
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
+    <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:px-8 sm:py-10 md:pb-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
       <div className="flex items-center gap-3">
         <Link
           href={session?.user ? "/" : "/play"}
@@ -326,6 +333,8 @@ export default function CreateRoom() {
           />
         </div>
       </div>
+
+      <MobileTabBar items={[getHomeItem(homeHref), ...NAV_ITEMS.slice(0, 2)]} />
     </main>
   );
 }

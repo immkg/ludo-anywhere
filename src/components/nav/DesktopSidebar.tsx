@@ -8,7 +8,7 @@ import CreditBalance from "@/components/nav/CreditBalance";
 import NavigationItem from "@/components/nav/NavigationItem";
 import ShareInviteButton from "@/components/nav/ShareInviteButton";
 import FeedbackButton from "@/components/nav/FeedbackButton";
-import { NAV_ITEMS, IconExit } from "@/components/nav/navItems";
+import { NAV_ITEMS, getHomeItem, IconExit } from "@/components/nav/navItems";
 import { IconAppearance } from "@/components/nav/icons";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -48,6 +48,7 @@ export default function DesktopSidebar({ displayName, email, userImage }: Deskto
       <FeedbackButton />
 
       <nav className="flex flex-1 flex-col gap-1">
+        <NavigationItem {...getHomeItem("/")} />
         {NAV_ITEMS.map((item) => (
           <NavigationItem key={item.href} {...item} />
         ))}

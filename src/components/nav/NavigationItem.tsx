@@ -19,7 +19,7 @@ export default function NavigationItem({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const active = pathname === href;
+  const active = href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
 
   return (
     <Link

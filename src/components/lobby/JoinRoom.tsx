@@ -14,6 +14,8 @@ import { usePresenceStore } from "@/store/usePresenceStore";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import FriendAvatar from "@/components/friends/FriendAvatar";
+import MobileTabBar from "@/components/nav/MobileTabBar";
+import { NAV_ITEMS, getHomeItem } from "@/components/nav/navItems";
 import { IconClock } from "@/components/lobby/icons";
 import { cn } from "@/lib/utils";
 import type { OwnedSeat } from "@/types/room";
@@ -154,9 +156,10 @@ export default function JoinRoom() {
   };
 
   const friendsPlayingNow = friends.filter((f) => presence[f.userId]?.online && presence[f.userId]?.roomCode);
+  const homeHref = session?.user ? "/" : "/play";
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 sm:px-8 sm:py-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
+    <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:px-8 sm:py-10 md:pb-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
       <div className="flex items-center gap-3">
         <Link
           href={session?.user ? "/" : "/play"}
@@ -359,6 +362,8 @@ export default function JoinRoom() {
           />
         </div>
       </div>
+
+      <MobileTabBar items={[getHomeItem(homeHref), ...NAV_ITEMS.slice(0, 2)]} />
     </main>
   );
 }

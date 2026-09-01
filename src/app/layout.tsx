@@ -65,6 +65,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Required for env(safe-area-inset-*) to resolve to anything but 0 —
+  // without it the body's bottom padding and AccountSheet's inset both
+  // silently no-op. Matters most on the Android TWA build, which draws
+  // edge-to-edge behind the system status/gesture bars.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#fbf6ef" },
     { media: "(prefers-color-scheme: dark)", color: "#16130f" },

@@ -8,8 +8,10 @@ import AppIconMark from "@/components/brand/AppIconMark";
 import Wordmark from "@/components/brand/Wordmark";
 import NavigationItem from "@/components/nav/NavigationItem";
 import ShareInviteButton from "@/components/nav/ShareInviteButton";
-import { NAV_ITEMS } from "@/components/nav/navItems";
+import MobileTabBar from "@/components/nav/MobileTabBar";
+import { NAV_ITEMS, getHomeItem } from "@/components/nav/navItems";
 import { IconAppearance } from "@/components/nav/icons";
+import { IconPerson } from "@/components/home/icons";
 import ThemeToggle from "@/components/ThemeToggle";
 
 // Logged-out counterpart to AuthenticatedNav — same page chrome (mobile top
@@ -25,10 +27,13 @@ export default function GuestNav({ children }: { children: ReactNode }) {
   // expectation.
   const pathname = usePathname();
   const callbackUrl = pathname !== "/" ? pathname : undefined;
+  // Same 3 primary destinations as the signed-in tab bar; "More" becomes
+  // the sign-in CTA here since there's no account sheet to open yet.
+  const tabItems = [getHomeItem("/play"), ...NAV_ITEMS.slice(0, 2)];
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-line bg-surface px-3 md:hidden">
+      <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between gap-2 border-b border-line bg-surface px-3 pt-[env(safe-area-inset-top)] md:hidden">
         <Link href="/play" className="flex items-center gap-1.5">
           <AppIconMark className="h-6 w-6" />
           <Wordmark className="text-base" />
@@ -67,6 +72,7 @@ export default function GuestNav({ children }: { children: ReactNode }) {
         </button>
 
         <nav className="flex flex-1 flex-col gap-1">
+          <NavigationItem {...getHomeItem("/play")} />
           {NAV_ITEMS.map((item) => (
             <NavigationItem key={item.href} {...item} />
           ))}
@@ -85,7 +91,11 @@ export default function GuestNav({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1 pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">{children}</div>
+      <MobileTabBar
+        items={tabItems}
+        more={{ label: "Sign in", icon: <IconPerson />, onClick: () => signIn("google", { callbackUrl }) }}
+      />
     </div>
   );
 }
