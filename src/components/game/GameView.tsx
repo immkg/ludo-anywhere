@@ -24,6 +24,8 @@ import { clearOwnedSeats } from "@/lib/identity";
 import { getSocket } from "@/lib/socket";
 import { colorForArm, buildBoardLayout } from "@/game/board";
 import { moveToken as applyMoveToken, placementFor, DICE_HOLD_MS, timeoutsForLevel } from "@/game/engine";
+import { computeGameXp } from "@/lib/trophies";
+import { playVictoryFanfare } from "@/lib/sound";
 import Dice, { type ThrowStyle } from "@/components/game/Dice";
 import PlayerCorner from "@/components/game/PlayerCorner";
 import ReactionBar from "@/components/game/ReactionBar";
@@ -51,6 +53,13 @@ const Board = dynamic(() => import("@/components/game/Board"), {
 });
 
 const REACTION_DISPLAY_MS = 1600;
+// How long the results screen holds off the feedback-rating prompt (see
+// showSecondaryAsks below) — long enough for the primary "Play again"
+// moment (and the confetti/win callout) to land first, short enough that
+// it doesn't feel like a separate, disconnected ask. The flash-discount
+// splash needs no equivalent constant: it never opens on this timer, only
+// from handleBackHome, once the player has actually chosen to leave.
+const SECONDARY_ASK_DELAY_MS = 1400;
 
 // How long the "Your turn"/"<Player>'s turn" callout stays up (see
 // turnToast below) — a stopgap independent of the single relocating die
@@ -76,6 +85,19 @@ function homePositionPercent(armIndex: number) {
     left: ((cage.x + cage.width / 2) / layout.viewBox) * 100,
     top: ((cage.y + cage.height / 2) / layout.viewBox) * 100,
   };
+}
+
+// Rank (1-indexed) this device's own seat(s) finished in — null if none of
+// mySeatIds ever appear in game.placements at all (game still in progress
+// from this seat's perspective, or this device never had a seat in this
+// particular game, e.g. a spectator link). Pure and cheap, so it's safe to
+// call from a render as well as an effect.
+function myPlacementRank(game: GameState, mySeatIds: string[]): number | null {
+  for (const seatId of mySeatIds) {
+    const idx = game.placements.indexOf(seatId);
+    if (idx !== -1) return idx + 1;
+  }
+  return null;
 }
 
 export default function GameView({ room }: { room: Room }) {
@@ -428,6 +450,45 @@ export default function GameView({ room }: { room: Room }) {
     }
   }, [game?.status]);
 
+  // Confetti + a fanfare the instant the results screen appears — the
+  // game's one biggest emotional beat (issue #18), distinct from
+  // Token.tsx's per-token "victory" cue (which fires whenever *any* seat's
+  // last token reaches home, not necessarily this device's own win).
+  // celebratedRef caps this to once per finished game, same pattern as
+  // splashEvaluatedRef above. canvas-confetti is dynamically imported so a
+  // normal (non-finished) game screen never pays for it.
+  const celebratedRef = useRef(false);
+  useEffect(() => {
+    if (game?.status !== "finished" || celebratedRef.current) return;
+    celebratedRef.current = true;
+    const won = myPlacementRank(game, mySeats.map((s) => s.id)) === 1;
+    if (!reduceMotion) {
+      import("canvas-confetti")
+        .then(({ default: confetti }) => {
+          // Everyone gets a pop for the game wrapping up; the seat(s) that
+          // actually won this device also gets two side bursts on top of
+          // it, so the winner's own screen reads as materially bigger.
+          confetti({ particleCount: won ? 130 : 70, spread: won ? 100 : 60, origin: { y: 0.6 }, scalar: won ? 1 : 0.8 });
+          if (won) {
+            confetti({ particleCount: 60, angle: 60, spread: 55, origin: { x: 0, y: 0.65 } });
+            confetti({ particleCount: 60, angle: 120, spread: 55, origin: { x: 1, y: 0.65 } });
+          }
+        })
+        .catch(() => {});
+    }
+    if (won) playVictoryFanfare();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reduceMotion/mySeats read once at fire time; only game.status should re-trigger this
+  }, [game?.status]);
+
+  // Post-game asks are staggered instead of all appearing the instant the
+  // results screen mounts (issue #27) — see SECONDARY_ASK_DELAY_MS above.
+  const [showSecondaryAsks, setShowSecondaryAsks] = useState(false);
+  useEffect(() => {
+    if (game?.status !== "finished") return;
+    const timer = setTimeout(() => setShowSecondaryAsks(true), SECONDARY_ASK_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [game?.status]);
+
   const goHome = () => router.push(session?.user ? "/" : "/play");
 
   // Intercepts "Back home" (not "Play again" — a rematch just continues,
@@ -483,10 +544,11 @@ export default function GameView({ room }: { room: Room }) {
     // Leads the share message with the viewer's own result rather than a
     // generic pitch — they're sharing *this* game, not just the app.
     const myPlacement = winners.find((w) => mySeats.some((s) => s.id === w.seatId));
+    const isWinnerView = myPlacement?.rank === 1;
     const playerCount = game.seats.length;
     const resultLine = game.endedEarly
       ? "Just played a game of Ludo on MyLudo!"
-      : myPlacement?.rank === 1
+      : isWinnerView
         ? `I just won a ${playerCount}-player Ludo game on MyLudo! 🏆`
         : myPlacement
           ? `I just came ${myPlacement.rank === 2 ? "2nd" : "3rd"} in a ${playerCount}-player Ludo game on MyLudo!`
@@ -494,39 +556,59 @@ export default function GameView({ room }: { room: Room }) {
     const buildShareMessage = (url: string, pct: number | null) =>
       pct ? `${resultLine} Play with me — sign up and we both get ${pct}% off! ${url}` : `${resultLine} Play with me! ${url}`;
 
+    // "XP earned this game" (issue #19) — only shown for a seat this device
+    // actually controlled, using the exact same counts-as-played rule
+    // src/app/page.tsx applies when folding a finished game into lifetime
+    // totals (see computeGameXp). gameStartRef anchors elapsed playtime,
+    // same as the splash-trigger effect above.
+    const myLoser = losers.find((l) => mySeats.some((s) => s.id === l.seatId));
+    const xpEarned =
+      myPlacement || myLoser
+        ? computeGameXp({
+            isWinner: isWinnerView,
+            endedEarly: game.endedEarly,
+            playTimeHours: (Date.now() - gameStartRef.current) / 3_600_000,
+          })
+        : null;
+
     return (
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         className="flex min-h-dvh flex-col items-center justify-center gap-3 overflow-y-auto px-8 py-4 text-center"
       >
-        <div className="flex w-full max-w-xs gap-2">
-          <ShareInviteButton source="post_game" variant="button" buildMessage={buildShareMessage} />
-          <Button variant="secondary" className="flex-1" onClick={handleBackHome} disabled={checkingSplash}>
-            Back home
-          </Button>
-        </div>
-        {(showFeedbackSample || game.endedEarly) && (
-          <FeedbackPrompt context="GAME_FINISHED" gameId={room.code} />
-        )}
-        {splashOpen && pendingSplashTrigger && (
-          <DiscountSplash
-            trigger={pendingSplashTrigger}
-            isSignedIn={!!session?.user}
-            onClose={() => {
-              setSplashOpen(false);
-              goHome();
-            }}
-          />
-        )}
         <div className="flex w-full max-w-xs flex-col gap-1.5">
-          {winners.map((r) => (
-            <div key={r.seatId} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-2.5">
-              <span className="w-5 shrink-0 text-lg font-extrabold text-ink-muted">{r.rank}</span>
-              {r.color && <span className="h-7 w-7 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
-              <span className="flex-1 truncate text-left font-semibold">{r.name}</span>
-            </div>
-          ))}
+          {winners.map((r) =>
+            r.rank === 1 ? (
+              // The one visually bigger, distinct callout on this screen
+              // (issue #18) — everything else on the results list stays
+              // the same small, calm row it always was.
+              <div
+                key={r.seatId}
+                className="flex items-center gap-3 rounded-2xl border-2 border-accent-2 bg-surface p-3 shadow-lg"
+              >
+                <span className="text-2xl leading-none" aria-hidden>
+                  🏆
+                </span>
+                {r.color && (
+                  <span
+                    className="h-9 w-9 shrink-0 rounded-full ring-2 ring-accent-2 ring-offset-2 ring-offset-surface"
+                    style={{ backgroundColor: r.color.hex }}
+                  />
+                )}
+                <span className="flex-1 truncate text-left text-lg font-extrabold text-ink">{r.name}</span>
+                <span className="shrink-0 rounded-full bg-accent-2 px-2.5 py-1 text-[11px] font-extrabold text-white">
+                  WINNER
+                </span>
+              </div>
+            ) : (
+              <div key={r.seatId} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-2.5">
+                <span className="w-5 shrink-0 text-lg font-extrabold text-ink-muted">{r.rank}</span>
+                {r.color && <span className="h-7 w-7 shrink-0 rounded-full" style={{ backgroundColor: r.color.hex }} />}
+                <span className="flex-1 truncate text-left font-semibold">{r.name}</span>
+              </div>
+            )
+          )}
           {losers.map((r) => (
             <div
               key={r.seatId}
@@ -540,11 +622,42 @@ export default function GameView({ room }: { room: Room }) {
             </div>
           ))}
         </div>
+        {xpEarned !== null && <p className="text-sm font-bold text-accent-2">+{xpEarned} XP earned</p>}
+
+        {/* The primary post-game ask — sequenced first and unmistakably so
+            (issue #27): the one full-width, high-emphasis button on this
+            screen, appearing before any of the secondary asks below. */}
         {rematchError && <p className="text-sm text-accent">{rematchError}</p>}
         {isHost && (
-          <Button onClick={handleRematch} disabled={rematchLoading}>
+          <Button onClick={handleRematch} disabled={rematchLoading} className="w-full max-w-xs">
             {rematchLoading ? "Starting…" : "Play again with same players"}
           </Button>
+        )}
+        <div className="flex w-full max-w-xs gap-2">
+          <ShareInviteButton source="post_game" variant="button" buildMessage={buildShareMessage} />
+          <Button variant="secondary" className="flex-1" onClick={handleBackHome} disabled={checkingSplash}>
+            Back home
+          </Button>
+        </div>
+
+        {/* Secondary asks — deliberately held back a beat (or, for the
+            splash, gated behind an explicit "Back home" tap in
+            handleBackHome above) so they never compete with "Play again"
+            for the first instant of attention, and never stack with each
+            other: the splash fully replaces the feedback prompt rather
+            than layering over it. */}
+        {showSecondaryAsks && !splashOpen && (showFeedbackSample || game.endedEarly) && (
+          <FeedbackPrompt context="GAME_FINISHED" gameId={room.code} />
+        )}
+        {splashOpen && pendingSplashTrigger && (
+          <DiscountSplash
+            trigger={pendingSplashTrigger}
+            isSignedIn={!!session?.user}
+            onClose={() => {
+              setSplashOpen(false);
+              goHome();
+            }}
+          />
         )}
       </motion.div>
     );
