@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { playDiceRoll } from "@/lib/sound";
 import { timeoutsForLevel } from "@/game/engine";
+import { arcKeyframes, playSettleBounces } from "@/lib/diceMotion";
 import { useCosmetics } from "@/components/CosmeticsProvider";
 import { resolveDiceSkin, type DiceSkinColors } from "@/game/cosmetics";
 
@@ -42,6 +43,14 @@ const HOLD_THRESHOLD_MS = 350;
 const DOUBLE_TAP_WINDOW_MS = 280;
 const THROW_MS_RANGE: [number, number] = [700, 1050];
 const RETURN_MS_RANGE: [number, number] = [350, 600];
+// How long a die that auto-resolved (no legal move, or three sixes in a
+// row — see the "bring it home" comment below) rests on the board showing
+// its rolled face before flying back — without this, it was retracting the
+// instant the throw itself finished landing, too fast to actually register
+// what was rolled. A normal player-moved token has this same beat for
+// free (the board's own move animation plays out first); this just gives
+// the auto-resolved case the same courtesy.
+const AUTO_RETURN_HOLD_MS = 550;
 // Touching the die pauses the auto-roll countdown; letting go without
 // actually completing a roll (moving off, or a cancelled gesture) costs
 // this much off whatever time was left when it resumes.
@@ -287,6 +296,9 @@ export default function Dice({
   const prevRollSeqRef = useRef(rollSeq);
   const spinStartRef = useRef(0);
   const landTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Holds an auto-resolved throw (see the "bring it home" comment below)
+  // on the board for AUTO_RETURN_HOLD_MS before it flies back.
+  const autoReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Position/phase machinery for the "flick" throw — untouched by a plain
   // tap, which never moves this at all (stays at {x:0, y:0}, i.e. its
@@ -334,21 +346,16 @@ export default function Dice({
       x: safeRegion.left + Math.random() * safeRegion.size,
       y: safeRegion.top + Math.random() * safeRegion.size,
     };
-    const dx = target.x - restPoint.x;
-    const dy = target.y - restPoint.y;
-    const dist = Math.hypot(dx, dy);
     // A curved (not straight-line) path: an intermediate point offset both
     // upward (a throwing arc) and sideways (so it doesn't look like a
-    // perfectly straight ramp), varied per throw.
-    const arcLift = dist * randomBetween(0.25, 0.45);
-    const sideDrift =
-      (Math.random() < 0.5 ? -1 : 1) * dist * randomBetween(0.05, 0.2);
-    const midX = dx / 2 + sideDrift;
-    const midY = dy / 2 - arcLift;
+    // perfectly straight ramp), varied per throw — see arcKeyframes in
+    // src/lib/diceMotion.ts (also reused by GameView.tsx's corner-to-corner
+    // handoff, which animates the same kind of arc between two points).
+    const { x, y } = arcKeyframes(restPoint, target);
 
     await posControls.start({
-      x: [0, midX, dx],
-      y: [0, midY, dy],
+      x,
+      y,
       transition: {
         duration: durationMs / 1000,
         times: [0, 0.55, 1],
@@ -356,17 +363,11 @@ export default function Dice({
       },
     });
 
-    // A couple of small squash-and-settle bounces on impact — count and
-    // intensity both vary per throw.
+    // A couple of small squash-and-settle bounces on impact — count varies
+    // per throw, intensity/falloff shared with the handoff's own landing
+    // (see playSettleBounces).
     const bounces = Math.round(randomBetween(1, 3));
-    for (let i = 0; i < bounces; i++) {
-      const intensity = 0.16 * (1 - i / bounces) + 0.04;
-      await posControls.start({
-        scaleY: [1, 1 - intensity, 1 + intensity * 0.4, 1],
-        scaleX: [1, 1 + intensity * 0.5, 1 - intensity * 0.2, 1],
-        transition: { duration: 0.22, ease: "easeOut" },
-      });
-    }
+    await playSettleBounces(posControls, bounces);
   }
 
   async function returnHome() {
@@ -400,7 +401,31 @@ export default function Dice({
       setIsRolling(true);
       setOrientation(spinFrom);
       playDiceRoll();
-      if (style === "flick") throwOntoBoard(durationMs);
+      if (style === "flick") {
+        const throwPromise = throwOntoBoard(durationMs);
+        // Some rolls resolve their own move in the very same server update
+        // that produced them — no legal moves, or three sixes (see endTurn
+        // in src/game/engine.js) — so `diceValue` is already back to null
+        // right here, in the same render as this very roll. The usual
+        // "bring it home" effect below watches for a non-null->null
+        // transition to know a move just finished; it never gets to see
+        // one for a roll like this (diceValue stays null the whole time,
+        // from this component's point of view), so a die that got flicked
+        // onto the board would otherwise be left stranded there — a
+        // physical object doesn't just get abandoned mid-turn. Bring it
+        // home here instead, once the throw itself finishes landing —
+        // after a short AUTO_RETURN_HOLD_MS rest so the rolled face is
+        // actually visible for a beat first, not retracted the instant it
+        // touches down.
+        if (diceValue == null) {
+          throwPromise.then(() => {
+            autoReturnTimerRef.current = setTimeout(() => {
+              autoReturnTimerRef.current = null;
+              returnHome();
+            }, AUTO_RETURN_HOLD_MS);
+          });
+        }
+      }
     }
 
     const target = withTilt(
@@ -437,6 +462,7 @@ export default function Dice({
       if (landTimeoutRef.current) clearTimeout(landTimeoutRef.current);
       if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
       if (pendingTapTimerRef.current) clearTimeout(pendingTapTimerRef.current);
+      if (autoReturnTimerRef.current) clearTimeout(autoReturnTimerRef.current);
       rollAnimRef.current?.stop();
     };
   }, []);
