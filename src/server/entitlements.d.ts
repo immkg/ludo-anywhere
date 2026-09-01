@@ -29,6 +29,10 @@ export type EntitlementStatus = {
   entitlement: { type: "MONTHLY" | "ANNUAL"; expiresAt: Date } | null;
   creditsRemaining: number;
   creditsExpireAt: Date | null;
+  // How many separate Game Pack purchases are currently stacked (each an
+  // active, non-expired, non-exhausted CreditBatch). 0 when creditsRemaining
+  // is 0.
+  creditBatchCount: number;
   freeRemaining: number;
 };
 

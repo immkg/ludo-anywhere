@@ -64,14 +64,28 @@ export async function grantPayment(
     if (updated.count === 0) return false; // already processed by a concurrent reconcile
 
     if (payment.purpose === "PACK") {
+      const expiresAt = new Date(now.getTime() + config.gamePack.expiryHours * 60 * 60 * 1000);
       await tx.creditBatch.create({
         data: {
           userId: payment.userId,
           credits: config.gamePack.credits,
           remaining: config.gamePack.credits,
-          expiresAt: new Date(now.getTime() + config.gamePack.expiryHours * 60 * 60 * 1000),
+          expiresAt,
           paymentId: payment.id,
         },
+      });
+      // Buying another pack while an older one still has unused credits:
+      // the UI shows a single "valid until" date (the newest purchase's —
+      // see getEntitlementStatus's creditsExpireAt), so every other active
+      // batch's expiry is pulled forward to match. Without this, a user
+      // could see "30 games, 7 more days" while a handful of them
+      // silently expire on the OLD batch's earlier date — losing paid-for
+      // games without warning. `lt: expiresAt` only ever extends, never
+      // shortens (a batch already expiring later than this new one, e.g.
+      // from a since-changed expiryHours config, is left alone).
+      await tx.creditBatch.updateMany({
+        where: { userId: payment.userId, remaining: { gt: 0 }, expiresAt: { gt: now, lt: expiresAt } },
+        data: { expiresAt },
       });
     } else {
       const days = payment.purpose === "MONTHLY" ? config.monthly.days : config.annual.days;

@@ -6,9 +6,11 @@ export type BillingPurpose = "PACK" | "MONTHLY" | "ANNUAL";
 export type EntitlementStatus = {
   entitlement: { type: "MONTHLY" | "ANNUAL"; expiresAt: string } | null;
   creditsRemaining: number;
-  // Soonest-expiring active Game Pack credit batch, if any — see
+  // Latest-expiring active Game Pack credit batch, if any — see
   // src/server/entitlements.js's getEntitlementStatus().
   creditsExpireAt: string | null;
+  // How many separate Game Pack purchases are currently stacked.
+  creditBatchCount: number;
   freeRemaining: number;
   // Only present when entitlement is an active Monthly plan — see
   // src/lib/entitlements.ts's getAnnualUpgradeOffer().

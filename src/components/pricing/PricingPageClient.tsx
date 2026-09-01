@@ -313,6 +313,7 @@ export default function PricingPageClient() {
               subtitle={`${status.pricing.gamePack.credits} games · ${status.pricing.gamePack.days} days`}
               detail={`${status.creditsRemaining} game${status.creditsRemaining === 1 ? "" : "s"} remaining`}
               validUntil={status.creditsExpireAt ? formatDate(status.creditsExpireAt) : undefined}
+              countBadge={status.creditBatchCount}
             />
           </YourPlanSection>
           <PlanGroup heading="GET MORE GAMES">
@@ -562,6 +563,7 @@ function ActivePlanCard({
   validUntil,
   note = "One-time purchase",
   badge = "ACTIVE",
+  countBadge,
 }: {
   planKey: PlanKey;
   subtitle: string;
@@ -569,6 +571,11 @@ function ActivePlanCard({
   validUntil?: string;
   note?: string;
   badge?: string | null;
+  // How many separate purchases are stacked (Game Pack only — see
+  // EntitlementStatus.creditBatchCount) — shown as "×N" next to the plan
+  // name so buying another pack while one's active reads as a visible
+  // count, not just a bigger "games remaining" number.
+  countBadge?: number;
 }) {
   const meta = PLAN_META[planKey];
   return (
@@ -583,6 +590,9 @@ function ActivePlanCard({
           </span>
           <p className="text-lg font-extrabold" style={{ color: meta.color }}>
             {meta.name}
+            {!!countBadge && countBadge > 1 && (
+              <span className="ml-1.5 opacity-70">×{countBadge}</span>
+            )}
           </p>
         </div>
         {badge && (

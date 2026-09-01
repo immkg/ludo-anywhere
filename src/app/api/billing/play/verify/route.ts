@@ -5,7 +5,7 @@ import { getPricingConfig } from "@/lib/entitlements";
 import { grantPayment } from "@/lib/billing-fulfillment";
 import {
   getProductPurchase,
-  acknowledgeProductPurchase,
+  consumeProductPurchase,
   getSubscriptionPurchaseV2,
   acknowledgeSubscriptionPurchase,
   mapPlayProductToPurpose,
@@ -98,19 +98,26 @@ export async function POST(request: Request) {
 
   await grantPayment(payment, { entitlementWindow });
 
-  // Acknowledge only after our own grant succeeds — acking something we
-  // failed to fulfill would permanently lose the ability to detect/retry
-  // it. A failed ack still leaves the user fulfilled; it's logged rather
-  // than failing the request, since Google auto-refunds unacked purchases
-  // after 3 days and this is the one piece worth a human noticing sooner.
+  // Acknowledge/consume only after our own grant succeeds — doing it first
+  // would permanently lose the ability to detect/retry a fulfillment
+  // failure. A failure here still leaves the user fulfilled; it's logged
+  // rather than failing the request, since Google auto-refunds an
+  // un-acknowledged purchase after 3 days and this is the one piece worth
+  // a human noticing sooner.
+  //
+  // PACK is consumed, not just acknowledged — Game Pack is a repeatable
+  // purchase (buy as many as you want, each grants its own 25 credits/
+  // 7-day CreditBatch), and Play Billing refuses a second purchase of an
+  // unconsumed managed product with "You already own this item". Consuming
+  // also acknowledges it, so there's no separate acknowledge call for PACK.
   try {
     if (purpose === "PACK") {
-      await acknowledgeProductPurchase(productId, purchaseToken);
+      await consumeProductPurchase(productId, purchaseToken);
     } else {
       await acknowledgeSubscriptionPurchase(purchaseToken);
     }
   } catch (e) {
-    console.error(`Play Billing: failed to acknowledge purchase ${purchaseToken} (payment ${payment.id})`, e);
+    console.error(`Play Billing: failed to acknowledge/consume purchase ${purchaseToken} (payment ${payment.id})`, e);
   }
 
   return NextResponse.json({ ok: true });
