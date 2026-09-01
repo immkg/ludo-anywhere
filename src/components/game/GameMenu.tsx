@@ -7,6 +7,7 @@ import { shareRoomLink, roomJoinUrl } from "@/lib/share";
 import { colorForArm } from "@/game/board";
 import Button from "@/components/ui/Button";
 import ThemeToggle from "@/components/ThemeToggle";
+import CosmeticsPicker from "@/components/CosmeticsPicker";
 import FeedbackPrompt from "@/components/game/FeedbackPrompt";
 import type { Seat } from "@/types/room";
 
@@ -102,6 +103,14 @@ export default function GameMenu({
             <p className="text-sm text-ink-muted">Theme</p>
             <ThemeToggle />
           </div>
+
+          {/* Free cosmetic customization (token style/board finish/dice
+              skin) — issues #23/#29. Placed here, right below Theme, since
+              there's no dedicated settings/profile screen yet and this is
+              the same kind of per-client, local-only, always-visible
+              preference Theme already is. Worth revisiting if a settings
+              screen shows up later. */}
+          <CosmeticsPicker />
 
           {showLeaveFeedback ? (
             <FeedbackPrompt context="LEFT_EARLY" gameId={roomCode} onDone={onLeaveGame} />
