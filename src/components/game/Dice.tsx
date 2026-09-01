@@ -43,6 +43,14 @@ const HOLD_THRESHOLD_MS = 350;
 const DOUBLE_TAP_WINDOW_MS = 280;
 const THROW_MS_RANGE: [number, number] = [700, 1050];
 const RETURN_MS_RANGE: [number, number] = [350, 600];
+// How long a die that auto-resolved (no legal move, or three sixes in a
+// row — see the "bring it home" comment below) rests on the board showing
+// its rolled face before flying back — without this, it was retracting the
+// instant the throw itself finished landing, too fast to actually register
+// what was rolled. A normal player-moved token has this same beat for
+// free (the board's own move animation plays out first); this just gives
+// the auto-resolved case the same courtesy.
+const AUTO_RETURN_HOLD_MS = 550;
 // Touching the die pauses the auto-roll countdown; letting go without
 // actually completing a roll (moving off, or a cancelled gesture) costs
 // this much off whatever time was left when it resumes.
@@ -288,6 +296,9 @@ export default function Dice({
   const prevRollSeqRef = useRef(rollSeq);
   const spinStartRef = useRef(0);
   const landTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Holds an auto-resolved throw (see the "bring it home" comment below)
+  // on the board for AUTO_RETURN_HOLD_MS before it flies back.
+  const autoReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Position/phase machinery for the "flick" throw — untouched by a plain
   // tap, which never moves this at all (stays at {x:0, y:0}, i.e. its
@@ -402,9 +413,17 @@ export default function Dice({
         // from this component's point of view), so a die that got flicked
         // onto the board would otherwise be left stranded there — a
         // physical object doesn't just get abandoned mid-turn. Bring it
-        // home here instead, once the throw itself finishes landing.
+        // home here instead, once the throw itself finishes landing —
+        // after a short AUTO_RETURN_HOLD_MS rest so the rolled face is
+        // actually visible for a beat first, not retracted the instant it
+        // touches down.
         if (diceValue == null) {
-          throwPromise.then(() => returnHome());
+          throwPromise.then(() => {
+            autoReturnTimerRef.current = setTimeout(() => {
+              autoReturnTimerRef.current = null;
+              returnHome();
+            }, AUTO_RETURN_HOLD_MS);
+          });
         }
       }
     }
@@ -443,6 +462,7 @@ export default function Dice({
       if (landTimeoutRef.current) clearTimeout(landTimeoutRef.current);
       if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
       if (pendingTapTimerRef.current) clearTimeout(pendingTapTimerRef.current);
+      if (autoReturnTimerRef.current) clearTimeout(autoReturnTimerRef.current);
       rollAnimRef.current?.stop();
     };
   }, []);

@@ -16,7 +16,14 @@ import {
 // the server's bot scheduler can guarantee it never rolls again before this
 // hold has released — otherwise the *next* bot's roll arrives mid-hold,
 // forcing a remount right as it needs to animate, silently swallowing it.
-export const DICE_HOLD_MS = 2000;
+// Long enough to cover that same auto-resolved roll's own worst-case
+// on-screen sequence in full — the flick-throw landing (up to
+// THROW_MS_RANGE), the AUTO_RETURN_HOLD_MS beat resting on the board
+// showing its face, and the return-home flight (up to RETURN_MS_RANGE), all
+// in Dice.tsx — plus a margin, so a corner-to-corner handoff never starts
+// while that return-home animation is still in flight, fighting the
+// handoff's own overlay transform.
+export const DICE_HOLD_MS = 2500;
 
 // [autoRollMs, autoMoveMs] per inactivity level — see resetInactivity/
 // advanceInactivity below. A connected seat that lets the server auto-play
