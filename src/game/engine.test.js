@@ -3,6 +3,7 @@ import {
   createGame,
   moveToken,
   placementFor,
+  claimableSeatCount,
   suspendSeat,
   removeSeatFromGame,
   reactivateSeat,
@@ -207,6 +208,48 @@ describe("suspend / remove / reactivate", () => {
     expect(state.seats[1].finished).toBe(false);
     expect(state.seats[1].suspended).toBe(false);
     expect(state.seats[1].tokens).toEqual([-1, -1, -1, -1]); // still at yard from the removal
+  });
+});
+
+describe("claimableSeatCount", () => {
+  it("is 0 for a fresh game with nobody suspended or removed", () => {
+    const state = createGame(seats(4));
+    expect(claimableSeatCount(state)).toBe(0);
+  });
+
+  it("counts a suspended seat as claimable", () => {
+    let state = createGame(seats(4));
+    state = suspendSeat(state, "seat-1");
+    expect(claimableSeatCount(state)).toBe(1);
+  });
+
+  it("counts a removed-and-unclaimed seat as claimable", () => {
+    let state = createGame(seats(3));
+    state = removeSeatFromGame(state, "seat-1");
+    expect(claimableSeatCount(state)).toBe(1);
+  });
+
+  it("does not count a seat that actually won as claimable", () => {
+    let state = createGame(seats(4));
+    state = primeSeatToFinish(state, 0);
+    state = moveToken(state, "seat-0", 3);
+    expect(state.placements).toEqual(["seat-0"]);
+    expect(claimableSeatCount(state)).toBe(0);
+  });
+
+  it("stops counting a seat once it's reactivated", () => {
+    let state = createGame(seats(4));
+    state = suspendSeat(state, "seat-1");
+    expect(claimableSeatCount(state)).toBe(1);
+    state = reactivateSeat(state, "seat-1");
+    expect(claimableSeatCount(state)).toBe(0);
+  });
+
+  it("adds up more than one open seat at once", () => {
+    let state = createGame(seats(4));
+    state = suspendSeat(state, "seat-1");
+    state = removeSeatFromGame(state, "seat-2");
+    expect(claimableSeatCount(state)).toBe(2);
   });
 });
 
