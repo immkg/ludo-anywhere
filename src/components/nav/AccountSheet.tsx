@@ -7,7 +7,7 @@ import CreditBalance from "@/components/nav/CreditBalance";
 import NavigationItem from "@/components/nav/NavigationItem";
 import ShareInviteButton from "@/components/nav/ShareInviteButton";
 import FeedbackButton from "@/components/nav/FeedbackButton";
-import { NAV_ITEMS, IconExit } from "@/components/nav/navItems";
+import { NAV_ITEMS, getHomeItem, IconExit } from "@/components/nav/navItems";
 import { IconAppearance } from "@/components/nav/icons";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -101,6 +101,7 @@ export default function AccountSheet({ open, onClose, displayName, email, userIm
             <FeedbackButton />
 
             <nav className="flex flex-col gap-1">
+              <NavigationItem {...getHomeItem("/")} onNavigate={onClose} />
               {NAV_ITEMS.map((item) => (
                 <NavigationItem key={item.href} {...item} onNavigate={onClose} />
               ))}
