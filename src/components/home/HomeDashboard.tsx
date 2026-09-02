@@ -2,6 +2,7 @@ import Link from "next/link";
 import { IconArrowRight } from "@/components/home/icons";
 import { IconTrophy } from "@/components/lobby/icons";
 import TopPlayersList from "@/components/home/TopPlayersList";
+import LiveMatchesSection from "@/components/home/LiveMatchesSection";
 import type { TopPlayer } from "@/lib/leaderboard";
 import type { TrophyTier } from "@/lib/trophies";
 
@@ -101,6 +102,8 @@ export default function HomeDashboard({ displayName, topPlayers, stats, trophy, 
               </div>
             </Link>
           </div>
+
+          <LiveMatchesSection />
 
           <TopPlayersList players={topPlayers} />
         </div>

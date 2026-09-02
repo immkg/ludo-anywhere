@@ -6,6 +6,7 @@ import {
   removeSeatFromGame,
   reactivateSeat,
   endGame as endGameInProgress,
+  seatProgress,
 } from "../game/engine.js";
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
@@ -751,6 +752,52 @@ export function startGame(room) {
   room.startedAt = new Date();
   room.game = createGame(room.seats.map((s) => ({ id: s.id, armIndex: s.armIndex })));
   return { room };
+}
+
+const DEFAULT_LIVE_MATCHES_LIMIT = 5;
+
+// The seat furthest along by seatProgress (see engine.js) — null before
+// anyone's left the yard, or on a tie, rather than picking an arbitrary
+// "leader" that isn't really ahead of anyone.
+function leadingSeatName(room) {
+  if (!room.game) return null;
+  const progresses = room.game.seats.map((gs) => ({ id: gs.id, progress: seatProgress(gs) }));
+  const maxProgress = Math.max(0, ...progresses.map((p) => p.progress));
+  if (maxProgress === 0) return null;
+  const leaders = progresses.filter((p) => p.progress === maxProgress);
+  if (leaders.length !== 1) return null;
+  return room.seats.find((s) => s.id === leaders[0].id)?.name ?? null;
+}
+
+// Public, in-progress rooms for the home dashboard's "Live Matches" section
+// (see src/app/api/live-matches/route.ts) — a room only shows up once its
+// host has opted spectatePolicy to "public" (default is "private", see
+// createRoom), so this never surfaces a room its host hasn't chosen to make
+// discoverable. Ranked by spectatorCount (most-watched first) so the small
+// capped list favors whatever's already drawing attention, tie-broken by
+// startedAt (older/more-established games first).
+export function listLiveMatches({ limit = DEFAULT_LIVE_MATCHES_LIMIT } = {}) {
+  const eligible = [];
+  for (const room of rooms.values()) {
+    if (room.status !== "playing" || room.spectatePolicy !== "public") continue;
+    eligible.push(room);
+  }
+  eligible.sort((a, b) => {
+    const spectatorDiff =
+      b.spectators.filter((s) => s.connected).length - a.spectators.filter((s) => s.connected).length;
+    if (spectatorDiff !== 0) return spectatorDiff;
+    return (a.startedAt?.getTime() ?? 0) - (b.startedAt?.getTime() ?? 0);
+  });
+  return eligible.slice(0, limit).map((room) => ({
+    code: room.code,
+    matchmaking: !!room.matchmaking,
+    maxPlayers: room.maxPlayers,
+    humanCount: room.seats.filter((s) => !s.bot).length,
+    botCount: room.seats.filter((s) => s.bot).length,
+    spectatorCount: room.spectators.filter((s) => s.connected).length,
+    elapsedMs: room.startedAt ? Date.now() - room.startedAt.getTime() : 0,
+    leaderName: leadingSeatName(room),
+  }));
 }
 
 export function serializeRoom(room) {
