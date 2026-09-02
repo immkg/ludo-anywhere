@@ -33,10 +33,10 @@ export default function GuestDashboard({ topPlayers }: { topPlayers: TopPlayer[]
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="flex gap-3 sm:grid sm:grid-cols-2">
         <Link
           href="/create"
-          className="flex min-h-[128px] flex-col justify-between rounded-3xl border-2 border-accent/30 bg-accent/10 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6),0_2px_0_rgba(0,0,0,0.06),0_8px_20px_-6px_var(--color-accent),0_16px_36px_-12px_var(--color-accent)] transition active:scale-[0.98] sm:min-h-[150px] sm:p-5"
+          className="flex min-h-[128px] flex-[2] flex-col justify-between rounded-3xl border-2 border-accent/30 bg-accent/10 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6),0_2px_0_rgba(0,0,0,0.06),0_8px_20px_-6px_var(--color-accent),0_16px_36px_-12px_var(--color-accent)] transition active:scale-[0.98] sm:min-h-[150px] sm:p-5"
         >
           <div className="min-w-0">
             <p className="text-base font-extrabold text-accent sm:text-lg">Play Now</p>
@@ -53,11 +53,11 @@ export default function GuestDashboard({ topPlayers }: { topPlayers: TopPlayer[]
 
         <Link
           href="/join"
-          className="flex min-h-[128px] flex-col justify-between rounded-3xl border-2 p-4 transition active:scale-[0.98] sm:min-h-[150px] sm:p-5"
+          className="flex min-h-[128px] flex-[1] flex-col justify-between rounded-3xl border-2 p-4 transition active:scale-[0.98] sm:min-h-[150px] sm:p-5"
           style={{
             borderColor: `${BLUE}4d`,
             backgroundColor: `${BLUE}14`,
-            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 0 rgba(0,0,0,0.06), 0 8px 20px -6px ${BLUE}80, 0 16px 36px -12px ${BLUE}80`,
+            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 0 rgba(0,0,0,0.06)`,
           }}
         >
           <div className="min-w-0">
