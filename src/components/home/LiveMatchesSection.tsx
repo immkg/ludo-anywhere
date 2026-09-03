@@ -7,7 +7,13 @@ import { useLiveMatches } from "@/hooks/useLiveMatches";
 import { requestMidGameJoin } from "@/lib/socketActions";
 import { formatElapsedShort } from "@/lib/formatDuration";
 import { IconClock, IconGlobe, IconUsers } from "@/components/lobby/icons";
-import type { LiveMatchSummary } from "@/types/room";
+import type { LiveMatchRoomType, LiveMatchSummary } from "@/types/room";
+
+const ROOM_TYPE_LABEL: Record<LiveMatchRoomType, string> = {
+  matchmaking: "Matchmaking",
+  guest: "Guest",
+  private: "Private",
+};
 
 // Read-only discovery card for the home dashboard — Spectate deep-links
 // into the room page's existing public-watch flow untouched. Join instead
@@ -57,7 +63,7 @@ function LiveMatchCard({ match }: { match: LiveMatchSummary }) {
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-bold text-ink-muted">
             <IconGlobe className="h-3 w-3" />
-            {match.matchmaking ? "Matchmaking" : "Private"}
+            {ROOM_TYPE_LABEL[match.roomType]}
           </span>
           <span className="inline-flex items-center gap-1 text-xs text-ink-muted">
             <IconUsers className="h-3.5 w-3.5" />

@@ -848,7 +848,14 @@ export function listLiveMatches({ limit = DEFAULT_LIVE_MATCHES_LIMIT } = {}) {
   });
   return eligible.slice(0, limit).map((room) => ({
     code: room.code,
-    matchmaking: !!room.matchmaking,
+    // "matchmaking": auto-paired via Find Players Online (always a
+    // signed-in host, see matchmaking:join in server.js). "guest": the
+    // no-sign-in-needed Play with Bots flow (see CreateRoom.tsx's
+    // handlePlayWithBots) — never has an invite link anyone would share, so
+    // it's the other case that only reaches Live Matches by defaulting to
+    // public on its own. "private": a signed-in host's own created room
+    // that chose to make watching public.
+    roomType: room.matchmaking ? "matchmaking" : hostUserId(room) ? "private" : "guest",
     maxPlayers: room.maxPlayers,
     humanCount: room.seats.filter((s) => !s.bot).length,
     botCount: room.seats.filter((s) => s.bot).length,

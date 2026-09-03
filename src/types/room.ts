@@ -70,9 +70,14 @@ export type OwnedSpectator = {
 // Deliberately not `Room`: no seat-level detail, since every action here
 // (join/spectate) deep-links into /join or /room, which fetch the real
 // Room themselves.
+// "matchmaking": auto-paired via Find Players Online. "guest": the
+// no-sign-in-needed Play with Bots flow. "private": a signed-in host's own
+// created room. See listLiveMatches in src/server/rooms.js.
+export type LiveMatchRoomType = "matchmaking" | "guest" | "private";
+
 export type LiveMatchSummary = {
   code: string;
-  matchmaking: boolean;
+  roomType: LiveMatchRoomType;
   maxPlayers: number;
   humanCount: number;
   botCount: number;

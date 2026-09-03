@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
-import { createRoom, createRoomAsGuest, fillBotSeats, findMatch, startGame } from "@/lib/socketActions";
+import { createRoom, createRoomAsGuest, fillBotSeats, findMatch, startGame, setSpectatePolicy } from "@/lib/socketActions";
 import { saveOwnedSeats, getGuestName, saveGuestName, randomFunnyName } from "@/lib/identity";
 import { useRoomStore } from "@/store/useRoomStore";
 import { useProfiles } from "@/hooks/useProfiles";
@@ -116,6 +116,12 @@ export default function CreateRoom() {
       saveOwnedSeats(res.roomCode, res.seats);
       addMySeats(res.seats);
       const hostSeatId = res.seats[0].id;
+      // Nobody to share an invite link with in a solo Play with Bots game —
+      // left "private" (the default) it'd never get a single spectator, so
+      // it defaults to "public" instead, same as a matchmaking room (see
+      // matchmaking:join in server.js), letting it show up in the home
+      // dashboard's Live Matches and actually get watched or joined.
+      setSpectatePolicy(res.roomCode, "public", hostSeatId).catch(() => {});
       if (totalPlayers > 1) await fillBotSeats(res.roomCode, hostSeatId);
       startGame(res.roomCode, hostSeatId);
       router.push(`/room/${res.roomCode}`);

@@ -21,36 +21,42 @@ function makePlayingRoom({ maxPlayers = 4, humans = 2, bots = 0 } = {}) {
   return room;
 }
 
+// rooms.js's `rooms` Map is module-level state that outlives each `it`
+// block, and listLiveMatches never actually deletes anything — so every
+// test below except the one testing the cap itself passes a generous limit,
+// rather than the real default of 5, to keep finding its own room
+// regardless of how many earlier tests' public/playing rooms are still
+// sitting in the shared map ahead of it.
 describe("listLiveMatches", () => {
   it("excludes rooms that are still in the lobby", () => {
     const room = createRoom({ maxPlayers: 4 });
     addSeats(room, [{ name: "P0", profileId: "profile-0" }], { socketId: "s0", deviceId: "d0", userId: "u0" });
     setSpectatePolicy(room, "public");
-    expect(listLiveMatches().find((m) => m.code === room.code)).toBeUndefined();
+    expect(listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code)).toBeUndefined();
   });
 
   it("excludes finished rooms", () => {
     const room = makePlayingRoom();
     setSpectatePolicy(room, "public");
     room.status = "finished";
-    expect(listLiveMatches().find((m) => m.code === room.code)).toBeUndefined();
+    expect(listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code)).toBeUndefined();
   });
 
   it("excludes playing rooms whose host left spectating private (the default)", () => {
     const room = makePlayingRoom();
     expect(room.spectatePolicy).toBe("private");
-    expect(listLiveMatches().find((m) => m.code === room.code)).toBeUndefined();
+    expect(listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code)).toBeUndefined();
   });
 
-  it("includes a public, in-progress room with human/bot counts and matchmaking flag", () => {
+  it("includes a public, in-progress room with human/bot counts and roomType", () => {
     const room = makePlayingRoom({ humans: 2, bots: 1 });
     room.matchmaking = true;
     setSpectatePolicy(room, "public");
 
-    const match = listLiveMatches().find((m) => m.code === room.code);
+    const match = listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code);
     expect(match).toMatchObject({
       code: room.code,
-      matchmaking: true,
+      roomType: "matchmaking",
       maxPlayers: 4,
       humanCount: 2,
       botCount: 1,
@@ -60,22 +66,37 @@ describe("listLiveMatches", () => {
     expect(match.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 
+  it("labels a non-matchmaking room with a signed-in host as private", () => {
+    const room = makePlayingRoom({ humans: 2 });
+    setSpectatePolicy(room, "public");
+    expect(listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code)).toMatchObject({ roomType: "private" });
+  });
+
+  it("labels a non-matchmaking room with a guest host as guest", () => {
+    const room = createRoom({ maxPlayers: 4 });
+    addSeats(room, [{ name: "Guest" }], { socketId: "s0", deviceId: "d0" }); // no userId: guest host
+    addSeats(room, [{ name: "Bot 1" }], { bot: true });
+    startGame(room);
+    setSpectatePolicy(room, "public");
+    expect(listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code)).toMatchObject({ roomType: "guest" });
+  });
+
   it("reflects the connected spectator count", () => {
     const room = makePlayingRoom();
     setSpectatePolicy(room, "public");
     addSpectator(room, { name: "Watcher", userId: "user-9", deviceId: null, socketId: "s9" });
 
-    const match = listLiveMatches().find((m) => m.code === room.code);
+    const match = listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code);
     expect(match.spectatorCount).toBe(1);
   });
 
   it("reports null leaderName before anyone has moved, and a name once one seat pulls ahead", () => {
     const room = makePlayingRoom();
     setSpectatePolicy(room, "public");
-    expect(listLiveMatches().find((m) => m.code === room.code).leaderName).toBeNull();
+    expect(listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code).leaderName).toBeNull();
 
     room.game.seats[0].tokens = [5, -1, -1, -1];
-    const match = listLiveMatches().find((m) => m.code === room.code);
+    const match = listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code);
     expect(match.leaderName).toBe(room.seats[0].name);
   });
 
@@ -85,7 +106,7 @@ describe("listLiveMatches", () => {
     room.game.seats[0].tokens = [5, -1, -1, -1];
     room.game.seats[1].tokens = [5, -1, -1, -1];
 
-    const match = listLiveMatches().find((m) => m.code === room.code);
+    const match = listLiveMatches({ limit: 1000 }).find((m) => m.code === room.code);
     expect(match.leaderName).toBeNull();
   });
 
