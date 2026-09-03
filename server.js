@@ -1312,13 +1312,24 @@ app.prepare().then(() => {
         if (room.seats.some((s) => s.userId === userId)) {
           return ack?.({ error: "You're already playing in this room" });
         }
-        const hostId = hostUserId(room);
-        if (!hostId) return ack?.({ error: "That room isn't open" });
 
         const requester = await getPrisma().user.findUnique({ where: { id: userId } });
         const fromName = requester?.name ?? requester?.email ?? "Someone";
         room.pendingMidGameRequests.set(userId, { fromName });
-        io.to(userChannel(hostId)).emit("room:midGameJoinRequest:incoming", { roomCode: room.code, fromUserId: userId, fromName });
+
+        const hostId = hostUserId(room);
+        const payload = { roomCode: room.code, fromUserId: userId, fromName };
+        if (hostId) {
+          io.to(userChannel(hostId)).emit("room:midGameJoinRequest:incoming", payload);
+        } else {
+          // A guest host (e.g. Play with Bots, see CreateRoom.tsx) has no
+          // account, so no userChannel to push into — fall back to the
+          // room's own socket.io channel, which the host is in simply by
+          // having this room open (see socket.join(room.code) elsewhere).
+          // Every client in the room gets this, but only the host's own
+          // client acts on it (see useSocket.ts's isHost check).
+          io.to(room.code).emit("room:midGameJoinRequest:incoming", payload);
+        }
         ack?.({});
       })
     );
@@ -1330,12 +1341,13 @@ app.prepare().then(() => {
 
     socket.on(
       "room:midGameJoinRequest:approve",
-      withAck(async ({ roomCode, toUserId, targetSeatId }, ack) => {
-        const approverUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+      withAck(async ({ roomCode, toUserId, targetSeatId, callerSeatId }, ack) => {
         const room = getRoom(roomCode);
         if (!room) return ack?.({ error: "Room not found" });
-        const hostSeat = room.seats.find((s) => s.id === room.hostSeatId);
-        if (!approverUserId || hostSeat?.userId !== approverUserId) {
+        // Seat-based proof of host-ness, not a cookie-based userId check
+        // (see room:endGame/room:setSpectatePolicy) — a guest host (e.g.
+        // Play with Bots) has no account at all to check against.
+        if (!room.hostSeatId || room.hostSeatId !== callerSeatId) {
           return ack?.({ error: "Only the host can approve requests" });
         }
 

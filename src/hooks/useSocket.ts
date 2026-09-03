@@ -47,8 +47,18 @@ export function useSocketConnection() {
       addJoinRequest({ id: crypto.randomUUID(), kind: "seat", ...payload });
     const onWatchRequestIncoming = (payload: { roomCode: string; fromUserId: string; fromName: string }) =>
       addJoinRequest({ id: crypto.randomUUID(), kind: "spectate", ...payload });
-    const onMidGameJoinRequestIncoming = (payload: { roomCode: string; fromUserId: string; fromName: string }) =>
+    // A guest host (no account, no userChannel — see room:midGameJoinRequest
+    // in server.js) gets this broadcast to the whole room.code channel
+    // instead of pushed to them individually, so every other client in the
+    // room receives it too; only the actual host's own client should act on
+    // it. Read via getState() rather than selecting room/mySeats above so
+    // this handler doesn't need re-registering on every room/seat change.
+    const onMidGameJoinRequestIncoming = (payload: { roomCode: string; fromUserId: string; fromName: string }) => {
+      const { room, mySeats } = useRoomStore.getState();
+      const isHost = !!room?.hostSeatId && mySeats.some((s) => s.id === room.hostSeatId);
+      if (!isHost) return;
       addJoinRequest({ id: crypto.randomUUID(), kind: "midGameJoin", ...payload });
+    };
     // The host approved a Live Matches "Join" request (see
     // room:midGameJoinRequest:approve in server.js) — the requester is
     // already on /room/[code] as a spectator (see LiveMatchesSection.tsx),

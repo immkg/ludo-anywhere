@@ -204,8 +204,11 @@ export function requestMidGameJoin(roomCode: string) {
   return emitWithAck("room:midGameJoinRequest", { roomCode });
 }
 
-export function approveMidGameJoinRequest(roomCode: string, toUserId: string, targetSeatId: string) {
-  return emitWithAck("room:midGameJoinRequest:approve", { roomCode, toUserId, targetSeatId });
+// `hostSeatId` proves the caller is the host by seat, not by signed-in
+// account — same as setSpectatePolicy/endGame, needed because a guest host
+// (e.g. Play with Bots) has no account for a cookie-based check.
+export function approveMidGameJoinRequest(roomCode: string, toUserId: string, targetSeatId: string, hostSeatId: string) {
+  return emitWithAck("room:midGameJoinRequest:approve", { roomCode, toUserId, targetSeatId, callerSeatId: hostSeatId });
 }
 
 export function declineMidGameJoinRequest(roomCode: string, toUserId: string) {

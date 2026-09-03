@@ -72,7 +72,8 @@ export default function IncomingJoinRequests({ roomCode, room, game }: { roomCod
                     <button
                       key={target.seatId}
                       onClick={() => {
-                        approveMidGameJoinRequest(roomCode, req.fromUserId, target.seatId).catch(() => {});
+                        if (!room?.hostSeatId) return;
+                        approveMidGameJoinRequest(roomCode, req.fromUserId, target.seatId, room.hostSeatId).catch(() => {});
                         removeJoinRequest(req.id);
                       }}
                       className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white"
