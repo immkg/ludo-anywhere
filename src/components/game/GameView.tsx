@@ -961,7 +961,7 @@ export default function GameView({
 
       {isHost && (
         <div className="shrink-0 flex flex-col gap-2 px-2 pt-2 sm:px-4">
-          <IncomingJoinRequests roomCode={room.code} />
+          <IncomingJoinRequests roomCode={room.code} room={room} game={game} />
         </div>
       )}
 

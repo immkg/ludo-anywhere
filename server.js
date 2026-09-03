@@ -33,6 +33,7 @@ import {
   setSpectatePolicy,
   addSpectatorChatMessage,
   listLiveMatches,
+  assignMidGameSeat,
 } from "./src/server/rooms.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
 import {
@@ -1292,6 +1293,94 @@ app.prepare().then(() => {
         });
         broadcastRoom(room);
         broadcastGame(room);
+      })
+    );
+
+    // Home dashboard's Live Matches "Join" on an in-progress room —
+    // deliberately generic (no seatId, unlike room:claimSeat above): the
+    // requester doesn't get to see which seats are open or bot-controlled,
+    // the host does, and picks a target themselves at approval time (see
+    // room:midGameJoinRequest:approve below).
+    socket.on(
+      "room:midGameJoinRequest",
+      withAck(async ({ roomCode }, ack) => {
+        const userId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        if (!userId) return ack?.({ error: "Sign in with Google to ask to join" });
+
+        const room = getRoom(roomCode);
+        if (!room?.game || room.status !== "playing") return ack?.({ error: "That game isn't in progress" });
+        if (room.seats.some((s) => s.userId === userId)) {
+          return ack?.({ error: "You're already playing in this room" });
+        }
+        const hostId = hostUserId(room);
+        if (!hostId) return ack?.({ error: "That room isn't open" });
+
+        const requester = await getPrisma().user.findUnique({ where: { id: userId } });
+        const fromName = requester?.name ?? requester?.email ?? "Someone";
+        room.pendingMidGameRequests.set(userId, { fromName });
+        io.to(userChannel(hostId)).emit("room:midGameJoinRequest:incoming", { roomCode: room.code, fromUserId: userId, fromName });
+        ack?.({});
+      })
+    );
+
+    socket.on("room:midGameJoinRequest:decline", ({ roomCode, toUserId }) => {
+      getRoom(roomCode)?.pendingMidGameRequests.delete(toUserId);
+      io.to(userChannel(toUserId)).emit("room:midGameJoinRequest:declined", { roomCode });
+    });
+
+    socket.on(
+      "room:midGameJoinRequest:approve",
+      withAck(async ({ roomCode, toUserId, targetSeatId }, ack) => {
+        const approverUserId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        const hostSeat = room.seats.find((s) => s.id === room.hostSeatId);
+        if (!approverUserId || hostSeat?.userId !== approverUserId) {
+          return ack?.({ error: "Only the host can approve requests" });
+        }
+
+        const pending = room.pendingMidGameRequests.get(toUserId);
+        room.pendingMidGameRequests.delete(toUserId);
+        if (!pending) return ack?.({ error: "That request is no longer pending" });
+
+        // Same profile-resolution fallback as room:joinRequest:approve's
+        // "older friends-list" path — this request never collected a
+        // profileId of its own, so it's always resolved from the
+        // requester's own default profile.
+        const requester = await getPrisma().user.findUnique({ where: { id: toUserId } });
+        if (!requester?.email) return ack?.({ error: "Could not find that player" });
+        const profile = await getPrisma().playerProfile.findUnique({
+          where: { email: requester.email.toLowerCase() },
+        });
+        if (!profile) return ack?.({ error: "Could not find that player" });
+        const resolved = await resolveSeatProfiles([{ profileId: profile.id }], toUserId);
+        if (resolved.error) {
+          io.to(userChannel(toUserId)).emit("room:midGameJoinRequest:declined", { roomCode });
+          return ack?.({ error: resolved.error });
+        }
+        const [{ name, profileId }] = resolved.seats;
+
+        const { error, seat } = assignMidGameSeat(room, targetSeatId, {
+          name,
+          profileId,
+          userId: toUserId,
+          socketId: null,
+          deviceId: null,
+        });
+        if (error) {
+          io.to(userChannel(toUserId)).emit("room:midGameJoinRequest:declined", { roomCode });
+          return ack?.({ error });
+        }
+
+        setUserRoom(toUserId, room.code);
+        broadcastPresence(toUserId).catch(logPresenceError("mid-game join approval"));
+        broadcastRoom(room);
+        broadcastGame(room);
+        io.to(userChannel(toUserId)).emit("room:midGameJoinApproved", {
+          roomCode: room.code,
+          seats: [{ id: seat.id, token: seat.token, armIndex: seat.armIndex, name: seat.name }],
+        });
+        ack?.({});
       })
     );
 
