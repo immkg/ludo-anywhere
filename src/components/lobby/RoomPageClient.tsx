@@ -174,12 +174,26 @@ export default function RoomPageClient() {
               {watchState === "requesting" ? "Requesting…" : "Watch this game"}
             </Button>
           )}
-          <Button variant="secondary" onClick={() => router.push(`/join`)}>
-            Join a room
-          </Button>
-          <Button variant="secondary" onClick={() => router.push(`/create`)}>
-            Create room
-          </Button>
+          {roomNotFound ? (
+            <>
+              {/* This link is dead either way, so lead with the action that
+                  actually gets someone playing again rather than the one
+                  that just asks them to type in another code. */}
+              <Button onClick={() => router.push(`/create`)}>Create room</Button>
+              <Button variant="secondary" onClick={() => router.push(`/join`)}>
+                Join a room
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => router.push(`/join`)}>
+                Join a room
+              </Button>
+              <Button variant="secondary" onClick={() => router.push(`/create`)}>
+                Create room
+              </Button>
+            </>
+          )}
         </div>
       </div>
     );
