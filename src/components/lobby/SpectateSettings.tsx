@@ -37,8 +37,8 @@ export default function SpectateSettings({ room, hostSeatId }: { room: Room; hos
         </p>
         <p className="text-xs text-ink-muted">
           {isPublic
-            ? "Anyone with the link can watch — no approval needed."
-            : "You approve each request to watch; watchers stay anonymous to players."}
+            ? "Anyone with the link can watch"
+            : "You approve each request to watch"}
         </p>
         {error && <p className="text-xs text-accent">{error}</p>}
       </div>
