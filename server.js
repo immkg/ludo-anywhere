@@ -747,6 +747,15 @@ app.prepare().then(() => {
         if (!room) {
           room = createRoom({ maxPlayers: MATCHMAKING_SIZE });
           room.matchmaking = true;
+          // Unlike a host-created room (see SpectateSettings/ReactionBar's
+          // Spectators toggle, hidden entirely for matchmaking rooms — see
+          // showSpectatorsToggle in GameView.tsx), nobody ever gets a
+          // matchmaking room's invite link to opt into watching, and there's
+          // no host to flip a toggle on its behalf. Default it to public so
+          // it's actually reachable — via the home dashboard's Live Matches
+          // list (src/server/rooms.js's listLiveMatches), which is now the
+          // only way anyone finds a matchmaking room to spectate/join at all.
+          room.spectatePolicy = "public";
           created = true;
         }
         const { error, seats: addedSeats } = addSeats(room, resolved.seats, {
