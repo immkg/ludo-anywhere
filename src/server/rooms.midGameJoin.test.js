@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { createRoom, addSeats, startGame, midGameSuspendSeat, midGameRemoveSeat, assignMidGameSeat } from "./rooms.js";
+import {
+  createRoom,
+  addSeats,
+  startGame,
+  midGameSuspendSeat,
+  midGameRemoveSeat,
+  assignMidGameSeat,
+  isBotOnlyGame,
+  pickMidGameJoinTarget,
+  handleSocketDisconnect,
+} from "./rooms.js";
 
 function makeStartedRoom({ humans = 2, bots = 0 } = {}) {
   const room = createRoom({ maxPlayers: 4 });
@@ -96,5 +106,75 @@ describe("assignMidGameSeat", () => {
   it("errors on a seat id that was never part of this game", () => {
     const room = makeStartedRoom({ humans: 2 });
     expect(assignMidGameSeat(room, "not-a-real-seat", IDENTITY)).toEqual({ error: "Seat not found" });
+  });
+});
+
+describe("isBotOnlyGame", () => {
+  it("is false while any human seat remains, connected or not", () => {
+    const room = makeStartedRoom({ humans: 1, bots: 3 });
+    expect(isBotOnlyGame(room)).toBe(false);
+    room.seats.find((s) => !s.bot).connected = false;
+    expect(isBotOnlyGame(room)).toBe(false);
+  });
+
+  it("is true once every seat is a bot", () => {
+    const room = makeStartedRoom({ humans: 1, bots: 3 });
+    room.seats = room.seats.filter((s) => s.bot);
+    expect(isBotOnlyGame(room)).toBe(true);
+  });
+
+  it("is false for a bot-only room still in the lobby", () => {
+    const room = createRoom({ maxPlayers: 4 });
+    addSeats(room, [{ name: "Bot 1" }], { bot: true });
+    expect(isBotOnlyGame(room)).toBe(false);
+  });
+});
+
+describe("pickMidGameJoinTarget", () => {
+  it("prefers a suspended human seat over an active bot", () => {
+    const room = makeStartedRoom({ humans: 2, bots: 1 });
+    const suspendedId = room.seats[1].id;
+    midGameSuspendSeat(room, suspendedId);
+    expect(pickMidGameJoinTarget(room)).toBe(suspendedId);
+  });
+
+  it("falls back to a fully-vacated seat when no seat row is open", () => {
+    const room = makeStartedRoom({ humans: 3, bots: 1 });
+    const vacatedId = room.seats[1].id;
+    midGameRemoveSeat(room, vacatedId);
+    room.seats = room.seats.filter((s) => s.id !== vacatedId);
+
+    expect(pickMidGameJoinTarget(room)).toBe(vacatedId);
+  });
+
+  it("falls back to an active bot when nothing else is open", () => {
+    const room = makeStartedRoom({ humans: 2, bots: 1 });
+    const botId = room.seats.find((s) => s.bot).id;
+    expect(pickMidGameJoinTarget(room)).toBe(botId);
+  });
+
+  it("returns null when there is truly nothing to hand over", () => {
+    const room = makeStartedRoom({ humans: 2 });
+    expect(pickMidGameJoinTarget(room)).toBeNull();
+  });
+});
+
+describe("handleSocketDisconnect host reassignment", () => {
+  it("hands host to the next connected human, never a bot", () => {
+    const room = makeStartedRoom({ humans: 2, bots: 2 });
+    const [host, human2] = room.seats.filter((s) => !s.bot);
+    room.hostSeatId = host.id;
+
+    handleSocketDisconnect(room, host.socketId, () => {});
+    expect(room.hostSeatId).toBe(human2.id);
+  });
+
+  it("leaves hostSeatId on the disconnected host when no other human is connected", () => {
+    const room = makeStartedRoom({ humans: 1, bots: 2 });
+    const host = room.seats.find((s) => !s.bot);
+    room.hostSeatId = host.id;
+
+    handleSocketDisconnect(room, host.socketId, () => {});
+    expect(room.hostSeatId).toBe(host.id);
   });
 });

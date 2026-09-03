@@ -50,7 +50,14 @@ export default function RoomPageClient() {
         }
         setRejoinState("ok");
       })
-      .catch(() => setRejoinState("none"));
+      .catch((e) => {
+        // Surfaced the same way a failed manual "Watch this game" click
+        // would be (see handleWatch) — a dead room link should show that
+        // immediately, not the generic "not seated" prompt with a Watch
+        // button that would just fail the same way if clicked.
+        if (e instanceof Error && e.message === "Room not found") setWatchError(e.message);
+        setRejoinState("none");
+      });
   }, [roomCode, addMySeats]);
 
   // Reconnect as a spectator, same idea as the seat rejoin above — only
@@ -128,6 +135,7 @@ export default function RoomPageClient() {
     if (autoWatchFired.current) return;
     if (searchParams.get("watch") !== "1") return;
     if (rejoinState === "pending" || isSeated || isWatching || watchState !== "idle") return;
+    if (watchError === "Room not found") return;
     autoWatchFired.current = true;
     // Deferred a tick rather than called directly — handleWatch's first
     // line is a setState call, and calling it synchronously from an
@@ -136,35 +144,56 @@ export default function RoomPageClient() {
     // no-setstate-in-effect lint rule.
     Promise.resolve().then(() => handleWatch());
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleWatch is redefined every render; autoWatchFired.current already guards against firing more than once
-  }, [searchParams, rejoinState, isSeated, isWatching, watchState]);
+  }, [searchParams, rejoinState, isSeated, isWatching, watchState, watchError]);
 
   if (rejoinState === "pending") {
     return <div className="flex min-h-dvh items-center justify-center text-ink-muted">Loading room…</div>;
   }
 
   if (rejoinState === "none" || !room || (!isSeated && !isWatching)) {
+    // A dead end, not something retrying the same action fixes — no seat
+    // to rejoin, no room to watch. Skip the "not seated"/Watch prompt
+    // entirely rather than show them next to an error that already says
+    // there's nothing here.
+    const roomNotFound = watchError === "Room not found";
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-8 text-center">
-        <p className="text-ink-muted">
-          {watchState === "waiting"
-            ? "Waiting for the host to let you watch…"
-            : watchState === "declined"
-              ? "The host declined your request to watch."
-              : `You're not seated in room ${roomCode}.`}
-        </p>
+        {!roomNotFound && (
+          <p className="text-ink-muted">
+            {watchState === "waiting"
+              ? "Waiting for the host to let you watch…"
+              : watchState === "declined"
+                ? "The host declined your request to watch."
+                : `You're not seated in room ${roomCode}.`}
+          </p>
+        )}
         {watchError && <p className="text-sm text-accent">{watchError}</p>}
         <div className="flex w-full max-w-xs flex-col gap-3">
-          {watchState !== "waiting" && (
+          {watchState !== "waiting" && !roomNotFound && (
             <Button onClick={handleWatch} disabled={watchState === "requesting"}>
               {watchState === "requesting" ? "Requesting…" : "Watch this game"}
             </Button>
           )}
-          <Button variant="secondary" onClick={() => router.push(`/join`)}>
-            Join a room
-          </Button>
-          <Button variant="secondary" onClick={() => router.push(`/create`)}>
-            Create room
-          </Button>
+          {roomNotFound ? (
+            <>
+              {/* This link is dead either way, so lead with the action that
+                  actually gets someone playing again rather than the one
+                  that just asks them to type in another code. */}
+              <Button onClick={() => router.push(`/create`)}>Create room</Button>
+              <Button variant="secondary" onClick={() => router.push(`/join`)}>
+                Join a room
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => router.push(`/join`)}>
+                Join a room
+              </Button>
+              <Button variant="secondary" onClick={() => router.push(`/create`)}>
+                Create room
+              </Button>
+            </>
+          )}
         </div>
       </div>
     );
