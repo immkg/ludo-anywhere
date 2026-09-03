@@ -536,6 +536,38 @@ export function assignMidGameSeat(room, seatId, { name, profileId, userId, socke
   return { room, seat: newSeat };
 }
 
+// True once every seat still in the room is a bot — no human is actually
+// playing (whether they were fully removed, or drifted down to nobody in
+// room.seats at all), so play continuing is just bots against bots with no
+// one it matters to. Used by server.js's sweep to end such games rather
+// than let them run forever (see room:endGame for the equivalent
+// host-triggered path).
+export function isBotOnlyGame(room) {
+  return room.status === "playing" && room.seats.length > 0 && room.seats.every((s) => s.bot);
+}
+
+// Best target for a mid-game join request nobody's around to approve (see
+// room:midGameJoinRequest in server.js, for when every human seat is
+// disconnected) — prefers a seat where nobody's actually displaced (an
+// open seat, whether still in room.seats or fully vacated) over bumping a
+// bot that's at least still "someone" mid-game, and only reaches for a bot
+// if literally nothing else is open. Mirrors assignMidGameSeat's own
+// "available" condition, minus the seat.bot branch (checked last, not
+// first, unlike there).
+export function pickMidGameJoinTarget(room) {
+  if (!room?.game) return null;
+  for (const seat of room.seats) {
+    if (seat.bot) continue;
+    const gameSeat = room.game.seats.find((s) => s.id === seat.id);
+    if (!gameSeat) continue;
+    const removedUnclaimed = gameSeat.finished && !room.game.placements.includes(seat.id);
+    if (gameSeat.suspended || removedUnclaimed || (!seat.connected && !gameSeat.finished)) return seat.id;
+  }
+  const vacated = vacatedSeats(room)[0];
+  if (vacated) return vacated.id;
+  return room.seats.find((s) => s.bot)?.id ?? null;
+}
+
 // Host-only: stops the game outright — see engine.js's endGame. Unlike
 // midGameRemoveSeat, this doesn't require narrowing down to one seat
 // first; the host can call it any time mid-game. Once the room has been
@@ -735,7 +767,10 @@ export function handleSocketDisconnect(room, socketId, onChange) {
   if (room.status === "lobby") {
     room.seats = room.seats.filter((s) => s.socketId !== socketId);
     if (room.hostSeatId && !room.seats.find((s) => s.id === room.hostSeatId)) {
-      room.hostSeatId = room.seats[0]?.id ?? null;
+      // A bot can't act as host (approve requests, start the game, ...) —
+      // prefer the next human seat, falling back to a bot only when no
+      // human is left at all (matches the mid-game branch below).
+      room.hostSeatId = (room.seats.find((s) => !s.bot) ?? room.seats[0])?.id ?? null;
     }
     if (room.seats.length === 0 && room.spectators.length === 0) rooms.delete(room.code);
     onChange();
@@ -750,7 +785,13 @@ export function handleSocketDisconnect(room, socketId, onChange) {
   // personally reconnect. Mirrors the lobby branch above, just without
   // dropping the seat itself.
   if (room.hostSeatId && affected.some((s) => s.id === room.hostSeatId)) {
-    const nextHost = room.seats.find((s) => !affected.includes(s) && s.connected);
+    // A bot can't approve anything or act as host, so it's never a
+    // candidate here — unlike the lobby branch above, the disconnecting
+    // host's own seat isn't removed mid-game (it stays, just disconnected),
+    // so leaving hostSeatId untouched when no other human is connected
+    // means it's still waiting right there for them to reconnect into,
+    // rather than being handed to a bot that can never give it back.
+    const nextHost = room.seats.find((s) => !affected.includes(s) && s.connected && !s.bot);
     if (nextHost) room.hostSeatId = nextHost.id;
   }
 

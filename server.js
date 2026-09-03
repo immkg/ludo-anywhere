@@ -34,6 +34,8 @@ import {
   addSpectatorChatMessage,
   listLiveMatches,
   assignMidGameSeat,
+  isBotOnlyGame,
+  pickMidGameJoinTarget,
 } from "./src/server/rooms.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
 import {
@@ -145,6 +147,19 @@ app.prepare().then(() => {
 
   function sweepTurnTimeouts() {
     for (const room of allRooms()) {
+      // No human is actually playing (see isBotOnlyGame) — end it here
+      // rather than let bots play each other forever. Same resolution path
+      // a host's own "End game" takes (room:endGame), just nobody left to
+      // click it.
+      if (isBotOnlyGame(room)) {
+        const { error } = midGameEndGame(room);
+        if (!error) {
+          broadcastGame(room);
+          finishRoomIfNeeded(room);
+        }
+        continue;
+      }
+
       const target = currentAutoTarget(room);
       if (!target) {
         room.turnTarget = null;
@@ -245,6 +260,57 @@ app.prepare().then(() => {
     const props = { roomCode: room.code, playerCount: room.seats.length, sponsored: room.sponsored };
     logEvent("game_completed", hostUserId(room), props);
     trackPosthog("game_completed", props, hostUserId(room));
+  }
+
+  // Shared by room:midGameJoinRequest:approve and its auto-approval branch
+  // (see below) — a mid-game join request never collects a profileId of
+  // its own, so it's always resolved from the requester's own default
+  // profile, same as room:joinRequest:approve's "older friends-list" path.
+  async function resolveRequesterProfile(userId) {
+    const requester = await getPrisma().user.findUnique({ where: { id: userId } });
+    if (!requester?.email) return { error: "Could not find that player" };
+    const profile = await getPrisma().playerProfile.findUnique({
+      where: { email: requester.email.toLowerCase() },
+    });
+    if (!profile) return { error: "Could not find that player" };
+    const resolved = await resolveSeatProfiles([{ profileId: profile.id }], userId);
+    if (resolved.error) return { error: resolved.error };
+    return { seat: resolved.seats[0] };
+  }
+
+  // Shared by room:midGameJoinRequest's auto-approval branch and its
+  // human-approved counterpart below — resolves the requester's profile,
+  // hands them the target seat, and pushes room:midGameJoinApproved to
+  // them (see useSocket.ts, which promotes them from spectator to player).
+  async function seatMidGameRequester(room, userId, targetSeatId) {
+    const resolvedProfile = await resolveRequesterProfile(userId);
+    if (resolvedProfile.error) {
+      io.to(userChannel(userId)).emit("room:midGameJoinRequest:declined", { roomCode: room.code });
+      return { error: resolvedProfile.error };
+    }
+    const { name, profileId } = resolvedProfile.seat;
+
+    const { error, seat } = assignMidGameSeat(room, targetSeatId, {
+      name,
+      profileId,
+      userId,
+      socketId: null,
+      deviceId: null,
+    });
+    if (error) {
+      io.to(userChannel(userId)).emit("room:midGameJoinRequest:declined", { roomCode: room.code });
+      return { error };
+    }
+
+    setUserRoom(userId, room.code);
+    broadcastPresence(userId).catch(logPresenceError("mid-game join approval"));
+    broadcastRoom(room);
+    broadcastGame(room);
+    io.to(userChannel(userId)).emit("room:midGameJoinApproved", {
+      roomCode: room.code,
+      seats: [{ id: seat.id, token: seat.token, armIndex: seat.armIndex, name: seat.name }],
+    });
+    return {};
   }
 
   const userChannel = (userId) => `user:${userId}`;
@@ -1313,6 +1379,17 @@ app.prepare().then(() => {
           return ack?.({ error: "You're already playing in this room" });
         }
 
+        // Nobody left to approve anything (see the host-reassignment fix in
+        // handleSocketDisconnect, which never hands host role to a bot) —
+        // seat them straight in rather than leaving the request pending
+        // forever with no human around to act on it.
+        if (room.seats.filter((s) => !s.bot && s.connected).length === 0) {
+          const targetSeatId = pickMidGameJoinTarget(room);
+          if (!targetSeatId) return ack?.({ error: "No seat available" });
+          const { error } = await seatMidGameRequester(room, userId, targetSeatId);
+          return ack?.(error ? { error } : {});
+        }
+
         const requester = await getPrisma().user.findUnique({ where: { id: userId } });
         const fromName = requester?.name ?? requester?.email ?? "Someone";
         room.pendingMidGameRequests.set(userId, { fromName });
@@ -1355,44 +1432,8 @@ app.prepare().then(() => {
         room.pendingMidGameRequests.delete(toUserId);
         if (!pending) return ack?.({ error: "That request is no longer pending" });
 
-        // Same profile-resolution fallback as room:joinRequest:approve's
-        // "older friends-list" path — this request never collected a
-        // profileId of its own, so it's always resolved from the
-        // requester's own default profile.
-        const requester = await getPrisma().user.findUnique({ where: { id: toUserId } });
-        if (!requester?.email) return ack?.({ error: "Could not find that player" });
-        const profile = await getPrisma().playerProfile.findUnique({
-          where: { email: requester.email.toLowerCase() },
-        });
-        if (!profile) return ack?.({ error: "Could not find that player" });
-        const resolved = await resolveSeatProfiles([{ profileId: profile.id }], toUserId);
-        if (resolved.error) {
-          io.to(userChannel(toUserId)).emit("room:midGameJoinRequest:declined", { roomCode });
-          return ack?.({ error: resolved.error });
-        }
-        const [{ name, profileId }] = resolved.seats;
-
-        const { error, seat } = assignMidGameSeat(room, targetSeatId, {
-          name,
-          profileId,
-          userId: toUserId,
-          socketId: null,
-          deviceId: null,
-        });
-        if (error) {
-          io.to(userChannel(toUserId)).emit("room:midGameJoinRequest:declined", { roomCode });
-          return ack?.({ error });
-        }
-
-        setUserRoom(toUserId, room.code);
-        broadcastPresence(toUserId).catch(logPresenceError("mid-game join approval"));
-        broadcastRoom(room);
-        broadcastGame(room);
-        io.to(userChannel(toUserId)).emit("room:midGameJoinApproved", {
-          roomCode: room.code,
-          seats: [{ id: seat.id, token: seat.token, armIndex: seat.armIndex, name: seat.name }],
-        });
-        ack?.({});
+        const { error } = await seatMidGameRequester(room, toUserId, targetSeatId);
+        ack?.(error ? { error } : {});
       })
     );
 
