@@ -32,6 +32,7 @@ import {
   reconnectSpectator,
   setSpectatePolicy,
   addSpectatorChatMessage,
+  listLiveMatches,
 } from "./src/server/rooms.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
 import {
@@ -66,7 +67,22 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
-  const httpServer = createServer((req, res) => handle(req, res));
+  // Served here rather than as a Next.js route handler (src/app/api/*) —
+  // a Next-bundled route imports rooms.js through Next's own dev/prod
+  // bundler, which instantiates it as a *separate* module from this
+  // file's plain `import` above, each with its own independent in-memory
+  // `rooms` Map. Only this native import is ever mutated by the socket
+  // handlers below, so a Next route reading "live" room state would
+  // always see an empty map. Intercepting the request here, before
+  // handing off to Next's `handle`, guarantees the same module instance.
+  const httpServer = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/api/live-matches") {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ matches: listLiveMatches() }));
+      return;
+    }
+    handle(req, res);
+  });
   const io = new Server(httpServer);
 
   function broadcastRoom(room) {
