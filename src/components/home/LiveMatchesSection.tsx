@@ -48,7 +48,7 @@ function LiveMatchCard({ match }: { match: LiveMatchSummary }) {
     // on this.
     requestMidGameJoin(match.code)
       .catch(() => {})
-      .finally(() => router.push(`/room/${match.code}`));
+      .finally(() => router.push(`/room/${match.code}?watch=1`));
   };
 
   return (
@@ -76,7 +76,7 @@ function LiveMatchCard({ match }: { match: LiveMatchSummary }) {
 
       <div className="flex shrink-0 items-center gap-2">
         <Link
-          href={`/room/${match.code}`}
+          href={`/room/${match.code}?watch=1`}
           className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink active:scale-[0.98]"
         >
           Spectate

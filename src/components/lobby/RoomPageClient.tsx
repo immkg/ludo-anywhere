@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useRoomStore } from "@/store/useRoomStore";
 import {
@@ -27,6 +27,7 @@ type WatchState = "idle" | "requesting" | "waiting" | "declined";
 export default function RoomPageClient() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session } = useSession();
   const roomCode = String(params.roomId).toUpperCase();
 
@@ -115,6 +116,27 @@ export default function RoomPageClient() {
   const myRelevantSeats = mySeats.filter((s) => room?.seats.some((rs) => rs.id === s.id));
   const isSeated = myRelevantSeats.length > 0;
   const isWatching = !!spectator;
+
+  // Skips the manual "Watch this game" click for a link that already
+  // promised spectating — the home dashboard's Live Matches "Spectate"
+  // (see LiveMatchesSection.tsx) only ever links to rooms with
+  // spectatePolicy "public", so this always resolves instantly rather than
+  // landing the visitor on a wait screen for something a click wouldn't
+  // meaningfully gate anyway.
+  const autoWatchFired = useRef(false);
+  useEffect(() => {
+    if (autoWatchFired.current) return;
+    if (searchParams.get("watch") !== "1") return;
+    if (rejoinState === "pending" || isSeated || isWatching || watchState !== "idle") return;
+    autoWatchFired.current = true;
+    // Deferred a tick rather than called directly — handleWatch's first
+    // line is a setState call, and calling it synchronously from an
+    // effect's own body (as opposed to from a later promise/event
+    // callback, the way every other effect above handles this) trips the
+    // no-setstate-in-effect lint rule.
+    Promise.resolve().then(() => handleWatch());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleWatch is redefined every render; autoWatchFired.current already guards against firing more than once
+  }, [searchParams, rejoinState, isSeated, isWatching, watchState]);
 
   if (rejoinState === "pending") {
     return <div className="flex min-h-dvh items-center justify-center text-ink-muted">Loading room…</div>;
