@@ -162,7 +162,7 @@ export default function DiscountSplash({ trigger, isSignedIn, onClose }: Discoun
           // viewports, and still clips the gradient header's square
           // corners against the rounded container the same as
           // overflow-hidden did at rest.
-          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-y-auto rounded-3xl bg-surface shadow-2xl"
+          className="flex max-h-[calc(100dvh_-_2rem)] w-full max-w-md flex-col overflow-y-auto rounded-3xl bg-surface shadow-2xl"
           initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.9, y: 12 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.92 }}

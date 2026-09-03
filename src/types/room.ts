@@ -64,6 +64,31 @@ export type OwnedSpectator = {
   token: string;
 };
 
+// One row of the home dashboard's "Live Matches" list (see
+// listLiveMatches in src/server/rooms.js / GET /api/live-matches) — a
+// trimmed, read-only view of an in-progress, publicly-spectatable room.
+// Deliberately not `Room`: no seat-level detail, since every action here
+// (join/spectate) deep-links into /join or /room, which fetch the real
+// Room themselves.
+// "matchmaking": auto-paired via Find Players Online. "guest": the
+// no-sign-in-needed Play with Bots flow. "private": a signed-in host's own
+// created room. See listLiveMatches in src/server/rooms.js.
+export type LiveMatchRoomType = "matchmaking" | "guest" | "private";
+
+export type LiveMatchSummary = {
+  code: string;
+  roomType: LiveMatchRoomType;
+  maxPlayers: number;
+  humanCount: number;
+  botCount: number;
+  spectatorCount: number;
+  elapsedMs: number;
+  // Name of whoever's furthest along right now, or null before anyone's
+  // left the yard or on a tie (see leadingSeatName in rooms.js) — never a
+  // guess at who's "really" ahead.
+  leaderName: string | null;
+};
+
 // One message on the spectator-only chat side channel (see
 // spectator:chat:send/spectator:chat:message in server.js) — deliberately
 // separate from the player-facing quick-chat/reaction stream (game:reaction)

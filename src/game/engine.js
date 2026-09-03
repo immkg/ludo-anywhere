@@ -332,7 +332,7 @@ function tokenProgress(pos) {
 // across all its tokens, so a seat with several tokens moving is ranked
 // above one with a single token lucky enough to be furthest along but the
 // rest still stuck in the yard.
-function seatProgress(seat) {
+export function seatProgress(seat) {
   return seat.tokens.reduce((sum, pos) => sum + tokenProgress(pos), 0);
 }
 

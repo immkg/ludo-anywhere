@@ -196,6 +196,25 @@ export function declineJoinRequest(roomCode: string, toUserId: string) {
   getSocket().emit("room:joinRequest:decline", { roomCode, toUserId });
 }
 
+// Asks the host of an in-progress room to seat the caller — from the home
+// dashboard's Live Matches "Join", so no seatId is picked up front (see
+// room:midGameJoinRequest in server.js): unlike claimSeat, the host chooses
+// which open seat or active bot to hand over at approval time.
+export function requestMidGameJoin(roomCode: string) {
+  return emitWithAck("room:midGameJoinRequest", { roomCode });
+}
+
+// `hostSeatId` proves the caller is the host by seat, not by signed-in
+// account — same as setSpectatePolicy/endGame, needed because a guest host
+// (e.g. Play with Bots) has no account for a cookie-based check.
+export function approveMidGameJoinRequest(roomCode: string, toUserId: string, targetSeatId: string, hostSeatId: string) {
+  return emitWithAck("room:midGameJoinRequest:approve", { roomCode, toUserId, targetSeatId, callerSeatId: hostSeatId });
+}
+
+export function declineMidGameJoinRequest(roomCode: string, toUserId: string) {
+  getSocket().emit("room:midGameJoinRequest:decline", { roomCode, toUserId });
+}
+
 // Random-opponent matchmaking: joins the shared pool (always a 4-seat
 // room — see matchmaking.js). Resolves the same shape as createRoom, so
 // callers reuse the same navigate-into-room flow.

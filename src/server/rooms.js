@@ -6,6 +6,7 @@ import {
   removeSeatFromGame,
   reactivateSeat,
   endGame as endGameInProgress,
+  seatProgress,
 } from "../game/engine.js";
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no O/0/I/1
@@ -120,6 +121,15 @@ export function createRoom({ maxPlayers }) {
     // one of each pending at once without colliding (see room:watch in
     // server.js).
     pendingSpectateRequests: new Map(),
+    // A signed-in, unseated visitor asking the host for a spot in an
+    // already-playing game — from the home dashboard's Live Matches "Join"
+    // (see room:midGameJoinRequest in server.js). Kept separate from
+    // pendingRequests above: those always resolve to a specific seat chosen
+    // by the requester (see room:claimSeat), while these are generic asks
+    // the host resolves at approval time by picking a target themselves
+    // (see assignMidGameSeat) — mixing the two shapes into one map would
+    // make pending.claimSeatId's presence ambiguous.
+    pendingMidGameRequests: new Map(),
     // Bounded backlog for the spectator-only chat channel (see
     // addSpectatorChatMessage below) — a spectator who joins mid-
     // conversation gets this handed to them once (spectator:chat:history in
@@ -477,6 +487,55 @@ export function midGameAddBot(room, seatId) {
   return { room, seat: newSeat };
 }
 
+// Host-approved hand-off for a mid-game join request from the home
+// dashboard's Live Matches "Join" (see room:midGameJoinRequest:approve in
+// server.js) — the host picks `seatId` themselves (an open seat per
+// midGameAddBot's "vacant" definition, or any actively-playing bot seat),
+// so unlike claimSeat this doesn't require the target to already be in
+// claimableSeats. Mirrors midGameAddBot's two shapes (still in room.seats
+// vs fully vacated) with one addition: an active bot seat (`seat.bot`,
+// still connected and playing) is always available to hand over directly,
+// no suspend-then-claim two-step needed first.
+export function assignMidGameSeat(room, seatId, { name, profileId, userId, socketId, deviceId }) {
+  if (!room?.game || room.status !== "playing") return { error: "Game not in progress" };
+
+  const identity = {
+    name: (name || "Player").slice(0, 20),
+    token: randomToken(),
+    deviceId: deviceId ?? null,
+    profileId: profileId || null,
+    userId: userId || null,
+    socketId: socketId ?? null,
+    connected: true,
+    bot: false,
+    simulated: false,
+  };
+
+  const seat = room.seats.find((s) => s.id === seatId);
+  const gameSeat = room.game.seats.find((s) => s.id === seatId);
+
+  if (seat) {
+    if (!gameSeat) return { error: "Player not found" };
+    const removedUnclaimed = gameSeat.finished && !room.game.placements.includes(seatId);
+    const available = seat.bot || gameSeat.suspended || removedUnclaimed || (!seat.connected && !gameSeat.finished);
+    if (!available) return { error: "That seat isn't available" };
+
+    clearDisconnectTimer(room, seatId);
+    Object.assign(seat, identity);
+    room.game = reactivateSeat(room.game, seatId);
+    return { room, seat };
+  }
+
+  if (!gameSeat || !gameSeat.finished || room.game.placements.includes(seatId)) {
+    return { error: "Seat not found" };
+  }
+
+  const newSeat = { id: seatId, armIndex: gameSeat.armIndex, ...identity };
+  room.seats.push(newSeat);
+  room.game = reactivateSeat(room.game, seatId);
+  return { room, seat: newSeat };
+}
+
 // Host-only: stops the game outright — see engine.js's endGame. Unlike
 // midGameRemoveSeat, this doesn't require narrowing down to one seat
 // first; the host can call it any time mid-game. Once the room has been
@@ -751,6 +810,59 @@ export function startGame(room) {
   room.startedAt = new Date();
   room.game = createGame(room.seats.map((s) => ({ id: s.id, armIndex: s.armIndex })));
   return { room };
+}
+
+const DEFAULT_LIVE_MATCHES_LIMIT = 5;
+
+// The seat furthest along by seatProgress (see engine.js) — null before
+// anyone's left the yard, or on a tie, rather than picking an arbitrary
+// "leader" that isn't really ahead of anyone.
+function leadingSeatName(room) {
+  if (!room.game) return null;
+  const progresses = room.game.seats.map((gs) => ({ id: gs.id, progress: seatProgress(gs) }));
+  const maxProgress = Math.max(0, ...progresses.map((p) => p.progress));
+  if (maxProgress === 0) return null;
+  const leaders = progresses.filter((p) => p.progress === maxProgress);
+  if (leaders.length !== 1) return null;
+  return room.seats.find((s) => s.id === leaders[0].id)?.name ?? null;
+}
+
+// Public, in-progress rooms for the home dashboard's "Live Matches" section
+// (see src/app/api/live-matches/route.ts) — a room only shows up once its
+// host has opted spectatePolicy to "public" (default is "private", see
+// createRoom), so this never surfaces a room its host hasn't chosen to make
+// discoverable. Ranked by spectatorCount (most-watched first) so the small
+// capped list favors whatever's already drawing attention, tie-broken by
+// startedAt (older/more-established games first).
+export function listLiveMatches({ limit = DEFAULT_LIVE_MATCHES_LIMIT } = {}) {
+  const eligible = [];
+  for (const room of rooms.values()) {
+    if (room.status !== "playing" || room.spectatePolicy !== "public") continue;
+    eligible.push(room);
+  }
+  eligible.sort((a, b) => {
+    const spectatorDiff =
+      b.spectators.filter((s) => s.connected).length - a.spectators.filter((s) => s.connected).length;
+    if (spectatorDiff !== 0) return spectatorDiff;
+    return (a.startedAt?.getTime() ?? 0) - (b.startedAt?.getTime() ?? 0);
+  });
+  return eligible.slice(0, limit).map((room) => ({
+    code: room.code,
+    // "matchmaking": auto-paired via Find Players Online (always a
+    // signed-in host, see matchmaking:join in server.js). "guest": the
+    // no-sign-in-needed Play with Bots flow (see CreateRoom.tsx's
+    // handlePlayWithBots) — never has an invite link anyone would share, so
+    // it's the other case that only reaches Live Matches by defaulting to
+    // public on its own. "private": a signed-in host's own created room
+    // that chose to make watching public.
+    roomType: room.matchmaking ? "matchmaking" : hostUserId(room) ? "private" : "guest",
+    maxPlayers: room.maxPlayers,
+    humanCount: room.seats.filter((s) => !s.bot).length,
+    botCount: room.seats.filter((s) => s.bot).length,
+    spectatorCount: room.spectators.filter((s) => s.connected).length,
+    elapsedMs: room.startedAt ? Date.now() - room.startedAt.getTime() : 0,
+    leaderName: leadingSeatName(room),
+  }));
 }
 
 export function serializeRoom(room) {

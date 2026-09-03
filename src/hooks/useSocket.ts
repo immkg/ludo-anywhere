@@ -47,6 +47,28 @@ export function useSocketConnection() {
       addJoinRequest({ id: crypto.randomUUID(), kind: "seat", ...payload });
     const onWatchRequestIncoming = (payload: { roomCode: string; fromUserId: string; fromName: string }) =>
       addJoinRequest({ id: crypto.randomUUID(), kind: "spectate", ...payload });
+    // A guest host (no account, no userChannel — see room:midGameJoinRequest
+    // in server.js) gets this broadcast to the whole room.code channel
+    // instead of pushed to them individually, so every other client in the
+    // room receives it too; only the actual host's own client should act on
+    // it. Read via getState() rather than selecting room/mySeats above so
+    // this handler doesn't need re-registering on every room/seat change.
+    const onMidGameJoinRequestIncoming = (payload: { roomCode: string; fromUserId: string; fromName: string }) => {
+      const { room, mySeats } = useRoomStore.getState();
+      const isHost = !!room?.hostSeatId && mySeats.some((s) => s.id === room.hostSeatId);
+      if (!isHost) return;
+      addJoinRequest({ id: crypto.randomUUID(), kind: "midGameJoin", ...payload });
+    };
+    // The host approved a Live Matches "Join" request (see
+    // room:midGameJoinRequest:approve in server.js) — the requester is
+    // already on /room/[code] as a spectator (see LiveMatchesSection.tsx),
+    // so this just needs to hand over the new seat; RoomPageClient picks up
+    // the seat from useRoomStore and switches from spectator to player view
+    // on its own, same as it would after any other reconnect.
+    const onMidGameJoinApproved = ({ roomCode, seats }: { roomCode: string; seats: OwnedSeat[] }) => {
+      saveOwnedSeats(roomCode, seats);
+      addMySeats(seats);
+    };
     const onInviteDeclined = (payload: { roomCode: string; byUserId: string }) =>
       addDeclinedInvite({ roomCode: payload.roomCode, userId: payload.byUserId });
     // A rematch's new seats are pushed directly (see room:rematch in
@@ -69,6 +91,8 @@ export function useSocketConnection() {
     socket.on("room:invited", onRoomInvited);
     socket.on("room:joinRequest:incoming", onJoinRequestIncoming);
     socket.on("room:watchRequest:incoming", onWatchRequestIncoming);
+    socket.on("room:midGameJoinRequest:incoming", onMidGameJoinRequestIncoming);
+    socket.on("room:midGameJoinApproved", onMidGameJoinApproved);
     socket.on("room:invite:declined", onInviteDeclined);
     socket.on("room:rematchReady", onRematchReady);
 
@@ -88,6 +112,8 @@ export function useSocketConnection() {
       socket.off("room:invited", onRoomInvited);
       socket.off("room:joinRequest:incoming", onJoinRequestIncoming);
       socket.off("room:watchRequest:incoming", onWatchRequestIncoming);
+      socket.off("room:midGameJoinRequest:incoming", onMidGameJoinRequestIncoming);
+      socket.off("room:midGameJoinApproved", onMidGameJoinApproved);
       socket.off("room:invite:declined", onInviteDeclined);
       socket.off("room:rematchReady", onRematchReady);
     };

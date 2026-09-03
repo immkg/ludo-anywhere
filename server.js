@@ -32,6 +32,8 @@ import {
   reconnectSpectator,
   setSpectatePolicy,
   addSpectatorChatMessage,
+  listLiveMatches,
+  assignMidGameSeat,
 } from "./src/server/rooms.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
 import {
@@ -66,7 +68,22 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
-  const httpServer = createServer((req, res) => handle(req, res));
+  // Served here rather than as a Next.js route handler (src/app/api/*) —
+  // a Next-bundled route imports rooms.js through Next's own dev/prod
+  // bundler, which instantiates it as a *separate* module from this
+  // file's plain `import` above, each with its own independent in-memory
+  // `rooms` Map. Only this native import is ever mutated by the socket
+  // handlers below, so a Next route reading "live" room state would
+  // always see an empty map. Intercepting the request here, before
+  // handing off to Next's `handle`, guarantees the same module instance.
+  const httpServer = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/api/live-matches") {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ matches: listLiveMatches() }));
+      return;
+    }
+    handle(req, res);
+  });
   const io = new Server(httpServer);
 
   function broadcastRoom(room) {
@@ -747,6 +764,15 @@ app.prepare().then(() => {
         if (!room) {
           room = createRoom({ maxPlayers: MATCHMAKING_SIZE });
           room.matchmaking = true;
+          // Unlike a host-created room (see SpectateSettings/ReactionBar's
+          // Spectators toggle, hidden entirely for matchmaking rooms — see
+          // showSpectatorsToggle in GameView.tsx), nobody ever gets a
+          // matchmaking room's invite link to opt into watching, and there's
+          // no host to flip a toggle on its behalf. Default it to public so
+          // it's actually reachable — via the home dashboard's Live Matches
+          // list (src/server/rooms.js's listLiveMatches), which is now the
+          // only way anyone finds a matchmaking room to spectate/join at all.
+          room.spectatePolicy = "public";
           created = true;
         }
         const { error, seats: addedSeats } = addSeats(room, resolved.seats, {
@@ -1267,6 +1293,106 @@ app.prepare().then(() => {
         });
         broadcastRoom(room);
         broadcastGame(room);
+      })
+    );
+
+    // Home dashboard's Live Matches "Join" on an in-progress room —
+    // deliberately generic (no seatId, unlike room:claimSeat above): the
+    // requester doesn't get to see which seats are open or bot-controlled,
+    // the host does, and picks a target themselves at approval time (see
+    // room:midGameJoinRequest:approve below).
+    socket.on(
+      "room:midGameJoinRequest",
+      withAck(async ({ roomCode }, ack) => {
+        const userId = await getAuthenticatedUserId(socket.handshake.headers.cookie);
+        if (!userId) return ack?.({ error: "Sign in with Google to ask to join" });
+
+        const room = getRoom(roomCode);
+        if (!room?.game || room.status !== "playing") return ack?.({ error: "That game isn't in progress" });
+        if (room.seats.some((s) => s.userId === userId)) {
+          return ack?.({ error: "You're already playing in this room" });
+        }
+
+        const requester = await getPrisma().user.findUnique({ where: { id: userId } });
+        const fromName = requester?.name ?? requester?.email ?? "Someone";
+        room.pendingMidGameRequests.set(userId, { fromName });
+
+        const hostId = hostUserId(room);
+        const payload = { roomCode: room.code, fromUserId: userId, fromName };
+        if (hostId) {
+          io.to(userChannel(hostId)).emit("room:midGameJoinRequest:incoming", payload);
+        } else {
+          // A guest host (e.g. Play with Bots, see CreateRoom.tsx) has no
+          // account, so no userChannel to push into — fall back to the
+          // room's own socket.io channel, which the host is in simply by
+          // having this room open (see socket.join(room.code) elsewhere).
+          // Every client in the room gets this, but only the host's own
+          // client acts on it (see useSocket.ts's isHost check).
+          io.to(room.code).emit("room:midGameJoinRequest:incoming", payload);
+        }
+        ack?.({});
+      })
+    );
+
+    socket.on("room:midGameJoinRequest:decline", ({ roomCode, toUserId }) => {
+      getRoom(roomCode)?.pendingMidGameRequests.delete(toUserId);
+      io.to(userChannel(toUserId)).emit("room:midGameJoinRequest:declined", { roomCode });
+    });
+
+    socket.on(
+      "room:midGameJoinRequest:approve",
+      withAck(async ({ roomCode, toUserId, targetSeatId, callerSeatId }, ack) => {
+        const room = getRoom(roomCode);
+        if (!room) return ack?.({ error: "Room not found" });
+        // Seat-based proof of host-ness, not a cookie-based userId check
+        // (see room:endGame/room:setSpectatePolicy) — a guest host (e.g.
+        // Play with Bots) has no account at all to check against.
+        if (!room.hostSeatId || room.hostSeatId !== callerSeatId) {
+          return ack?.({ error: "Only the host can approve requests" });
+        }
+
+        const pending = room.pendingMidGameRequests.get(toUserId);
+        room.pendingMidGameRequests.delete(toUserId);
+        if (!pending) return ack?.({ error: "That request is no longer pending" });
+
+        // Same profile-resolution fallback as room:joinRequest:approve's
+        // "older friends-list" path — this request never collected a
+        // profileId of its own, so it's always resolved from the
+        // requester's own default profile.
+        const requester = await getPrisma().user.findUnique({ where: { id: toUserId } });
+        if (!requester?.email) return ack?.({ error: "Could not find that player" });
+        const profile = await getPrisma().playerProfile.findUnique({
+          where: { email: requester.email.toLowerCase() },
+        });
+        if (!profile) return ack?.({ error: "Could not find that player" });
+        const resolved = await resolveSeatProfiles([{ profileId: profile.id }], toUserId);
+        if (resolved.error) {
+          io.to(userChannel(toUserId)).emit("room:midGameJoinRequest:declined", { roomCode });
+          return ack?.({ error: resolved.error });
+        }
+        const [{ name, profileId }] = resolved.seats;
+
+        const { error, seat } = assignMidGameSeat(room, targetSeatId, {
+          name,
+          profileId,
+          userId: toUserId,
+          socketId: null,
+          deviceId: null,
+        });
+        if (error) {
+          io.to(userChannel(toUserId)).emit("room:midGameJoinRequest:declined", { roomCode });
+          return ack?.({ error });
+        }
+
+        setUserRoom(toUserId, room.code);
+        broadcastPresence(toUserId).catch(logPresenceError("mid-game join approval"));
+        broadcastRoom(room);
+        broadcastGame(room);
+        io.to(userChannel(toUserId)).emit("room:midGameJoinApproved", {
+          roomCode: room.code,
+          seats: [{ id: seat.id, token: seat.token, armIndex: seat.armIndex, name: seat.name }],
+        });
+        ack?.({});
       })
     );
 

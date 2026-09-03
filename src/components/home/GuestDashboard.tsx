@@ -6,6 +6,7 @@ import posthog from "posthog-js";
 import { IconArrowRight } from "@/components/home/icons";
 import { IconUsers, IconTrophy, IconClock } from "@/components/lobby/icons";
 import TopPlayersList from "@/components/home/TopPlayersList";
+import LiveMatchesSection from "@/components/home/LiveMatchesSection";
 import type { TopPlayer } from "@/lib/leaderboard";
 
 const BLUE = "#1565E8";
@@ -78,6 +79,8 @@ export default function GuestDashboard({ topPlayers }: { topPlayers: TopPlayer[]
           </div>
         </Link>
       </div>
+
+      <LiveMatchesSection />
 
       <TopPlayersList players={topPlayers} />
 
