@@ -121,6 +121,15 @@ export function createRoom({ maxPlayers }) {
     // one of each pending at once without colliding (see room:watch in
     // server.js).
     pendingSpectateRequests: new Map(),
+    // A signed-in, unseated visitor asking the host for a spot in an
+    // already-playing game — from the home dashboard's Live Matches "Join"
+    // (see room:midGameJoinRequest in server.js). Kept separate from
+    // pendingRequests above: those always resolve to a specific seat chosen
+    // by the requester (see room:claimSeat), while these are generic asks
+    // the host resolves at approval time by picking a target themselves
+    // (see assignMidGameSeat) — mixing the two shapes into one map would
+    // make pending.claimSeatId's presence ambiguous.
+    pendingMidGameRequests: new Map(),
     // Bounded backlog for the spectator-only chat channel (see
     // addSpectatorChatMessage below) — a spectator who joins mid-
     // conversation gets this handed to them once (spectator:chat:history in
@@ -473,6 +482,55 @@ export function midGameAddBot(room, seatId) {
     connected: true,
     bot: true,
   };
+  room.seats.push(newSeat);
+  room.game = reactivateSeat(room.game, seatId);
+  return { room, seat: newSeat };
+}
+
+// Host-approved hand-off for a mid-game join request from the home
+// dashboard's Live Matches "Join" (see room:midGameJoinRequest:approve in
+// server.js) — the host picks `seatId` themselves (an open seat per
+// midGameAddBot's "vacant" definition, or any actively-playing bot seat),
+// so unlike claimSeat this doesn't require the target to already be in
+// claimableSeats. Mirrors midGameAddBot's two shapes (still in room.seats
+// vs fully vacated) with one addition: an active bot seat (`seat.bot`,
+// still connected and playing) is always available to hand over directly,
+// no suspend-then-claim two-step needed first.
+export function assignMidGameSeat(room, seatId, { name, profileId, userId, socketId, deviceId }) {
+  if (!room?.game || room.status !== "playing") return { error: "Game not in progress" };
+
+  const identity = {
+    name: (name || "Player").slice(0, 20),
+    token: randomToken(),
+    deviceId: deviceId ?? null,
+    profileId: profileId || null,
+    userId: userId || null,
+    socketId: socketId ?? null,
+    connected: true,
+    bot: false,
+    simulated: false,
+  };
+
+  const seat = room.seats.find((s) => s.id === seatId);
+  const gameSeat = room.game.seats.find((s) => s.id === seatId);
+
+  if (seat) {
+    if (!gameSeat) return { error: "Player not found" };
+    const removedUnclaimed = gameSeat.finished && !room.game.placements.includes(seatId);
+    const available = seat.bot || gameSeat.suspended || removedUnclaimed || (!seat.connected && !gameSeat.finished);
+    if (!available) return { error: "That seat isn't available" };
+
+    clearDisconnectTimer(room, seatId);
+    Object.assign(seat, identity);
+    room.game = reactivateSeat(room.game, seatId);
+    return { room, seat };
+  }
+
+  if (!gameSeat || !gameSeat.finished || room.game.placements.includes(seatId)) {
+    return { error: "Seat not found" };
+  }
+
+  const newSeat = { id: seatId, armIndex: gameSeat.armIndex, ...identity };
   room.seats.push(newSeat);
   room.game = reactivateSeat(room.game, seatId);
   return { room, seat: newSeat };
