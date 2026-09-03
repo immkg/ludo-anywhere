@@ -110,7 +110,7 @@ export default function SpectatorChat({
       <button
         onClick={() => setOpen(true)}
         aria-label="Open spectator chat"
-        className="fixed right-4 top-[calc(1rem+env(safe-area-inset-top))] z-30 flex h-12 items-center gap-1.5 rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink shadow-lg"
+        className="fixed right-4 top-[calc(1rem_+_env(safe-area-inset-top))] z-30 flex h-12 items-center gap-1.5 rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink shadow-lg"
       >
         <span aria-hidden>💬</span> Spectator chat
         {unread > 0 && (
@@ -127,7 +127,7 @@ export default function SpectatorChat({
       className={
         variant === "badge"
           ? "absolute right-2 top-full z-30 mt-2 flex max-h-[60vh] w-72 flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl sm:right-4"
-          : "fixed inset-x-4 top-[calc(1rem+env(safe-area-inset-top))] z-30 mx-auto flex max-h-[60vh] w-auto max-w-sm flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl sm:inset-x-auto sm:right-4"
+          : "fixed inset-x-4 top-[calc(1rem_+_env(safe-area-inset-top))] z-30 mx-auto flex max-h-[60vh] w-auto max-w-sm flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl sm:inset-x-auto sm:right-4"
       }
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface-2 px-3 py-2">

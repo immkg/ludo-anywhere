@@ -91,7 +91,7 @@ export default function GuestNav({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">{children}</div>
+      <div className="min-w-0 flex-1 pb-[calc(3.5rem_+_env(safe-area-inset-bottom))] md:pb-0">{children}</div>
       <MobileTabBar
         items={tabItems}
         more={{ label: "Sign in", icon: <IconPerson />, onClick: () => signIn("google", { callbackUrl }) }}

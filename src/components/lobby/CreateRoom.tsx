@@ -131,7 +131,7 @@ export default function CreateRoom() {
   const homeHref = session?.user ? "/" : "/play";
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:px-8 sm:py-10 md:pb-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
+    <main className="mx-auto flex w-full max-w-5xl flex-col px-5 py-6 pb-[calc(3.5rem_+_env(safe-area-inset-bottom))] sm:px-8 sm:py-10 md:pb-10 lg:min-h-dvh lg:justify-center lg:px-10 lg:py-12">
       <div className="flex items-center gap-3">
         <Link
           href={session?.user ? "/" : "/play"}

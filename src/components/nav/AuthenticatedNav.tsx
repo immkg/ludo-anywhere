@@ -45,7 +45,7 @@ export default function AuthenticatedNav({ displayName, email, userImage, pendin
         onOpenMenu={() => setMenuOpen(true)}
       />
       <DesktopSidebar displayName={displayName} email={email} userImage={userImage} />
-      <div className="min-w-0 flex-1 pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">{children}</div>
+      <div className="min-w-0 flex-1 pb-[calc(3.5rem_+_env(safe-area-inset-bottom))] md:pb-0">{children}</div>
       <MobileTabBar items={tabItems} more={{ label: "More", icon: <IconMenu />, onClick: () => setMenuOpen(true) }} />
       <AccountSheet
         open={menuOpen}

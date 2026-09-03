@@ -924,7 +924,7 @@ export default function GameView({
           normal py-2 top padding, so a notch/status-bar cutout in a
           full-screen PWA/TWA never sits flush against the reaction bar —
           see the matching pb- on bottomRowRef below. */}
-      <div className="sticky top-0 z-10 relative flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] sm:px-4">
+      <div className="sticky top-0 z-10 relative flex shrink-0 items-center justify-center border-b border-line bg-bg px-2 pb-2 pt-[calc(0.5rem_+_env(safe-area-inset-top))] sm:px-4">
         {/* For a spectator, the same top-right slot that would otherwise
             just show the watching-count badge doubles as the spectator
             chat trigger — merging the two instead of a separate floating
