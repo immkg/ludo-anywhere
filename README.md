@@ -117,8 +117,11 @@ of this is just a UI-level restriction.
 
 - **Server**: a custom Node server (`server.js`) running Next.js and
   Socket.IO on one HTTP server/port. Room and game state live in memory in
-  that process — a restart drops in-progress games, but the Postgres-backed
-  accounts and game history below survive it.
+  that process, mirrored to Redis on every change (`src/server/roomStore.js`)
+  so a restart can rebuild every room instead of dropping in-progress games —
+  see `REDIS_URL` in `.env.example`. With no `REDIS_URL` set, this falls back
+  to today's in-memory-only behavior. The Postgres-backed accounts and game
+  history below always survive a restart either way.
 - **Because of that**, this needs a host that runs a persistent Node
   process (Railway, Render, Fly.io, a plain VPS, etc.) — **not** Vercel's
   serverless functions, which can't hold a long-lived Socket.IO connection.

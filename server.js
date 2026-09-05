@@ -36,7 +36,10 @@ import {
   assignMidGameSeat,
   isBotOnlyGame,
   pickMidGameJoinTarget,
+  restoreRoom,
+  resumeDisconnectGrace,
 } from "./src/server/rooms.js";
+import { saveRoomState, deleteRoomState, loadAllRoomStates } from "./src/server/roomStore.js";
 import { findOpenMatchRoom, markOpen, markClosed, MATCHMAKING_SIZE } from "./src/server/matchmaking.js";
 import {
   rollDice,
@@ -69,7 +72,7 @@ const port = Number(process.env.PORT) || 3001;
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
   // Served here rather than as a Next.js route handler (src/app/api/*) —
   // a Next-bundled route imports rooms.js through Next's own dev/prod
   // bundler, which instantiates it as a *separate* module from this
@@ -88,12 +91,30 @@ app.prepare().then(() => {
   });
   const io = new Server(httpServer);
 
+  // Mirrors a room's state to Redis (or deletes its mirror once the room
+  // itself is gone) every time it's broadcast — broadcastRoom/broadcastGame
+  // below are already the one choke point every mutation in this file
+  // passes through (a create, join, roll, move, disconnect, ...), so
+  // piggybacking here means nothing needs a separate "remember to persist"
+  // step. Fire-and-forget: a slow or unreachable Redis should never block
+  // gameplay itself (see getRedisClient in src/server/redis.js, which
+  // degrades to a no-op with no REDIS_URL configured at all).
+  function persistRoom(room) {
+    if (getRoom(room.code) === room) {
+      saveRoomState(room).catch((err) => console.error("Failed to persist room", room.code, err));
+    } else {
+      deleteRoomState(room.code).catch((err) => console.error("Failed to delete persisted room", room.code, err));
+    }
+  }
+
   function broadcastRoom(room) {
     io.to(room.code).emit("room:update", serializeRoom(room));
+    persistRoom(room);
   }
 
   function broadcastGame(room) {
     io.to(room.code).emit("game:update", serializeGame(room));
+    persistRoom(room);
   }
 
   // Derived from DICE_HOLD_MS (src/game/engine.js), with margin, rather than
@@ -1599,6 +1620,32 @@ app.prepare().then(() => {
       }
     });
   });
+
+  // Rebuild every room Redis still has a mirror for before accepting a
+  // single connection — otherwise a client reconnecting in the gap between
+  // "process is up" and "rooms are restored" would find its room missing
+  // and treat it as gone for good. Every seat/spectator comes back marked
+  // disconnected (see restoreRoom in rooms.js); resumeDisconnectGrace below
+  // gives each mid-game one the same grace period an ordinary disconnect
+  // would have, rather than pruning them immediately. A restored
+  // still-waiting matchmaking lobby also gets its open-pool/bot-fill state
+  // back, mirroring what matchmaking:join does for a freshly created one.
+  const restoredStates = await loadAllRoomStates();
+  for (const data of restoredStates) {
+    const room = restoreRoom(data);
+    resumeDisconnectGrace(room, () => {
+      broadcastRoom(room);
+      broadcastGame(room);
+      finishRoomIfNeeded(room);
+    });
+    if (room.matchmaking && room.status === "lobby" && room.seats.length < room.maxPlayers) {
+      markOpen(room.code);
+      scheduleMatchmakingBotFill(room, 0);
+    }
+  }
+  if (restoredStates.length > 0) {
+    console.log(`Restored ${restoredStates.length} room(s) from Redis after restart`);
+  }
 
   httpServer.listen(port, () => {
     console.log(`> Ludo server listening on http://localhost:${port}`);

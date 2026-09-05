@@ -732,6 +732,33 @@ function clearDisconnectTimer(room, seatId) {
   }
 }
 
+// Arms (or re-arms) the grace-period prune for one disconnected seat —
+// shared by a live socket disconnect (handleSocketDisconnect below) and by
+// resumeDisconnectGrace, which re-arms a fresh grace period for every
+// mid-game seat after restoring a room from Redis (see restoreRoom): a
+// server restart shouldn't cost anyone their seat any faster than an
+// ordinary disconnect would have.
+function armDisconnectTimer(room, seat, onChange) {
+  clearDisconnectTimer(room, seat.id);
+  const timer = setTimeout(() => {
+    room.seats = room.seats.filter((s) => s.id !== seat.id);
+    room.disconnectTimers.delete(seat.id);
+    if (room.seats.every((s) => !s.connected) && room.spectators.every((s) => !s.connected)) {
+      rooms.delete(room.code);
+    }
+    // The seat is gone from room.seats now, but room.game doesn't know
+    // that — if it's still their turn, nothing could ever resolve it
+    // again (the seat lookup in currentAutoTarget would just keep
+    // failing), freezing the round forever. Resolve their game turn the
+    // same way a host's manual removal already does.
+    if (room.game && room.status === "playing") {
+      room.game = removeSeatFromGame(room.game, seat.id);
+    }
+    onChange();
+  }, DISCONNECT_GRACE_MS);
+  room.disconnectTimers.set(seat.id, timer);
+}
+
 // Marks every seat owned by this socket as disconnected. In the lobby the
 // seat is dropped immediately (freeing the slot); mid-game it's kept, marked
 // disconnected, and pruned after a grace period so a refresh/reconnect can
@@ -803,26 +830,20 @@ export function handleSocketDisconnect(room, socketId, onChange) {
     // While this is set, the seat is auto-played like a bot (see
     // server.js's sweepTurnTimeouts) rather than stalling the round.
     if (!seat.disconnectedAt) seat.disconnectedAt = Date.now();
-    clearDisconnectTimer(room, seat.id);
-    const timer = setTimeout(() => {
-      room.seats = room.seats.filter((s) => s.id !== seat.id);
-      room.disconnectTimers.delete(seat.id);
-      if (room.seats.every((s) => !s.connected) && room.spectators.every((s) => !s.connected)) {
-        rooms.delete(room.code);
-      }
-      // The seat is gone from room.seats now, but room.game doesn't know
-      // that — if it's still their turn, nothing could ever resolve it
-      // again (the seat lookup in currentAutoTarget would just keep
-      // failing), freezing the round forever. Resolve their game turn the
-      // same way a host's manual removal already does.
-      if (room.game && room.status === "playing") {
-        room.game = removeSeatFromGame(room.game, seat.id);
-      }
-      onChange();
-    }, DISCONNECT_GRACE_MS);
-    room.disconnectTimers.set(seat.id, timer);
+    armDisconnectTimer(room, seat, onChange);
   });
   onChange();
+}
+
+// Re-arms a fresh disconnect-grace timer for every currently-disconnected
+// mid-game seat — called once per restored room right after restoreRoom
+// below, since a server restart drops every live socket but isn't a
+// player's fault: everyone gets the same DISCONNECT_GRACE_MS window to
+// reconnect that an ordinary disconnect would have given them (see
+// fromPersistedRoom's disconnectedAt handling, which sets up exactly this).
+export function resumeDisconnectGrace(room, onChange) {
+  if (room.status !== "playing") return;
+  room.seats.filter((s) => !s.connected).forEach((seat) => armDisconnectTimer(room, seat, onChange));
 }
 
 export function startGame(room) {
@@ -939,4 +960,77 @@ export function serializeRoom(room) {
 
 export function serializeGame(room) {
   return room.game;
+}
+
+// Full, lossless snapshot of a room for Redis (see server.js's persistRoom)
+// — unlike serializeRoom/serializeGame above, which trim to what's safe to
+// broadcast to clients, this keeps everything needed to rebuild an
+// equivalent room after a server restart. Map/Set fields become entry
+// arrays (JSON has neither). disconnectTimers is deliberately left out
+// entirely — those are live Timeout handles, not data, and are rebuilt
+// fresh by resumeDisconnectGrace after restoreRoom instead.
+export function toPersistedRoom(room) {
+  return {
+    code: room.code,
+    maxPlayers: room.maxPlayers,
+    hostSeatId: room.hostSeatId,
+    status: room.status,
+    seats: room.seats,
+    game: room.game,
+    sponsored: room.sponsored,
+    pendingRequests: [...room.pendingRequests],
+    invitedUserIds: [...room.invitedUserIds],
+    spectatePolicy: room.spectatePolicy,
+    spectators: room.spectators,
+    pendingSpectateRequests: [...room.pendingSpectateRequests],
+    pendingMidGameRequests: [...room.pendingMidGameRequests],
+    spectatorChat: room.spectatorChat,
+    matchmaking: !!room.matchmaking,
+    startedAt: room.startedAt ? room.startedAt.toISOString() : null,
+    historySaved: !!room.historySaved,
+  };
+}
+
+// The inverse of toPersistedRoom, run once per room at boot (see
+// server.js's restoration pass, before it starts accepting connections).
+// Every seat/spectator comes back marked disconnected — their sockets all
+// died with the old process, whatever connected/socketId said at save time
+// — and reconnects the normal way (by token or userId, see
+// reconnectSeats/reconnectSpectator) once their owner's client comes back.
+// Registers the room into this module's own `rooms` map the same way
+// createRoom does, so getRoom/allRooms see it immediately.
+export function restoreRoom(data) {
+  const now = Date.now();
+  const room = {
+    code: data.code,
+    maxPlayers: data.maxPlayers,
+    hostSeatId: data.hostSeatId,
+    status: data.status,
+    seats: data.seats.map((s) => ({
+      ...s,
+      connected: false,
+      socketId: null,
+      // A seat already disconnected before the crash keeps its original
+      // clock (still counts toward totalDisconnectedMs on reconnect, see
+      // reconnectSeats); one that was actually connected gets a fresh
+      // clock starting now, since it wasn't disconnected until this
+      // restart dropped its socket.
+      disconnectedAt: s.disconnectedAt ?? now,
+    })),
+    game: data.game,
+    sponsored: data.sponsored,
+    disconnectTimers: new Map(),
+    pendingRequests: new Map(data.pendingRequests),
+    invitedUserIds: new Set(data.invitedUserIds),
+    spectatePolicy: data.spectatePolicy,
+    spectators: data.spectators.map((s) => ({ ...s, connected: false, socketId: null })),
+    pendingSpectateRequests: new Map(data.pendingSpectateRequests),
+    pendingMidGameRequests: new Map(data.pendingMidGameRequests),
+    spectatorChat: data.spectatorChat,
+    matchmaking: data.matchmaking,
+    startedAt: data.startedAt ? new Date(data.startedAt) : null,
+    historySaved: data.historySaved,
+  };
+  rooms.set(room.code, room);
+  return room;
 }

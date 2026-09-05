@@ -21,9 +21,20 @@ Requires Node 20.9+ (`.nvmrc`).
 
 - **Server**: `server.js` is a custom Node server running Next.js and
   Socket.IO on a single HTTP server/port. Room and game state live in
-  memory in that process (dropped on restart) — this means it needs a host
-  that runs a persistent Node process (Railway, Render, Fly.io, a VPS,
-  etc.), **not** Vercel serverless functions.
+  memory in that process — this means it needs a host that runs a
+  persistent Node process (Railway, Render, Fly.io, a VPS, etc.), **not**
+  Vercel serverless functions. Every mutation is also mirrored to Redis
+  (`src/server/roomStore.js`, keyed `ludo:room:<code>`, via `REDIS_URL` —
+  see `.env.example`), so a restart rebuilds the in-memory `rooms` map from
+  there instead of losing in-progress games — see `restoreRoom`/
+  `resumeDisconnectGrace` in `src/server/rooms.js` and the restoration pass
+  in `server.js` right before `httpServer.listen`. Every seat/spectator
+  comes back marked disconnected (real sockets don't survive a restart) and
+  reconnects the normal way; a mid-game seat gets a fresh
+  `DISCONNECT_GRACE_MS` window rather than being pruned immediately. With no
+  `REDIS_URL` set, `getRedisClient()` (`src/server/redis.js`) returns null
+  and every roomStore function no-ops — falls back to today's
+  in-memory-only behavior unchanged.
 - **Accounts vs. players (required)**: Google sign-in via Auth.js v5
   (`src/lib/auth.ts`) gates room creation/joining — there's no anonymous
   path. But the signed-in Google account (`User`) is a *device login*, not
