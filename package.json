@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "nodemon",
     "build": "prisma generate && next build",
-    "start": "NODE_ENV=production node server.js",
+    "start": "NODE_ENV=production node --max-old-space-size=640 server.js",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
