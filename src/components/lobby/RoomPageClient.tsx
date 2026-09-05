@@ -86,7 +86,19 @@ export default function RoomPageClient() {
     const onApproved = ({ roomCode: approvedCode, spectator: approved }: { roomCode: string; spectator: OwnedSpectator }) => {
       if (approvedCode !== roomCode) return;
       saveSpectatorToken(approvedCode, approved);
-      setSpectator(approved);
+      // The approval push only updates room state server-side — this
+      // socket is still never subscribed to the room's broadcast channel
+      // until it actually calls room:watch (see reconnectSpectator in
+      // rooms.js, which is what runs socket.join(room.code) for it). Skip
+      // that and the UI would claim "watching" while getting no
+      // room:update/game:update until the next reload's token-reconnect
+      // effect happened to fix it up.
+      watchRoom(approvedCode, "", [approved.token])
+        .then((res) => {
+          if (res.spectator) saveSpectatorToken(approvedCode, res.spectator);
+          setSpectator(res.spectator ?? approved);
+        })
+        .catch(() => setSpectator(approved));
       setWatchState("idle");
     };
     const onDeclined = ({ roomCode: declinedCode }: { roomCode: string }) => {
