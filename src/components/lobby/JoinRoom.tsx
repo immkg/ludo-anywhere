@@ -27,7 +27,9 @@ export default function JoinRoom() {
   const addMySeats = useRoomStore((s) => s.addMySeats);
   const { profiles, loading: profilesLoading, createProfile } = useProfiles();
 
-  const [roomCode, setRoomCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
+  const [roomCode, setRoomCode] = useState(
+    () => searchParams.get("code")?.toUpperCase().replace(/[^A-Z0-9]/g, "") ?? ""
+  );
   const [guestName, setGuestName] = useState(() => getGuestName());
   const [funnyName] = useState(() => randomFunnyName());
   const [loading, setLoading] = useState(false);
@@ -278,7 +280,7 @@ export default function JoinRoom() {
                   value={roomCode}
                   maxLength={6}
                   onChange={(e) => {
-                    setRoomCode(e.target.value.toUpperCase());
+                    setRoomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""));
                     setError(null);
                   }}
                   onKeyDown={(e) => {
