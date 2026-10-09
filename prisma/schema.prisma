@@ -34,6 +34,7 @@ model User {
   // cross-device, unlike the guest-side localStorage flag used before
   // sign-in.
   upgradeSplashShownAt DateTime?
+  pushSubscriptions    PushSubscription[]
 }
 
 model Account {
@@ -68,6 +69,25 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// One row per browser/device install that's opted into Web Push — a device
+// login (User) can have several (e.g. phone + another device signed into
+// the same Google account), mirroring the multi-device reconnect model. See
+// src/server/push.js / src/lib/push.ts for sending, src/app/api/push/
+// subscribe/route.ts for how rows get created/removed.
+model PushSubscription {
+  id         String   @id @default(cuid())
+  userId     String
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // --- Player profiles ---

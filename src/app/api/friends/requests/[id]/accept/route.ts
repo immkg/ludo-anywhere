@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sendPushToUser } from "@/lib/push";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -18,6 +19,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     data: { status: "accepted", respondedAt: new Date() },
     include: { requester: true },
   });
+
+  sendPushToUser(updated.requester.id, {
+    title: "Friend request accepted",
+    body: `${session.user.name ?? session.user.email ?? "Someone"} accepted your friend request`,
+    url: "/friends",
+    tag: `friend-request-accepted-${friendship.id}`,
+  }).catch((err) => console.error("Push send failed (friend request accepted):", err));
 
   return NextResponse.json({
     friend: {

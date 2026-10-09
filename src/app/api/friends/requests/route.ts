@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sendPushToUser } from "@/lib/push";
 
 export async function GET() {
   const session = await auth();
@@ -69,6 +70,13 @@ export async function POST(request: Request) {
   const friendship = await prisma.friendship.create({
     data: { requesterId: session.user.id, addresseeId },
   });
+
+  sendPushToUser(addresseeId, {
+    title: "Friend request",
+    body: `${session.user.name ?? session.user.email ?? "Someone"} sent you a friend request`,
+    url: "/friends",
+    tag: `friend-request-${friendship.id}`,
+  }).catch((err) => console.error("Push send failed (friend request created):", err));
 
   return NextResponse.json({ requestId: friendship.id });
 }

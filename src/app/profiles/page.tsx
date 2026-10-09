@@ -4,6 +4,7 @@ import AuthenticatedNav from "@/components/nav/AuthenticatedNav";
 import GuestNav from "@/components/nav/GuestNav";
 import SignInTeaser from "@/components/nav/SignInTeaser";
 import ProfileManager from "@/components/lobby/ProfileManager";
+import NotificationsToggle from "@/components/lobby/NotificationsToggle";
 
 export default async function ProfilesPage() {
   const session = await auth();
@@ -48,6 +49,7 @@ export default async function ProfilesPage() {
           </p>
         </div>
         <ProfileManager />
+        <NotificationsToggle />
       </main>
     </AuthenticatedNav>
   );
