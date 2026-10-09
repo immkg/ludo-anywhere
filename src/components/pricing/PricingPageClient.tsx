@@ -81,6 +81,12 @@ export default function PricingPageClient() {
   // usePlayDigitalGoodsService()'s comment for why an old build or a
   // spoofed android-app:// referrer must not show a broken buy button.
   const androidBillingUnavailable = isAndroidApp && digitalGoodsService === null;
+  // True while we still don't know — the Digital Goods API binding is
+  // async and hasn't resolved yet (common right after a cold TWA start).
+  // buy() must not fall through to the Uropai web-checkout branch during
+  // this window: isAndroidApp is already true, so "unknown" must block the
+  // buy button same as "unavailable", not silently pick the wrong gateway.
+  const androidBillingPending = isAndroidApp && digitalGoodsService === "loading";
 
   const [status, setStatus] = useState<EntitlementStatus | null>(null);
   const [buying, setBuying] = useState<BillingPurpose | null>(null);
@@ -191,6 +197,10 @@ export default function PricingPageClient() {
         setError("Update the app from Play Store to purchase.");
         return;
       }
+      if (androidBillingPending) {
+        setError("Still setting up Google Play Billing — try again in a moment.");
+        return;
+      }
       setBuying(purpose);
       setError(null);
       try {
@@ -216,7 +226,7 @@ export default function PricingPageClient() {
         setBuying(null);
       }
     },
-    [session, applyCoupon, coupon, isAndroidApp, digitalGoodsService, androidBillingUnavailable, buyOnAndroid]
+    [session, applyCoupon, coupon, isAndroidApp, digitalGoodsService, androidBillingUnavailable, androidBillingPending, buyOnAndroid]
   );
 
   const planType = status?.entitlement?.type ?? null;
@@ -298,7 +308,7 @@ export default function PricingPageClient() {
                 }
                 benefits={["Unlimited games", "Any player count", "Play with friends", `Valid for ${status.pricing.annual.days} days`]}
                 ctaLabel="Upgrade to Annual Pass"
-                loading={buying === "ANNUAL"}
+                loading={buying === "ANNUAL" || androidBillingPending}
                 onBuy={() => buy("ANNUAL")}
                 highlight
               />
@@ -326,7 +336,7 @@ export default function PricingPageClient() {
               discountedPriceInr={flashPackPriceInr}
               benefits={[`${status.pricing.gamePack.credits} games`, "Any player count", `Valid for ${status.pricing.gamePack.days} days`]}
               ctaLabel="Buy Another Pack"
-              loading={buying === "PACK"}
+              loading={buying === "PACK" || androidBillingPending}
               onBuy={() => buy("PACK")}
             />
             <PlanCard
@@ -343,7 +353,7 @@ export default function PricingPageClient() {
                 "Best value",
               ]}
               ctaLabel="Buy Annual Pass"
-              loading={buying === "ANNUAL"}
+              loading={buying === "ANNUAL" || androidBillingPending}
               onBuy={() => buy("ANNUAL")}
               highlight
             />
@@ -356,7 +366,7 @@ export default function PricingPageClient() {
               discountedPriceInr={flashMonthlyPriceInr}
               benefits={["Unlimited games", "Any player count", "Play with friends", `Valid for ${status.pricing.monthly.days} days`]}
               ctaLabel="Buy Game Pass"
-              loading={buying === "MONTHLY"}
+              loading={buying === "MONTHLY" || androidBillingPending}
               onBuy={() => buy("MONTHLY")}
             />
           </PlanGroup>
@@ -376,7 +386,7 @@ export default function PricingPageClient() {
               discountedPriceInr={flashPackPriceInr}
               benefits={[`${status.pricing.gamePack.credits} games`, "Any player count", `Valid for ${status.pricing.gamePack.days} days`]}
               ctaLabel="Buy Game Pack"
-              loading={buying === "PACK"}
+              loading={buying === "PACK" || androidBillingPending}
               onBuy={() => buy("PACK")}
             />
             <PlanCard
@@ -393,7 +403,7 @@ export default function PricingPageClient() {
                 "Best value",
               ]}
               ctaLabel="Buy Annual Pass"
-              loading={buying === "ANNUAL"}
+              loading={buying === "ANNUAL" || androidBillingPending}
               onBuy={() => buy("ANNUAL")}
               highlight
             />
@@ -406,7 +416,7 @@ export default function PricingPageClient() {
               discountedPriceInr={flashMonthlyPriceInr}
               benefits={["Unlimited games", "Any player count", "Play with friends", `Valid for ${status.pricing.monthly.days} days`]}
               ctaLabel="Buy Game Pass"
-              loading={buying === "MONTHLY"}
+              loading={buying === "MONTHLY" || androidBillingPending}
               onBuy={() => buy("MONTHLY")}
             />
           </PlanGroup>
