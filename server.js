@@ -66,6 +66,7 @@ import {
 } from "./src/server/presence.js";
 import { getFriendUserIds } from "./src/server/friends.js";
 import { getPrisma } from "./src/server/prisma.js";
+import { sendPushToUser } from "./src/server/push.js";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT) || 3001;
@@ -494,6 +495,14 @@ app.prepare().then(async () => {
           fromName: fromSeat?.name ?? "A friend",
           fromUserId: userId,
         });
+        if (!isOnline(friendUserId)) {
+          sendPushToUser(friendUserId, {
+            title: "Room invite",
+            body: `${fromSeat?.name ?? "A friend"} invited you to play Ludo`,
+            url: `/join?code=${room.code}`,
+            tag: `room-invite-${room.code}`,
+          }).catch((err) => console.error("Push send failed (room:invited):", err));
+        }
         ack?.({});
       })
     );
@@ -519,11 +528,20 @@ app.prepare().then(async () => {
         if (!hostSeat?.userId) return ack?.({ error: "That room isn't open" });
 
         const requester = await getPrisma().user.findUnique({ where: { id: userId } });
+        const requesterName = requester?.name ?? requester?.email ?? "Someone";
         io.to(userChannel(hostSeat.userId)).emit("room:joinRequest:incoming", {
           roomCode: room.code,
           fromUserId: userId,
-          fromName: requester?.name ?? requester?.email ?? "Someone",
+          fromName: requesterName,
         });
+        if (!isOnline(hostSeat.userId)) {
+          sendPushToUser(hostSeat.userId, {
+            title: "Join request",
+            body: `${requesterName} wants to join your room`,
+            url: `/room/${room.code}`,
+            tag: `room-join-request-${room.code}`,
+          }).catch((err) => console.error("Push send failed (room:joinRequest:incoming):", err));
+        }
         ack?.({});
       })
     );
@@ -692,6 +710,14 @@ app.prepare().then(async () => {
             fromUserId: joinerKey,
             fromName: displayName,
           });
+          if (!isOnline(hostId)) {
+            sendPushToUser(hostId, {
+              title: "Watch request",
+              body: `${displayName} wants to watch your room`,
+              url: `/room/${room.code}`,
+              tag: `room-watch-request-${room.code}`,
+            }).catch((err) => console.error("Push send failed (room:watchRequest:incoming):", err));
+          }
         }
         ack?.({ pending: true, roomCode: room.code });
       })
@@ -1419,6 +1445,14 @@ app.prepare().then(async () => {
         const payload = { roomCode: room.code, fromUserId: userId, fromName };
         if (hostId) {
           io.to(userChannel(hostId)).emit("room:midGameJoinRequest:incoming", payload);
+          if (!isOnline(hostId)) {
+            sendPushToUser(hostId, {
+              title: "Join request",
+              body: `${fromName} wants to join your game`,
+              url: `/room/${room.code}`,
+              tag: `room-midgame-join-request-${room.code}`,
+            }).catch((err) => console.error("Push send failed (room:midGameJoinRequest:incoming):", err));
+          }
         } else {
           // A guest host (e.g. Play with Bots, see CreateRoom.tsx) has no
           // account, so no userChannel to push into — fall back to the
@@ -1543,6 +1577,14 @@ app.prepare().then(async () => {
         if (pendingConnections.size) await Promise.allSettled([...pendingConnections]);
         for (const [userId, seatsForUser] of seatsByUser) {
           io.to(userChannel(userId)).emit("room:rematchReady", { roomCode: newRoom.code, seats: seatsForUser });
+          if (!isOnline(userId)) {
+            sendPushToUser(userId, {
+              title: "Rematch ready",
+              body: "A new game is starting — come back!",
+              url: `/room/${newRoom.code}`,
+              tag: `room-rematch-${newRoom.code}`,
+            }).catch((err) => console.error("Push send failed (room:rematchReady):", err));
+          }
         }
 
         // Guests have no durable per-account channel to push into — reach
