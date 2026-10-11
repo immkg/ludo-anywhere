@@ -49,3 +49,6 @@ next-env.d.ts
 
 # store listing drafts/screenshots (not for commit)
 /store-assets/
+
+# ad-hoc analytics reports (contain real revenue/user data, not for commit)
+/insights/
