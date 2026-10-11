@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import posthog from "posthog-js";
+import { useIsAndroidApp } from "@/lib/android-app";
 
 const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://t.myludo.life";
 
@@ -15,6 +16,8 @@ const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://t.myludo.l
 // go first-party and dodge ad-blockers; ui_host stays on PostHog's own
 // domain so the in-app toolbar/session-recording links still resolve.
 export default function PosthogProvider({ children }: { children: React.ReactNode }) {
+  const isAndroidApp = useIsAndroidApp();
+
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN;
     if (process.env.NODE_ENV !== "production" || !token) return;
@@ -24,6 +27,17 @@ export default function PosthogProvider({ children }: { children: React.ReactNod
       person_profiles: "identified_only",
     });
   }, []);
+
+  // register() attaches this to every event this browser sends from now on,
+  // including pre-login/anonymous ones (signup_prompted, play_now_clicked,
+  // guest_dashboard_viewed) — unlike AuthProvider's setPersonProperties,
+  // which only tags the person once they're identified. That's what lets a
+  // "Play Store vs website" split cover the acquisition/signup funnel, not
+  // just post-signup purchase events.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production" || !process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN) return;
+    posthog.register({ platform: isAndroidApp ? "android_twa" : "web" });
+  }, [isAndroidApp]);
 
   return children;
 }

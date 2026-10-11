@@ -141,7 +141,11 @@ export async function grantPayment(
 
   if (granted) {
     const eventType = opts?.eventTypeOverride ?? (payment.purpose === "PACK" ? "pack_purchased" : "subscription_started");
-    await logEvent(eventType, payment.userId, { purpose: payment.purpose, amountInr: payment.amountInr });
+    await logEvent(eventType, payment.userId, {
+      purpose: payment.purpose,
+      provider: payment.provider,
+      amountInr: payment.amountInr,
+    });
     // revenue/currency were Umami's special property names for its Revenue
     // report. Kept as plain properties here — PostHog's revenue analytics
     // setup (which event/property shape it expects) hasn't been configured
@@ -158,6 +162,7 @@ export async function grantPayment(
       eventType,
       {
         purpose: payment.purpose,
+        provider: payment.provider,
         revenue: payment.amountInr,
         currency: "INR",
         $set: {
@@ -175,7 +180,13 @@ export async function grantPayment(
     if (redeemedCouponRole === "FLASH_OFFER") {
       trackPosthog(
         "flash_offer_paid",
-        { purpose: payment.purpose, revenue: payment.amountInr, discountInr: payment.discountInr, currency: "INR" },
+        {
+          purpose: payment.purpose,
+          provider: payment.provider,
+          revenue: payment.amountInr,
+          discountInr: payment.discountInr,
+          currency: "INR",
+        },
         payment.userId,
       );
     }
@@ -188,7 +199,7 @@ async function failPayment(payment: Payment) {
     data: { status: "FAILED" },
   });
   if (updated.count > 0) {
-    await logEvent("payment_failed", payment.userId, { purpose: payment.purpose });
-    trackPosthog("payment_failed", { purpose: payment.purpose }, payment.userId);
+    await logEvent("payment_failed", payment.userId, { purpose: payment.purpose, provider: payment.provider });
+    trackPosthog("payment_failed", { purpose: payment.purpose, provider: payment.provider }, payment.userId);
   }
 }
