@@ -222,6 +222,25 @@ app.prepare().then(async () => {
 
   setInterval(sweepTurnTimeouts, SWEEP_INTERVAL_MS);
 
+  // V8 doesn't proactively hand freed heap pages back to the OS just
+  // because GC ran — glibc's allocator (malloc) is even stickier about it,
+  // which is why this process's RSS visibly ratchets up after a burst of
+  // activity (a flurry of games, a billing webhook, ...) and then plateaus
+  // at the new, higher level forever instead of settling back down once
+  // things go quiet again. `--expose-gc` (see the `start` script) lets this
+  // force a full, compacting GC on a low cadence — cheap for a heap this
+  // size (well under the 640MB cap), and only run while there's nothing
+  // live to disturb (no rooms = no in-flight game state a stop-the-world
+  // pause could visibly stall). Node's allocator-level fragmentation (not
+  // just the JS heap) is addressed separately by MALLOC_ARENA_MAX=2 in the
+  // `start` script.
+  const IDLE_GC_INTERVAL_MS = 10 * 60 * 1000;
+  if (global.gc) {
+    setInterval(() => {
+      if (allRooms().next().done) global.gc();
+    }, IDLE_GC_INTERVAL_MS);
+  }
+
   // A lone host in a freshly-created matchmaking room has nothing to do but
   // wait, so this trickles bot seats in one at a time on a randomized,
   // human-arrival-like schedule instead of leaving them stuck — see
