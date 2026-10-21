@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { google } from "googleapis";
+import { auth as googleAuth } from "@googleapis/androidpublisher";
 import { prisma } from "@/lib/prisma";
 import { getSubscriptionPurchaseV2 } from "@/lib/play-billing";
 import { grantPayment } from "@/lib/billing-fulfillment";
@@ -40,7 +40,7 @@ async function verifyPushToken(request: Request): Promise<boolean> {
   const audience = `${process.env.AUTH_URL}/api/billing/play/rtdn`;
 
   try {
-    const client = new google.auth.OAuth2();
+    const client = new googleAuth.OAuth2();
     const ticket = await client.verifyIdToken({ idToken: token, audience });
     const payload = ticket.getPayload();
     return payload?.email === expectedEmail && payload?.email_verified === true;

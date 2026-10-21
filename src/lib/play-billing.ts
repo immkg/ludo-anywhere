@@ -1,21 +1,26 @@
-import { google } from "googleapis";
+import { androidpublisher, auth as googleAuth } from "@googleapis/androidpublisher";
 import { purposeForPlaySku } from "@/lib/play-products";
 import type { BillingPurpose } from "@/types/billing";
 
 // Server-only Android Publisher API client — the Play Billing counterpart
-// to src/lib/uropai.ts. Uses the `googleapis` package's JWT auth rather than
-// hand-rolling REST+HMAC the way uropai.ts does: Android Publisher's nested
-// response types and OAuth2 service-account flow are large enough that
-// hand-rolling risks subtle verification bugs in a payment-critical path.
+// to src/lib/uropai.ts. Uses Google's own JWT auth rather than hand-rolling
+// REST+HMAC the way uropai.ts does: Android Publisher's nested response
+// types and OAuth2 service-account flow are large enough that hand-rolling
+// risks subtle verification bugs in a payment-critical path. Imports the
+// scoped `@googleapis/androidpublisher` package rather than the full
+// `googleapis` megapackage — the latter bundles generated clients for every
+// Google API (200+MB on disk) and, once any route touching it is hit even
+// once, that whole module graph stays resident in the require cache for the
+// rest of the process's uptime, permanently inflating idle RAM.
 
-let auth: InstanceType<typeof google.auth.GoogleAuth> | null = null;
+let auth: InstanceType<typeof googleAuth.GoogleAuth> | null = null;
 
 function getAuth() {
   if (auth) return auth;
   const encoded = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64;
   if (!encoded) throw new Error("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 not configured");
   const credentials = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
-  auth = new google.auth.GoogleAuth({
+  auth = new googleAuth.GoogleAuth({
     credentials,
     scopes: ["https://www.googleapis.com/auth/androidpublisher"],
   });
@@ -29,7 +34,7 @@ function packageName(): string {
 }
 
 function androidPublisher() {
-  return google.androidpublisher({ version: "v3", auth: getAuth() });
+  return androidpublisher({ version: "v3", auth: getAuth() });
 }
 
 export type PlayProductPurchase = {
