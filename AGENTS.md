@@ -151,7 +151,7 @@ Vercel/Cloudflare Pages (e.g. Railway) — harmless belt-and-suspenders.
 
 ## This Next.js version may differ from training data
 
-This repo pins `next@16.2.2`, newer than what most models were trained on.
+This repo pins `next@16.4.2`, newer than what most models were trained on.
 APIs/conventions may have changed. Docs are vendored at
 `node_modules/next/dist/docs/` — check there if something behaves
 unexpectedly or an API looks unfamiliar, rather than assuming the code is
